@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>01 · Classic Console（三栏控制台） — originweave</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#f4f6f6; --panel:#fff; --line:#e4e6e6; --line2:#eef0f0;
+    --ink:#1c2430; --muted:#6b7280; --accent:#2563eb; --accent-soft:#e8f0fe;
+    --ok:#16a34a; --warn:#d97706; --danger:#dc2626;
+  }
+  body{background:var(--bg);color:var(--ink);
+    font-family:"Inter","PingFang SC",-apple-system,"Segoe UI",sans-serif;font-size:13px;line-height:1.45}
+  .appbar{height:52px;background:#fff;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:18px;padding:0 18px}
+  .brand{font-weight:700;font-size:15px;letter-spacing:-.2px}
+  .brand i{color:var(--accent);font-style:normal}
+  .crumbs{color:var(--muted);font-size:12.5px}
+  .crumbs i{color:#c3c8cf;font-style:normal;margin:0 6px}
+  .tools{margin-left:auto;display:flex;gap:8px}
+  .tools button{font:inherit;font-size:12.5px;color:#374151;background:#fff;border:1px solid var(--line);
+    border-radius:7px;padding:6px 11px;cursor:pointer}
+  .tools button:hover{background:#f8fafc}
+  .live{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ok);font-weight:600}
+  .live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok)}
+  .layout{display:grid;grid-template-columns:268px 1fr 320px;gap:14px;padding:14px;height:calc(100vh - 52px);min-height:620px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+  .panel-hd{display:flex;align-items:center;justify-content:space-between;
+    padding:11px 14px;border-bottom:1px solid var(--line2)}
+  .panel-hd h2{font-size:11px;font-weight:700;letter-spacing:1.2px;color:#8a929e}
+  .panel-hd .cnt{font-size:11px;color:var(--muted)}
+  .tabs{display:flex;gap:2px;background:#f1f3f4;border-radius:7px;padding:2px}
+  .tabs span{font-size:11.5px;padding:4px 10px;border-radius:5px;color:var(--muted);cursor:pointer}
+  .tabs .on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .list{overflow:auto;padding:6px}
+  .row{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:7px;cursor:pointer;color:#3b4453}
+  .row:hover{background:#f7f8f9}
+  .row.sel{background:var(--accent-soft);color:#12306e}
+  .row .dot{width:7px;height:7px;border-radius:50%;flex:none;background:#cbd2da}
+  .row .dot.done{background:var(--ok)} .row .dot.run{background:var(--accent)} .row .dot.pause{background:var(--warn)}
+  .row .lbl{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .lbl b{font-weight:600}
+  .row .lbl em{font-style:normal;color:#98a1ad;font-size:11px;margin-left:5px}
+  .row .st{font-size:11px;color:#98a1ad}
+  .canvas{min-width:0}
+  .dag{padding:16px;flex:1;overflow:auto}
+  .chain{display:flex;align-items:center;gap:0;flex-wrap:wrap;row-gap:14px}
+  .node{border:1px solid var(--line);background:#fff;border-radius:8px;padding:9px 12px;min-width:132px;
+    box-shadow:0 1px 2px rgba(16,24,40,.05)}
+  .node .k{font-size:10px;font-weight:700;letter-spacing:.6px;color:#8a929e;text-transform:uppercase}
+  .node .t{font-size:12.5px;font-weight:600;margin-top:3px}
+  .node .m{font-size:11px;color:var(--muted);margin-top:2px}
+  .node.agenda{border-left:3px solid var(--warn)} .node.intent{border-left:3px solid var(--accent)}
+  .node.fact{border-left:3px solid var(--ok)} .node.bias{border-left:3px solid var(--danger)}
+  .arrow{width:34px;height:2px;background:var(--line);position:relative;flex:none}
+  .arrow::after{content:"";position:absolute;right:-1px;top:-3px;border:4px solid transparent;border-left-color:var(--line)}
+  .facts{border-top:1px solid var(--line2)}
+  .facts h3{font-size:11px;font-weight:700;letter-spacing:1.2px;color:#8a929e;padding:11px 14px 4px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;padding:7px 14px;border-bottom:1px solid var(--line2)}
+  td{padding:8px 14px;border-bottom:1px solid var(--line2);color:#374151}
+  tr:last-child td{border-bottom:0}
+  .tag{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:5px;background:#eef1f4;color:#5b6472}
+  .tag.ok{background:#e7f6ec;color:#15803d} .tag.warn{background:#fdf3e3;color:#b45309} .tag.bad{background:#fdeaea;color:#b91c1c}
+  .inspector{padding:0}
+  .inspector .body{padding:15px;overflow:auto}
+  .mono{font-family:"SF Mono",Menlo,monospace;font-size:11px;color:var(--muted)}
+  .inspector h3{font-size:14px;margin:6px 0 4px}
+  .inspector .sub{color:var(--muted);font-size:12px}
+  .pills{display:flex;gap:6px;margin:12px 0}
+  .pills span{font-size:11px;font-weight:600;padding:3px 9px;border-radius:6px;background:#f1f3f4;color:#5b6472}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+  .cell{border:1px solid var(--line);border-radius:8px;padding:9px 11px}
+  .cell .l{font-size:10.5px;color:var(--muted);letter-spacing:.4px;text-transform:uppercase}
+  .cell .v{font-size:17px;font-weight:700;margin-top:2px}
+  .budget{margin:12px 0}
+  .budget .lbl{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-bottom:5px}
+  .bar{height:7px;background:#eef1f4;border-radius:99px;overflow:hidden}
+  .bar i{display:block;height:100%;width:78%;background:var(--warn)}
+  .note{margin:12px 0;border:1px solid #f0d9b5;background:#fffaf0;border-radius:8px;padding:9px 11px;font-size:11.5px;color:#8a5a12}
+  .quote{margin:12px 0;border-left:2px solid var(--accent);background:#f8fafc;padding:8px 11px;font-size:11.5px;color:#4b5563}
+  .actions{display:flex;gap:8px;margin-top:14px}
+  .actions button{flex:1;font:inherit;font-size:12.5px;font-weight:600;border-radius:8px;padding:8px;cursor:pointer;border:1px solid var(--line)}
+  .actions .primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .actions .danger{background:#fff;color:var(--danger);border-color:#f3c9c9}
+
+  /* --- two-root provenance graph --- */
+  .graph{width:100%;height:auto;display:block;min-width:980px}
+  .graph-wrap{padding:14px;border-bottom:1px solid var(--line);overflow:auto}
+  .gedge{fill:none;stroke:var(--line);stroke-width:1.4}
+  .gedge.hot{stroke:var(--accent);stroke-width:1.8;opacity:.9}
+  .gnode text{font-family:inherit}
+  .gnode .bg{fill:#fff;stroke:var(--line);stroke-width:1}
+  .gnode .bar{stroke:none}
+  .gnode .gk{fill:var(--muted);font-size:8.5px;font-weight:700;letter-spacing:.7px}
+  .gnode .gt{fill:var(--ink);font-size:10.5px;font-weight:600}
+  .gnode.root .bar{fill:var(--ink)}
+  .gnode.fact .bar{fill:var(--accent)}
+  .gnode.cite .bar{fill:var(--warn)}
+  .gnode.source .bar{fill:var(--ok)}
+  .gnode.edge .bar{fill:var(--muted)}
+  .gnode.compare .bar{fill:var(--accent)}
+  .gnode.dev .bar{fill:var(--danger)}
+
+</style>
+</head>
+<body>
+  <header class="appbar">
+    <div class="brand">origin<i>weave</i></div>
+    <nav class="crumbs">Researches <i>/</i> obscura-kitesurf <i>/</i> run_009</nav>
+    <div class="tools"><button>↻ Refresh</button><button>▶ Continue</button><button>⌫ Delete</button><button>⌕ Inspect</button></div>
+    <div class="live">LIVE · 17 tasks</div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel tasks">
+      <div class="panel-hd"><h2>TASKS</h2><span class="cnt">17 total</span></div>
+      <div class="list">
+        <div class="row sel"><span class="dot done"></span><span class="lbl"><b>描述</b> <em>root · 自然语言</em></span><span class="st">source</span></div>
+        <div class="row"><span class="dot run"></span><span class="lbl"><b>goal</b> <em>root · 第一性原理</em></span><span class="st">edge</span></div>
+        <div class="row"><span class="dot done"></span><span class="lbl"><b>f1</b> 核心结论 <em>fact</em></span><span class="st">verified</span></div>
+        <div class="row"><span class="dot done"></span><span class="lbl"><b>f2</b> 论据 · 数字 <em>fact</em></span><span class="st">verified</span></div>
+        <div class="row"><span class="dot "></span><span class="lbl"><b>c1</b> 引用 · 论文 <em>citation</em></span><span class="st">cited</span></div>
+        <div class="row"><span class="dot "></span><span class="lbl"><b>s1</b> 原始来源 <em>source</em></span><span class="st">origin</span></div>
+        <div class="row"><span class="dot pause"></span><span class="lbl"><b>e1</b> 边缘事实 A <em>goal</em></span><span class="st">edge</span></div>
+        <div class="row"><span class="dot pause"></span><span class="lbl"><b>d1</b> 篡改 <em>deviation</em></span><span class="st">flagged</span></div>
+      </div>
+    </aside>
+
+    <section class="panel canvas">
+      <div class="panel-hd"><h2>PROVENANCE DAG</h2>
+        <div class="tabs"><span class="on">Graph</span><span>Facts</span><span>Events</span></div></div>
+      <div class="dag">
+        <svg class="graph" viewBox="0 0 1060 368" role="img" aria-label="two-root provenance graph">
+  <g class="gedges">
+    <path class="gedge hot" d="M 166.0 145.0 C 192.8 145.0, 163.2 25.0, 190.0 25.0"/>
+    <path class="gedge" d="M 166.0 145.0 C 192.8 145.0, 163.2 85.0, 190.0 85.0"/>
+    <path class="gedge" d="M 166.0 145.0 C 192.8 145.0, 163.2 145.0, 190.0 145.0"/>
+    <path class="gedge" d="M 166.0 145.0 C 192.8 145.0, 163.2 205.0, 190.0 205.0"/>
+    <path class="gedge" d="M 166.0 145.0 C 192.8 145.0, 163.2 265.0, 190.0 265.0"/>
+    <path class="gedge" d="M 166.0 145.0 C 192.8 145.0, 163.2 325.0, 190.0 325.0"/>
+    <path class="gedge hot" d="M 166.0 205.0 C 427.7 205.0, 450.3 85.0, 712.0 85.0"/>
+    <path class="gedge" d="M 166.0 205.0 C 427.7 205.0, 450.3 145.0, 712.0 145.0"/>
+    <path class="gedge" d="M 166.0 205.0 C 427.7 205.0, 450.3 205.0, 712.0 205.0"/>
+    <path class="gedge hot" d="M 340.0 25.0 C 366.8 25.0, 337.2 25.0, 364.0 25.0"/>
+    <path class="gedge" d="M 340.0 85.0 C 366.8 85.0, 337.2 85.0, 364.0 85.0"/>
+    <path class="gedge" d="M 340.0 145.0 C 366.8 145.0, 337.2 145.0, 364.0 145.0"/>
+    <path class="gedge" d="M 340.0 205.0 C 366.8 205.0, 337.2 205.0, 364.0 205.0"/>
+    <path class="gedge" d="M 340.0 265.0 C 366.8 265.0, 337.2 265.0, 364.0 265.0"/>
+    <path class="gedge" d="M 340.0 325.0 C 366.8 325.0, 337.2 325.0, 364.0 325.0"/>
+    <path class="gedge hot" d="M 514.0 25.0 C 540.8 25.0, 511.2 55.0, 538.0 55.0"/>
+    <path class="gedge" d="M 514.0 85.0 C 540.8 85.0, 511.2 115.0, 538.0 115.0"/>
+    <path class="gedge" d="M 514.0 145.0 C 540.8 145.0, 511.2 235.0, 538.0 235.0"/>
+    <path class="gedge" d="M 514.0 205.0 C 540.8 205.0, 511.2 295.0, 538.0 295.0"/>
+    <path class="gedge" d="M 514.0 325.0 C 540.8 325.0, 511.2 175.0, 538.0 175.0"/>
+    <path class="gedge" d="M 340.0 25.0 C 523.4 25.0, 528.6 265.0, 712.0 265.0"/>
+    <path class="gedge" d="M 340.0 85.0 C 523.4 85.0, 528.6 265.0, 712.0 265.0"/>
+    <path class="gedge hot" d="M 688.0 55.0 C 714.8 55.0, 685.2 265.0, 712.0 265.0"/>
+    <path class="gedge" d="M 688.0 115.0 C 714.8 115.0, 685.2 265.0, 712.0 265.0"/>
+    <path class="gedge hot" d="M 862.0 85.0 C 810.5 85.0, 763.5 265.0, 712.0 265.0"/>
+    <path class="gedge" d="M 862.0 145.0 C 810.5 145.0, 763.5 265.0, 712.0 265.0"/>
+    <path class="gedge" d="M 862.0 205.0 C 810.5 205.0, 763.5 265.0, 712.0 265.0"/>
+    <path class="gedge hot" d="M 862.0 265.0 C 888.8 265.0, 859.2 55.0, 886.0 55.0"/>
+    <path class="gedge" d="M 862.0 265.0 C 888.8 265.0, 859.2 115.0, 886.0 115.0"/>
+    <path class="gedge" d="M 862.0 265.0 C 888.8 265.0, 859.2 175.0, 886.0 175.0"/>
+    <path class="gedge" d="M 862.0 265.0 C 888.8 265.0, 859.2 235.0, 886.0 235.0"/>
+    <path class="gedge" d="M 862.0 265.0 C 888.8 265.0, 859.2 295.0, 886.0 295.0"/>
+    <path class="gedge" d="M 340.0 145.0 C 601.7 145.0, 624.3 115.0, 886.0 115.0"/>
+    <path class="gedge" d="M 340.0 205.0 C 601.7 205.0, 624.3 295.0, 886.0 295.0"/>
+    <path class="gedge" d="M 340.0 265.0 C 601.7 265.0, 624.3 235.0, 886.0 235.0"/>
+  </g>
+  <g class="gnodes">
+    <g class="gnode root">
+      <rect class="bg" x="16.0" y="124.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="17.0" y="125.0" width="5" height="40" rx="2"/>
+      <text class="gk" x="31.0" y="139.0">ROOT</text>
+      <text class="gt" x="31.0" y="154.0">描述</text>
+    </g>
+    <g class="gnode root">
+      <rect class="bg" x="16.0" y="184.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="17.0" y="185.0" width="5" height="40" rx="2"/>
+      <text class="gk" x="31.0" y="199.0">ROOT</text>
+      <text class="gt" x="31.0" y="214.0">goal</text>
+    </g>
+    <g class="gnode fact">
+      <rect class="bg" x="190.0" y="4.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="191.0" y="5.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="205.0" y="19.0">FACT</text>
+      <text class="gt" x="205.0" y="34.0">核心结论</text>
+    </g>
+    <g class="gnode fact">
+      <rect class="bg" x="190.0" y="64.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="191.0" y="65.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="205.0" y="79.0">FACT</text>
+      <text class="gt" x="205.0" y="94.0">论据 · 数字</text>
+    </g>
+    <g class="gnode fact">
+      <rect class="bg" x="190.0" y="124.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="191.0" y="125.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="205.0" y="139.0">FACT</text>
+      <text class="gt" x="205.0" y="154.0">论据 · 因果</text>
+    </g>
+    <g class="gnode fact">
+      <rect class="bg" x="190.0" y="184.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="191.0" y="185.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="205.0" y="199.0">FACT</text>
+      <text class="gt" x="205.0" y="214.0">时间断言</text>
+    </g>
+    <g class="gnode fact">
+      <rect class="bg" x="190.0" y="244.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="191.0" y="245.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="205.0" y="259.0">FACT</text>
+      <text class="gt" x="205.0" y="274.0">归因断言</text>
+    </g>
+    <g class="gnode fact">
+      <rect class="bg" x="190.0" y="304.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="191.0" y="305.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="205.0" y="319.0">FACT</text>
+      <text class="gt" x="205.0" y="334.0">背景陈述</text>
+    </g>
+    <g class="gnode cite">
+      <rect class="bg" x="364.0" y="4.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="365.0" y="5.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="379.0" y="19.0">CITATION</text>
+      <text class="gt" x="379.0" y="34.0">引用 · 论文</text>
+    </g>
+    <g class="gnode cite">
+      <rect class="bg" x="364.0" y="64.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="365.0" y="65.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="379.0" y="79.0">CITATION</text>
+      <text class="gt" x="379.0" y="94.0">引用 · 报道</text>
+    </g>
+    <g class="gnode cite">
+      <rect class="bg" x="364.0" y="124.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="365.0" y="125.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="379.0" y="139.0">CITATION</text>
+      <text class="gt" x="379.0" y="154.0">引用 · 通稿</text>
+    </g>
+    <g class="gnode cite">
+      <rect class="bg" x="364.0" y="184.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="365.0" y="185.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="379.0" y="199.0">CITATION</text>
+      <text class="gt" x="379.0" y="214.0">引用 · 百科</text>
+    </g>
+    <g class="gnode cite">
+      <rect class="bg" x="364.0" y="244.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="365.0" y="245.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="379.0" y="259.0">CITATION</text>
+      <text class="gt" x="379.0" y="274.0">引用 · 社媒</text>
+    </g>
+    <g class="gnode cite">
+      <rect class="bg" x="364.0" y="304.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="365.0" y="305.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="379.0" y="319.0">CITATION</text>
+      <text class="gt" x="379.0" y="334.0">引用 · 档案</text>
+    </g>
+    <g class="gnode source">
+      <rect class="bg" x="538.0" y="34.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="539.0" y="35.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="553.0" y="49.0">SOURCE</text>
+      <text class="gt" x="553.0" y="64.0">原始来源</text>
+    </g>
+    <g class="gnode source">
+      <rect class="bg" x="538.0" y="94.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="539.0" y="95.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="553.0" y="109.0">SOURCE</text>
+      <text class="gt" x="553.0" y="124.0">一手文档</text>
+    </g>
+    <g class="gnode source">
+      <rect class="bg" x="538.0" y="154.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="539.0" y="155.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="553.0" y="169.0">SOURCE</text>
+      <text class="gt" x="553.0" y="184.0">存档快照</text>
+    </g>
+    <g class="gnode source">
+      <rect class="bg" x="538.0" y="214.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="539.0" y="215.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="553.0" y="229.0">SOURCE</text>
+      <text class="gt" x="553.0" y="244.0">转载源</text>
+    </g>
+    <g class="gnode source">
+      <rect class="bg" x="538.0" y="274.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="539.0" y="275.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="553.0" y="289.0">SOURCE</text>
+      <text class="gt" x="553.0" y="304.0">引文图</text>
+    </g>
+    <g class="gnode edge">
+      <rect class="bg" x="712.0" y="64.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="713.0" y="65.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="727.0" y="79.0">EDGE FACT</text>
+      <text class="gt" x="727.0" y="94.0">边缘事实 A</text>
+    </g>
+    <g class="gnode edge">
+      <rect class="bg" x="712.0" y="124.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="713.0" y="125.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="727.0" y="139.0">EDGE FACT</text>
+      <text class="gt" x="727.0" y="154.0">边缘事实 B</text>
+    </g>
+    <g class="gnode edge">
+      <rect class="bg" x="712.0" y="184.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="713.0" y="185.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="727.0" y="199.0">EDGE FACT</text>
+      <text class="gt" x="727.0" y="214.0">停止条件</text>
+    </g>
+    <g class="gnode compare">
+      <rect class="bg" x="712.0" y="244.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="713.0" y="245.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="727.0" y="259.0">COMPARE</text>
+      <text class="gt" x="727.0" y="274.0">比对引擎</text>
+    </g>
+    <g class="gnode dev">
+      <rect class="bg" x="886.0" y="34.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="887.0" y="35.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="901.0" y="49.0">DEVIATION</text>
+      <text class="gt" x="901.0" y="64.0">篡改</text>
+    </g>
+    <g class="gnode dev">
+      <rect class="bg" x="886.0" y="94.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="887.0" y="95.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="901.0" y="109.0">DEVIATION</text>
+      <text class="gt" x="901.0" y="124.0">改写</text>
+    </g>
+    <g class="gnode dev">
+      <rect class="bg" x="886.0" y="154.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="887.0" y="155.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="901.0" y="169.0">DEVIATION</text>
+      <text class="gt" x="901.0" y="184.0">省略 / 断章</text>
+    </g>
+    <g class="gnode dev">
+      <rect class="bg" x="886.0" y="214.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="887.0" y="215.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="901.0" y="229.0">DEVIATION</text>
+      <text class="gt" x="901.0" y="244.0">归因错误</text>
+    </g>
+    <g class="gnode dev">
+      <rect class="bg" x="886.0" y="274.0" width="150" height="42" rx="8"/>
+      <rect class="bar" x="887.0" y="275.0" width="4" height="40" rx="2"/>
+      <text class="gk" x="901.0" y="289.0">DEVIATION</text>
+      <text class="gt" x="901.0" y="304.0">时间错置</text>
+    </g>
+  </g>
+</svg>
+      </div>
+      <div class="facts">
+        <h3>FACTS</h3>
+        <table>
+          <thead><tr><th>ID</th><th>Kind</th><th>Statement</th><th>Conf.</th><th>Evidence</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">f1</td><td>结论</td><td>描述的核心结论与源头一致</td><td>0.94</td><td><span class="tag ok">逐字引用 ✓</span></td></tr>
+            <tr><td class="mono">f2</td><td>论据 · 数字</td><td>数字被改写，与一手文档不符</td><td>0.71</td><td><span class="tag warn">1 条</span></td></tr>
+            <tr><td class="mono">c1</td><td>引用</td><td>引用链 c1 → 源头 s1 可回链</td><td>0.88</td><td><span class="tag ok">2 条</span></td></tr>
+            <tr><td class="mono">d1</td><td>偏差</td><td>检出篡改 / 改写：结论被强化</td><td>0.78</td><td><span class="tag">flagged</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <aside class="panel inspector">
+      <div class="panel-hd"><h2>INSPECTOR</h2><span class="mono">f1</span></div>
+      <div class="body">
+        <h3>f1 · 核心结论</h3>
+        <p class="sub">描述中的核心结论 → 引用 c1 → 源头 s1；与 goal 的边缘事实比对后判定存在篡改/改写。</p>
+        <div class="pills"><span>steps 14/60</span><span>tokens 38.2k</span><span>cost $0.14</span></div>
+        <div class="grid2">
+          <div class="cell"><div class="l">Sources</div><div class="v">7</div></div>
+          <div class="cell"><div class="l">Facts</div><div class="v">19</div></div>
+          <div class="cell"><div class="l">Intent open</div><div class="v">3</div></div>
+          <div class="cell"><div class="l">Intent done</div><div class="v">11</div></div>
+        </div>
+        <div class="budget">
+          <div class="lbl"><span>Budget · steps</span><span>14 / 60</span></div>
+          <div class="bar"><i></i></div>
+        </div>
+        <div class="note">预算充足，调度继续。无阻塞项。</div>
+        <div class="quote">“We published this in February 2023 …” — cloudflare.com/blog</div>
+        <div class="actions"><button class="primary">Continue</button><button class="danger">Delete</button></div>
+      </div>
+    </aside>
+  </main>
+</body>
+</html>
