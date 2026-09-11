@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "originweave"
+version = "0.0.0"
+description = "Auditable fact-provenance tracing and deviation scoring for a claim-bearing document A."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "originweave" }]
+keywords = ["provenance", "fact-checking", "deviation", "event-sourcing"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = []
+
+[project.scripts]
+originweave = "originweave.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.11",
+    "pytest>=8.2",
+    "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/originweave"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["originweave"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
