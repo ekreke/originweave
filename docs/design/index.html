@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>originweave · 15 种 UI 设计风格总览</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0b0d12; --panel:#141821; --panel2:#1b2130; --line:#262d3d;
+    --ink:#e9edf5; --muted:#8b95aa; --accent:#5b8cff; --accent2:#a78bfa;
+  }
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);
+    font-family:"Inter","PingFang SC","Segoe UI",system-ui,sans-serif;line-height:1.5}
+  a{color:inherit;text-decoration:none}
+  .hero{padding:60px 40px 44px;max-width:1280px;margin:0 auto;position:relative}
+  .hero::before{content:"";position:absolute;inset:0;z-index:-1;
+    background:radial-gradient(700px 320px at 12% -10%,rgba(91,140,255,.28),transparent 60%),
+      radial-gradient(640px 320px at 88% 0%,rgba(167,139,250,.24),transparent 60%)}
+  .tagline{font-size:12px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);font-weight:600}
+  h1{font-size:clamp(30px,5vw,52px);font-weight:750;letter-spacing:-1.2px;margin:14px 0 12px}
+  h1 .grad{background:linear-gradient(90deg,#7fb0ff,#c4b5fd,#7fe7ff);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);max-width:760px;font-size:15.5px}
+  .meta-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+  .meta-row span{font-size:12.5px;color:var(--muted);background:var(--panel);border:1px solid var(--line);
+    padding:7px 14px;border-radius:999px}
+  .meta-row b{color:var(--ink);font-weight:600}
+
+  main{max-width:1280px;margin:0 auto;padding:8px 40px 80px}
+  .toolbar{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;
+    border-top:1px solid var(--line);padding-top:26px;margin-bottom:22px}
+  .toolbar h2{font-size:20px;font-weight:650}
+  .toolbar p{color:var(--muted);font-size:13px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px}
+  .card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    overflow:hidden;display:flex;flex-direction:column;
+    transition:transform .18s ease, border-color .18s ease, box-shadow .18s ease}
+  .card:hover{transform:translateY(-4px);border-color:var(--accent);
+    box-shadow:0 18px 40px -18px rgba(91,140,255,.55)}
+  .thumb{height:118px;position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+  .thumb .num{position:absolute;top:10px;left:12px;font-size:12px;font-weight:700;color:#fff;
+    background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.25);padding:2px 9px;border-radius:999px;z-index:2}
+  .thumb .mini{position:absolute;inset:0;display:grid;grid-template-columns:1fr 1.5fr 1fr;
+    gap:6px;padding:14px}
+  .thumb .mini i{border-radius:5px;display:block}
+  .body{padding:16px 17px 18px;display:flex;flex-direction:column;gap:9px;flex:1}
+  .body h3{font-size:15.5px;font-weight:650}
+  .body p{font-size:12.5px;color:var(--muted);flex:1}
+  .swatches{display:flex;gap:6px}
+  .swatches i{width:15px;height:15px;border-radius:50%;border:1px solid rgba(255,255,255,.2)}
+  .open{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--accent)}
+  .open::after{content:"→";transition:transform .18s}
+  .card:hover .open::after{transform:translateX(4px)}
+
+  footer{border-top:1px solid var(--line);padding:26px 40px 46px;max-width:1280px;margin:0 auto;
+    color:var(--muted);font-size:12.5px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+  code{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;
+    font-family:"SF Mono",Menlo,monospace;font-size:12px;color:#c4d0ea}
+</style>
+</head>
+<body>
+  <header class="hero">
+    <div class="tagline">originweave · M0e 最小 UI</div>
+    <h1><span class="grad">15 种设计风格</span> · 实时运行图</h1>
+    <p class="sub">
+      同一个 originweave 只读运行视图（<b>议程 → Intent → Fact</b> DAG + 黑板 + 偏差记分卡），
+      用 15 种截然不同的视觉语言各实现一版单文件 HTML。点击任意卡片即可打开对应的独立页面。
+    </p>
+    <div class="meta-row">
+      <span>页面 <b>15 + 1 总览</b></span>
+      <span>技术 <b>纯 HTML/CSS，零依赖</b></span>
+      <span>数据 <b>静态样例 run</b></span>
+      <span>目录 <b>docs/design/</b></span>
+    </div>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <div>
+        <h2>风格画廊</h2>
+        <p>按编号排列；每张卡片右下角可进入单页。</p>
+      </div>
+      <p>打开方式：浏览器直接打开本文件即可，无需服务器。</p>
+    </div>
+
+    <section class="grid">
+      <a class="card" href="01-neo-brutalism.html">
+        <div class="thumb" style="background:linear-gradient(135deg,#ffe14d,#ff5d8f)">
+          <span class="num">01</span>
+          <div class="mini"><i style="background:#0a0a0a"></i><i style="background:#fff"></i><i style="background:#3d9bff"></i></div>
+        </div>
+        <div class="body">
+          <h3>Neo-Brutalism</h3>
+          <p>粗黑描边、硬阴影、高饱和撞色与等宽字体，反精致、强个性。</p>
+          <div class="swatches"><i style="background:#ffe14d"></i><i style="background:#ff5d8f"></i><i style="background:#3d9bff"></i><i style="background:#8cff6b"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="02-glassmorphism.html">
+        <div class="thumb" style="background:linear-gradient(135deg,#6d5dfb,#00d4ff 55%,#ff3d9a)">
+          <span class="num">02</span>
+          <div class="mini"><i style="background:rgba(255,255,255,.28)"></i><i style="background:rgba(255,255,255,.16)"></i><i style="background:rgba(255,255,255,.3)"></i></div>
+        </div>
+        <div class="body">
+          <h3>Glassmorphism</h3>
+          <p>毛玻璃模糊、半透明层级、柔和渐变光晕，通透而富有空间感。</p>
+          <div class="swatches"><i style="background:#6d5dfb"></i><i style="background:#00d4ff"></i><i style="background:#ff3d9a"></i><i style="background:#120b2e"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="03-neumorphism.html">
+        <div class="thumb" style="background:linear-gradient(135deg,#e6e9ef,#cfd5e0)">
+          <span class="num">03</span>
+          <div class="mini"><i style="background:#e6e9ef;box-shadow:5px 5px 10px #c3c9d6,-5px -5px 10px #fff"></i><i style="background:#e6e9ef;box-shadow:inset 4px 4px 8px #c3c9d6,inset -4px -4px 8px #fff"></i><i style="background:#6c7cff;border-radius:50%"></i></div>
+        </div>
+        <div class="body">
+          <h3>Neumorphism</h3>
+          <p>同色系软阴影把控件「压」进或「凸」出表面，柔和、拟物化。</p>
+          <div class="swatches"><i style="background:#e6e9ef"></i><i style="background:#c3c9d6"></i><i style="background:#6c7cff"></i><i style="background:#4a5568"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="04-material-you.html">
+        <div class="thumb" style="background:linear-gradient(135deg,#eaddff,#6750a4)">
+          <span class="num">04</span>
+          <div class="mini"><i style="background:#eaddff"></i><i style="background:#6750a4"></i><i style="background:#ffd8e4"></i></div>
+        </div>
+        <div class="body">
+          <h3>Material You</h3>
+          <p>Google Material 3：大圆角、色调分层、柔和海拔阴影，亲和外放。</p>
+          <div class="swatches"><i style="background:#6750a4"></i><i style="background:#eaddff"></i><i style="background:#ffd8e4"></i><i style="background:#fef7ff"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="05-terminal.html">
+        <div class="thumb" style="background:#050a06">
+          <span class="num">05</span>
+          <div class="mini"><i style="background:#0f2b18;border:1px solid #33ff66"></i><i style="background:#07130b;border:1px solid #1f9e44"></i><i style="background:#0f2b18;border:1px solid #33ff66"></i></div>
+        </div>
+        <div class="body">
+          <h3>Terminal / CLI</h3>
+          <p>绿字黑底、扫描线、等宽网格与 ASCII 边框，硬核开发者气质。</p>
+          <div class="swatches"><i style="background:#050a06"></i><i style="background:#33ff66"></i><i style="background:#b6ff4d"></i><i style="background:#1f9e44"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="06-cyberpunk-neon.html">
+        <div class="thumb" style="background:linear-gradient(135deg,#ff2e97,#9b5cff 60%,#00f0ff)">
+          <span class="num">06</span>
+          <div class="mini"><i style="background:rgba(0,240,255,.25);border:1px solid #00f0ff"></i><i style="background:rgba(255,46,151,.25);border:1px solid #ff2e97"></i><i style="background:rgba(155,92,255,.25);border:1px solid #9b5cff"></i></div>
+        </div>
+        <div class="body">
+          <h3>Cyberpunk / Neon</h3>
+          <p>霓虹辉光、透视网格地平线、故障闪烁，赛博朋克未来夜城。</p>
+          <div class="swatches"><i style="background:#ff2e97"></i><i style="background:#00f0ff"></i><i style="background:#9b5cff"></i><i style="background:#05010f"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="07-swiss-minimal.html">
+        <div class="thumb" style="background:#fff;border-bottom:1px solid #d8d8d8">
+          <span class="num" style="background:#111;border-color:#111;color:#fff">07</span>
+          <div class="mini"><i style="background:#fff;border:1px solid #d8d8d8"></i><i style="background:#f4f4f4;border:1px solid #111"></i><i style="background:#e30613"></i></div>
+        </div>
+        <div class="body">
+          <h3>Swiss Minimal</h3>
+          <p>国际主义排版：网格、无衬线、大留白与一点红，理性克制。</p>
+          <div class="swatches"><i style="background:#fff"></i><i style="background:#111"></i><i style="background:#767676"></i><i style="background:#e30613"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="08-skeuomorphic.html">
+        <div class="thumb" style="background:linear-gradient(135deg,#8a6f4d,#332619)">
+          <span class="num">08</span>
+          <div class="mini"><i style="background:linear-gradient(#fbf3df,#e5d5ae)"></i><i style="background:linear-gradient(#8a6f4d,#5e4426);border:1px solid #caa874"></i><i style="background:linear-gradient(#f3e2bd,#d8c295)"></i></div>
+        </div>
+        <div class="body">
+          <h3>Skeuomorphic</h3>
+          <p>皮革、黄铜、纸纹与内阴影，把数字界面做回真实的物理质感。</p>
+          <div class="swatches"><i style="background:#8a6f4d"></i><i style="background:#fbf3df"></i><i style="background:#4f8c33"></i><i style="background:#b5462f"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="09-flat.html">
+        <div class="thumb" style="background:linear-gradient(135deg,#2d8cf0,#7c5cff)">
+          <span class="num">09</span>
+          <div class="mini"><i style="background:#19be6b"></i><i style="background:#ff9900"></i><i style="background:#ed4014"></i></div>
+        </div>
+        <div class="body">
+          <h3>Flat</h3>
+          <p>零渐变、零阴影的纯色块与轻投影卡片，清晰、直接、易读。</p>
+          <div class="swatches"><i style="background:#2d8cf0"></i><i style="background:#19be6b"></i><i style="background:#ff9900"></i><i style="background:#ed4014"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="10-bauhaus.html">
+        <div class="thumb" style="background:#f5f1e6">
+          <span class="num" style="background:#e63946;border-color:#161616">10</span>
+          <div class="mini"><i style="background:#e63946;border:2px solid #161616"></i><i style="background:#f4c400;border:2px solid #161616"></i><i style="background:#1d6fb8;border:2px solid #161616"></i></div>
+        </div>
+        <div class="body">
+          <h3>Bauhaus</h3>
+          <p>三原色 + 黑、几何色块与粗边框，包豪斯式的构成主义秩序。</p>
+          <div class="swatches"><i style="background:#e63946"></i><i style="background:#f4c400"></i><i style="background:#1d6fb8"></i><i style="background:#161616"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="11-editorial.html">
+        <div class="thumb" style="background:linear-gradient(135deg,#fbf7ef,#e8dfcd)">
+          <span class="num" style="background:#b3261e;border-color:#b3261e">11</span>
+          <div class="mini"><i style="background:#fbf7ef;border:1px solid #191714"></i><i style="background:repeating-linear-gradient(#191714 0 2px,transparent 2px 7px)"></i><i style="background:#b3261e"></i></div>
+        </div>
+        <div class="body">
+          <h3>Editorial</h3>
+          <p>衬线正文、双线刊头、首字下沉与细分隔线，像一本严肃杂志。</p>
+          <div class="swatches"><i style="background:#fbf7ef"></i><i style="background:#191714"></i><i style="background:#b3261e"></i><i style="background:#6b6459"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="12-oled-dark.html">
+        <div class="thumb" style="background:#000;border-bottom:1px solid #1c1c22">
+          <span class="num">12</span>
+          <div class="mini"><i style="background:#0f0f13;border-left:3px solid #5b8cff"></i><i style="background:#0f0f13;border-left:3px solid #2fd47a"></i><i style="background:#0f0f13;border-left:3px solid #ff5470"></i></div>
+        </div>
+        <div class="body">
+          <h3>OLED Dark</h3>
+          <p>纯黑底、极细分隔线、克制单色强调，为长时间盯屏而生。</p>
+          <div class="swatches"><i style="background:#000;border-color:#333"></i><i style="background:#5b8cff"></i><i style="background:#2fd47a"></i><i style="background:#a78bfa"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="13-claymorphism.html">
+        <div class="thumb" style="background:linear-gradient(135deg,#eef1ff,#d8dcff)">
+          <span class="num" style="background:#6b5bd6;border-color:#6b5bd6">13</span>
+          <div class="mini"><i style="background:#b9a7ff;box-shadow:4px 4px 9px rgba(146,150,200,.5),-4px -4px 9px #fff"></i><i style="background:#8fe3c9;box-shadow:4px 4px 9px rgba(146,150,200,.5),-4px -4px 9px #fff"></i><i style="background:#ffc09f;box-shadow:4px 4px 9px rgba(146,150,200,.5),-4px -4px 9px #fff"></i></div>
+        </div>
+        <div class="body">
+          <h3>Claymorphism</h3>
+          <p>厚实圆角、内高光与柔和外阴影，像捏出来的彩色黏土组件。</p>
+          <div class="swatches"><i style="background:#b9a7ff"></i><i style="background:#8fe3c9"></i><i style="background:#ffc09f"></i><i style="background:#ff9fb8"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="14-vaporwave.html">
+        <div class="thumb" style="background:linear-gradient(180deg,#3d1170,#12022e)">
+          <span class="num" style="background:#ff6ad5;border-color:#ff6ad5">14</span>
+          <div class="mini"><i style="background:rgba(255,106,213,.3);border:1px solid #ff6ad5"></i><i style="background:rgba(0,229,255,.3);border:1px solid #00e5ff"></i><i style="background:linear-gradient(#ffd76a,#ff6ad5)"></i></div>
+        </div>
+        <div class="body">
+          <h3>Vaporwave</h3>
+          <p>霓虹渐变、透视网格与落日圆盘，80 年代复古未来主义。</p>
+          <div class="swatches"><i style="background:#ff6ad5"></i><i style="background:#00e5ff"></i><i style="background:#9d6bff"></i><i style="background:#12022e"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+
+      <a class="card" href="15-ops-dashboard.html">
+        <div class="thumb" style="background:#14171c">
+          <span class="num">15</span>
+          <div class="mini"><i style="background:#1c2029;border:1px solid #2e3542"></i><i style="background:linear-gradient(180deg,#22b8cf,#1864ab)"></i><i style="background:#1c2029;border:1px solid #2e3542"></i></div>
+        </div>
+        <div class="body">
+          <h3>Ops Dashboard</h3>
+          <p>KPI 卡片 + 密集数据表 + 监控图，Grafana/Datadog 风格的运维面板。</p>
+          <div class="swatches"><i style="background:#4dabf7"></i><i style="background:#37b24d"></i><i style="background:#f59f00"></i><i style="background:#9775fa"></i></div>
+          <span class="open">打开页面</span>
+        </div>
+      </a>
+    </section>
+  </main>
+
+  <footer>
+    <div>originweave · M0e 最小 UI · 15 种风格样例（静态 mock，非实时数据）</div>
+    <div>入口文件 <code>docs/design/index.html</code></div>
+  </footer>
+</body>
+</html>

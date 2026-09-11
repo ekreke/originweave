@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>02 · Glassmorphism — originweave</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    min-height:100vh; color:#eef3ff; padding:26px;
+    font-family:"SF Pro Display","Segoe UI",system-ui,-apple-system,sans-serif;
+    background:
+      radial-gradient(900px 600px at 8% 12%, #6d5dfb 0%, transparent 55%),
+      radial-gradient(800px 700px at 92% 8%, #00d4ff 0%, transparent 50%),
+      radial-gradient(900px 800px at 55% 110%, #ff3d9a 0%, transparent 55%),
+      linear-gradient(135deg,#120b2e 0%,#0a0f2c 50%,#051021 100%);
+    background-attachment:fixed;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(circle at 30% 40%,rgba(255,255,255,.08),transparent 40%);
+  }
+  .glass{
+    background:rgba(255,255,255,.09);
+    border:1px solid rgba(255,255,255,.22);
+    border-radius:20px;
+    backdrop-filter:blur(22px) saturate(160%);
+    -webkit-backdrop-filter:blur(22px) saturate(160%);
+    box-shadow:0 10px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.25);
+  }
+  .topbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:24px;padding:16px 20px}
+  .logo{font-size:20px;font-weight:700;letter-spacing:.5px;
+    background:linear-gradient(90deg,#fff,#9fd0ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .chip{padding:6px 14px;border-radius:999px;font-size:13px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2)}
+  .dot{width:9px;height:9px;border-radius:50%;background:#39ff9e;display:inline-block;margin-right:7px;
+    box-shadow:0 0 12px #39ff9e;animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .grid{display:grid;grid-template-columns:290px 1fr 320px;gap:20px}
+  @media(max-width:1100px){.grid{grid-template-columns:1fr}}
+  .card{padding:20px;margin-bottom:20px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:2px;color:#9fb6e8;margin-bottom:16px;font-weight:600}
+  .stat{display:flex;justify-content:space-between;padding:9px 0;font-size:14px;border-bottom:1px solid rgba(255,255,255,.1)}
+  .stat:last-child{border-bottom:0}
+  .stat b{font-weight:600;color:#fff}
+  .node{border-radius:16px;padding:14px;margin-bottom:12px;
+    background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.15)}
+  .node h3{font-size:13px;font-weight:600}
+  .node p{font-size:12px;color:#a9bce4;margin-top:5px}
+  .node.agenda{border-left:3px solid #ffd166}
+  .node.intent{border-left:3px solid #4fc3ff}
+  .node.fact{border-left:3px solid #39ff9e}
+  .node.bias{border-left:3px solid #ff5ca8}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .lane-title{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#8ea4d4;margin-bottom:12px}
+  .arrow{text-align:center;color:#6f86bb;font-size:18px;margin:-2px 0 8px}
+  .log{font-size:12.5px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.08);color:#c7d5f4}
+  .log time{color:#7fe7ff;font-variant-numeric:tabular-nums;margin-right:10px}
+  .budgetbar{height:10px;border-radius:999px;background:rgba(255,255,255,.12);overflow:hidden;margin-top:12px}
+  .budgetbar i{display:block;height:100%;width:62%;border-radius:999px;background:linear-gradient(90deg,#7fe7ff,#a78bfa,#ff5ca8)}
+  .score{display:flex;flex-wrap:wrap;gap:8px}
+  .score span{font-size:11.5px;padding:5px 11px;border-radius:999px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2)}
+</style>
+</head>
+<body>
+  <div class="topbar glass">
+    <div class="logo">originweave</div>
+    <div class="chip">run · obscura_kitesurf</div>
+    <div class="chip"><span class="dot"></span>LIVE</div>
+    <div class="chip">M0e · 只读运行图</div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="card glass">
+        <h2>黑板 Blackboard</h2>
+        <div class="stat"><span>Sources</span><b>7</b></div>
+        <div class="stat"><span>Claims</span><b>12</b></div>
+        <div class="stat"><span>Facts</span><b>19</b></div>
+        <div class="stat"><span>Intent open</span><b>3</b></div>
+        <div class="stat"><span>Intent done</span><b>11</b></div>
+      </div>
+      <div class="card glass">
+        <h2>预算 Budget</h2>
+        <div class="stat"><span>steps</span><b>14 / 60</b></div>
+        <div class="stat"><span>tokens</span><b>38.2k</b></div>
+        <div class="stat"><span>wall</span><b>2m41s</b></div>
+        <div class="stat"><span>cost</span><b>$0.14 / $1</b></div>
+        <div class="budgetbar"><i></i></div>
+      </div>
+      <div class="card glass">
+        <h2>偏差记分卡</h2>
+        <div class="score">
+          <span>改写 0.62</span><span>夸大 0.31</span><span>省略 0.78</span>
+          <span>归因 0.10</span><span>循环 0.44</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card glass">
+      <h2>溯源 DAG · 议程 → Intent → Fact</h2>
+      <div class="cols">
+        <div>
+          <div class="lane-title">Agenda</div>
+          <div class="node agenda"><h3>A1 定位源头</h3><p>优先级 0.92 · 谱系深度 0</p></div>
+          <div class="node agenda"><h3>A2 最早出现时间</h3><p>优先级 0.71 · 存档 CDX</p></div>
+        </div>
+        <div>
+          <div class="lane-title">Intent / Fact</div>
+          <div class="node intent"><h3>I1 search “kitesurf…”</h3><p>worker · exa · done</p></div>
+          <div class="arrow">↓</div>
+          <div class="node fact"><h3>F1 source_earlier</h3><p>Cloudflare 博客 2023-02 · 逐字引用 ✓</p></div>
+          <div class="arrow">↓</div>
+          <div class="node fact"><h3>F2 claim_supported</h3><p>confidence 0.88 · 2 evidence</p></div>
+          <div class="node bias"><h3>D1 selective_omission</h3><p>分数 0.78 · README 略去关键限制</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card glass">
+      <h2>事件日志 Events</h2>
+      <div class="log"><time>t+00:03</time>run_started</div>
+      <div class="log"><time>t+00:11</time>claim_extracted · c1</div>
+      <div class="log"><time>t+00:19</time>intent_added · I1</div>
+      <div class="log"><time>t+00:42</time>intent_claimed · pi#1</div>
+      <div class="log"><time>t+01:07</time>fact_added · F1</div>
+      <div class="log"><time>t+01:33</time>prompt_used · extract.v3</div>
+      <div class="log"><time>t+02:10</time>fact_added · F2</div>
+      <div class="log"><time>t+02:41</time>budget_tick · step 14</div>
+    </div>
+  </div>
+</body>
+</html>

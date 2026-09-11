@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>14 · Vaporwave — originweave</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{--pink:#ff6ad5;--cyan:#00e5ff;--violet:#9d6bff;--ink:#fff;--panel:rgba(28,14,54,.72)}
+  body{background:linear-gradient(180deg,#2a0f52 0%,#3d1170 45%,#12022e 100%);
+    color:var(--ink);font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;
+    padding:26px;min-height:100vh;position:relative;overflow-x:hidden}
+  body::after{content:"";position:fixed;left:-20%;right:-20%;bottom:-10%;height:52vh;z-index:0;
+    background-image:linear-gradient(rgba(255,106,213,.55) 2px,transparent 2px),
+      linear-gradient(90deg,rgba(0,229,255,.5) 2px,transparent 2px);
+    background-size:52px 52px;
+    transform:perspective(300px) rotateX(62deg);transform-origin:bottom;opacity:.6}
+  .sun{position:fixed;top:8%;left:50%;transform:translateX(-50%);width:220px;height:220px;border-radius:50%;
+    background:linear-gradient(180deg,#ffd76a,#ff6ad5 60%,#9d6bff);z-index:0;opacity:.85;
+    mask-image:repeating-linear-gradient(180deg,#000 0 12px,transparent 12px 20px)}
+  .wrap{position:relative;z-index:1}
+  .topbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:26px;
+    background:var(--panel);border:2px solid var(--cyan);border-radius:4px;padding:16px 22px;
+    box-shadow:0 0 22px rgba(0,229,255,.5), inset 0 0 22px rgba(255,106,213,.15)}
+  .logo{font-size:24px;font-weight:700;letter-spacing:2px;font-style:italic;
+    background:linear-gradient(90deg,var(--cyan),var(--pink));-webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 8px rgba(255,106,213,.8))}
+  .chip{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;padding:7px 15px;border-radius:3px;
+    border:1px solid var(--pink);color:#ffd6f5;background:rgba(255,106,213,.12)}
+  .live{color:var(--cyan);border-color:var(--cyan);animation:glow 1.8s infinite alternate}
+  @keyframes glow{to{box-shadow:0 0 16px var(--cyan)}}
+  .grid{display:grid;grid-template-columns:290px 1fr 320px;gap:20px}
+  @media(max-width:1100px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid rgba(0,229,255,.5);border-radius:4px;padding:18px;margin-bottom:20px;
+    box-shadow:0 0 18px rgba(157,107,255,.3)}
+  .card h2{font-size:12px;letter-spacing:2.5px;text-transform:uppercase;color:var(--cyan);margin-bottom:16px;
+    text-shadow:0 0 8px var(--cyan)}
+  .stat{display:flex;justify-content:space-between;padding:9px 0;font-size:14px;
+    border-bottom:1px solid rgba(255,106,213,.28);letter-spacing:.5px}
+  .stat:last-child{border-bottom:0}
+  .stat b{color:#fff;text-shadow:0 0 8px var(--pink)}
+  .node{padding:13px 15px;margin-bottom:12px;border-radius:3px;background:rgba(0,0,0,.35);
+    border:1px solid var(--pink);box-shadow:0 0 12px rgba(255,106,213,.4)}
+  .node h3{font-size:13.5px;letter-spacing:.5px}
+  .node p{font-size:12px;color:#dcb8ff;margin-top:5px}
+  .node.agenda{border-color:#ffd76a} .node.agenda h3{color:#ffd76a;text-shadow:0 0 8px #ffd76a}
+  .node.intent{border-color:var(--cyan)} .node.intent h3{color:var(--cyan);text-shadow:0 0 8px var(--cyan)}
+  .node.fact{border-color:#7dffb0} .node.fact h3{color:#7dffb0;text-shadow:0 0 8px #7dffb0}
+  .node.bias{border-color:var(--pink)} .node.bias h3{color:var(--pink);text-shadow:0 0 8px var(--pink)}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .lane-title{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--violet);margin-bottom:14px}
+  .arrow{text-align:center;color:var(--violet);font-size:18px;margin:-2px 0 8px}
+  .log{font-size:12.5px;padding:8px 0;color:#dcb8ff;border-bottom:1px solid rgba(157,107,255,.25);letter-spacing:.4px}
+  .log time{color:var(--cyan);margin-right:10px;font-variant-numeric:tabular-nums}
+  .budgetbar{height:10px;border-radius:2px;background:rgba(157,107,255,.2);overflow:hidden;margin-top:14px;border:1px solid var(--violet)}
+  .budgetbar i{display:block;height:100%;width:62%;background:linear-gradient(90deg,var(--cyan),var(--pink))}
+  .score{display:flex;flex-wrap:wrap;gap:9px}
+  .score span{font-size:11.5px;letter-spacing:1px;padding:6px 13px;border-radius:3px;
+    border:1px solid var(--cyan);color:var(--cyan);background:rgba(0,229,255,.07)}
+</style>
+</head>
+<body>
+  <div class="sun"></div>
+  <div class="wrap">
+  <div class="topbar">
+    <div class="logo">originweave</div>
+    <div class="chip">run · obscura_kitesurf</div>
+    <div class="chip live">● LIVE</div>
+    <div class="chip">M0e 只读运行图</div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>Blackboard</h2>
+        <div class="stat"><span>Sources</span><b>7</b></div>
+        <div class="stat"><span>Claims</span><b>12</b></div>
+        <div class="stat"><span>Facts</span><b>19</b></div>
+        <div class="stat"><span>Intent open</span><b>3</b></div>
+        <div class="stat"><span>Intent done</span><b>11</b></div>
+      </div>
+      <div class="card">
+        <h2>Budget</h2>
+        <div class="stat"><span>steps</span><b>14 / 60</b></div>
+        <div class="stat"><span>tokens</span><b>38.2k</b></div>
+        <div class="stat"><span>wall</span><b>2m41s</b></div>
+        <div class="stat"><span>cost</span><b>$0.14 / $1</b></div>
+        <div class="budgetbar"><i></i></div>
+      </div>
+      <div class="card">
+        <h2>Bias Scorecard</h2>
+        <div class="score">
+          <span>改写 0.62</span><span>夸大 0.31</span><span>省略 0.78</span>
+          <span>归因 0.10</span><span>循环 0.44</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Provenance DAG · 议程 → Intent → Fact</h2>
+      <div class="cols">
+        <div>
+          <div class="lane-title">Agenda</div>
+          <div class="node agenda"><h3>A1 定位源头</h3><p>优先级 0.92 · 谱系深度 0</p></div>
+          <div class="node agenda"><h3>A2 最早出现时间</h3><p>优先级 0.71 · 存档 CDX</p></div>
+        </div>
+        <div>
+          <div class="lane-title">Intent / Fact</div>
+          <div class="node intent"><h3>I1 search “kitesurf…”</h3><p>worker · exa · done</p></div>
+          <div class="arrow">▼</div>
+          <div class="node fact"><h3>F1 source_earlier</h3><p>Cloudflare 博客 2023-02 · 逐字引用 ✓</p></div>
+          <div class="arrow">▼</div>
+          <div class="node fact"><h3>F2 claim_supported</h3><p>confidence 0.88 · 2 evidence</p></div>
+          <div class="node bias"><h3>D1 selective_omission</h3><p>分数 0.78 · README 略去关键限制</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Event Stream</h2>
+      <div class="log"><time>t+00:03</time>run_started</div>
+      <div class="log"><time>t+00:11</time>claim_extracted · c1</div>
+      <div class="log"><time>t+00:19</time>intent_added · I1</div>
+      <div class="log"><time>t+00:42</time>intent_claimed · pi#1</div>
+      <div class="log"><time>t+01:07</time>fact_added · F1</div>
+      <div class="log"><time>t+01:33</time>prompt_used · extract.v3</div>
+      <div class="log"><time>t+02:10</time>fact_added · F2</div>
+      <div class="log"><time>t+02:41</time>budget_tick · step 14</div>
+    </div>
+  </div>
+  </div>
+</body>
+</html>

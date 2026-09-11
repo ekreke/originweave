@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>15 · Ops Dashboard — originweave</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{--bg:#14171c;--panel:#1c2029;--panel2:#222732;--line:#2e3542;--ink:#d7dde8;--muted:#8b94a6;
+    --blue:#4dabf7;--green:#37b24d;--amber:#f59f00;--red:#f03e3e;--violet:#9775fa;--cyan:#22b8cf}
+  body{background:var(--bg);color:var(--ink);
+    font-family:"Inter","SF Pro Text","PingFang SC",system-ui,sans-serif;padding:18px;font-size:13px}
+  .topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px}
+  .logo{font-size:17px;font-weight:700;color:#fff}
+  .logo span{color:var(--blue)}
+  .chip{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);
+    padding:5px 11px;border-radius:6px}
+  .live{color:#b2f2bb;border-color:#2b8a3e;background:rgba(55,178,77,.14)}
+  .pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:6px;
+    animation:p 1.4s infinite}
+  @keyframes p{0%{box-shadow:0 0 0 0 rgba(55,178,77,.6)}70%{box-shadow:0 0 0 7px rgba(55,178,77,0)}100%{box-shadow:0 0 0 0 rgba(55,178,77,0)}}
+  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px}
+  @media(max-width:1000px){.kpis{grid-template-columns:repeat(3,1fr)}}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+  .kpi .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
+  .kpi .val{font-size:22px;font-weight:700;margin-top:5px;font-variant-numeric:tabular-nums}
+  .kpi .sub{font-size:11px;color:var(--muted);margin-top:3px}
+  .kpi.b .val{color:var(--blue)} .kpi.g .val{color:var(--green)}
+  .kpi.a .val{color:var(--amber)} .kpi.v .val{color:var(--violet)} .kpi.c .val{color:var(--cyan)}
+  .grid{display:grid;grid-template-columns:1.35fr 1fr;gap:14px}
+  @media(max-width:1000px){.grid{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:14px}
+  .panel h2{font-size:11px;text-transform:uppercase;letter-spacing:1.1px;color:var(--muted);
+    padding:11px 14px;border-bottom:1px solid var(--line);background:var(--panel2);font-weight:600;
+    display:flex;justify-content:space-between}
+  .panel .body{padding:14px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;
+    letter-spacing:.6px;padding:7px 14px;border-bottom:1px solid var(--line)}
+  td{padding:8px 14px;border-bottom:1px solid rgba(46,53,66,.6)}
+  tr:last-child td{border-bottom:0}
+  .tag{display:inline-block;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:4px}
+  .tag.done{background:rgba(55,178,77,.16);color:#8ce99a}
+  .tag.run{background:rgba(77,171,247,.16);color:#a5d8ff}
+  .tag.open{background:rgba(245,159,0,.16);color:#ffd43b}
+  .tag.bias{background:rgba(240,62,62,.16);color:#ffa8a8}
+  .num{font-variant-numeric:tabular-nums}
+  .track{height:7px;border-radius:4px;background:var(--panel2);overflow:hidden;margin-top:6px}
+  .track i{display:block;height:100%;background:linear-gradient(90deg,var(--blue),var(--violet))}
+  .log{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12px;line-height:1.85;color:#aeb7c8}
+  .log time{color:var(--cyan);margin-right:10px}
+  .log .t{color:var(--violet)}
+  .score{display:grid;grid-template-columns:1fr auto;gap:8px 12px;align-items:center}
+  .score .lbl{color:#c2ccdd;font-size:12.5px}
+  .score .val{color:var(--amber);font-weight:700;font-variant-numeric:tabular-nums}
+  .bars{display:flex;align-items:flex-end;gap:4px;height:56px;margin-top:6px}
+  .bars i{flex:1;background:linear-gradient(180deg,var(--cyan),#1864ab);border-radius:2px 2px 0 0}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo">origin<span>weave</span></div>
+    <div class="chip">run · obscura_kitesurf</div>
+    <div class="chip live"><span class="pulse"></span>LIVE · SSE events.jsonl</div>
+    <div class="chip">--port 8765</div>
+    <div class="chip">M0e 只读运行图</div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi b"><div class="lbl">Sources</div><div class="val">7</div><div class="sub">+2 本步</div></div>
+    <div class="kpi v"><div class="lbl">Claims</div><div class="val">12</div><div class="sub">c1…c12</div></div>
+    <div class="kpi g"><div class="lbl">Facts</div><div class="val">19</div><div class="sub">18 校验通过</div></div>
+    <div class="kpi a"><div class="lbl">Intent open</div><div class="val">3</div><div class="sub">11 done</div></div>
+    <div class="kpi c"><div class="lbl">Steps</div><div class="val">14<span style="font-size:13px;color:var(--muted)">/60</span></div><div class="sub">wall 2m41s</div></div>
+    <div class="kpi a"><div class="lbl">Cost</div><div class="val">$0.14</div><div class="sub">上限 $1.00</div></div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="panel">
+        <h2><span>溯源 DAG · 议程 → Intent → Fact</span><span>实时</span></h2>
+        <table>
+          <thead><tr><th>节点</th><th>类型</th><th>状态</th><th class="num">置信/优先级</th><th>来源</th></tr></thead>
+          <tbody>
+            <tr><td>A1 定位源头</td><td>Agenda</td><td><span class="tag open">OPEN</span></td><td class="num">0.92</td><td>seed</td></tr>
+            <tr><td>A2 最早出现时间</td><td>Agenda</td><td><span class="tag open">OPEN</span></td><td class="num">0.71</td><td>seed</td></tr>
+            <tr><td>I1 search “kitesurf…”</td><td>Intent</td><td><span class="tag run">DONE</span></td><td class="num">—</td><td>exa</td></tr>
+            <tr><td>F1 source_earlier</td><td>Fact</td><td><span class="tag done">VERIFIED</span></td><td class="num">0.94</td><td>cloudflare.com</td></tr>
+            <tr><td>F2 claim_supported</td><td>Fact</td><td><span class="tag done">VERIFIED</span></td><td class="num">0.88</td><td>2 evidence</td></tr>
+            <tr><td>D1 selective_omission</td><td>Bias</td><td><span class="tag bias">FLAGGED</span></td><td class="num">0.78</td><td>README</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2><span>Budget · steps / tokens / cost</span><span>62%</span></h2>
+        <div class="body">
+          <div style="display:flex;justify-content:space-between;color:var(--muted)">
+            <span>14 / 60 steps</span><span>38.2k tokens</span><span>$0.14 / $1.00</span>
+          </div>
+          <div class="track"><i style="width:62%"></i></div>
+          <div class="bars">
+            <i style="height:30%"></i><i style="height:48%"></i><i style="height:22%"></i>
+            <i style="height:64%"></i><i style="height:40%"></i><i style="height:78%"></i>
+            <i style="height:52%"></i><i style="height:88%"></i><i style="height:35%"></i>
+            <i style="height:70%"></i><i style="height:58%"></i><i style="height:92%"></i>
+            <i style="height:46%"></i><i style="height:66%"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2><span>偏差记分卡</span><span>5 dims</span></h2>
+        <div class="body score">
+          <span class="lbl">措辞 / 改写漂移</span><span class="val">0.62</span>
+          <span class="lbl">夸大 / 强度升级</span><span class="val">0.31</span>
+          <span class="lbl">选择性省略</span><span class="val" style="color:var(--red)">0.78</span>
+          <span class="lbl">归因错误</span><span class="val" style="color:var(--green)">0.10</span>
+          <span class="lbl">循环报道</span><span class="val">0.44</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2><span>事件日志 · tail -f</span><span>events.jsonl</span></h2>
+        <div class="body log">
+          <div><time>t+00:03</time><span class="t">run_started</span></div>
+          <div><time>t+00:11</time>claim_extracted c1</div>
+          <div><time>t+00:19</time>intent_added I1</div>
+          <div><time>t+00:42</time>intent_claimed pi#1</div>
+          <div><time>t+01:07</time>fact_added F1</div>
+          <div><time>t+01:33</time>prompt_used extract.v3</div>
+          <div><time>t+02:10</time>fact_added F2</div>
+          <div><time>t+02:41</time><span class="t">budget_tick</span> step=14</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

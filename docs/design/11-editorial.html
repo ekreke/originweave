@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>11 · Editorial — originweave</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{--ink:#191714;--paper:#fbf7ef;--accent:#b3261e;--muted:#6b6459;--rule:#d9d0c0}
+  body{background:var(--paper);color:var(--ink);
+    font-family:"Iowan Old Style",Georgia,"Songti SC","Noto Serif SC",serif;padding:30px}
+  .topbar{border-bottom:4px double var(--ink);padding-bottom:18px;margin-bottom:8px;
+    display:flex;align-items:baseline;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  .logo{font-size:34px;font-weight:700;letter-spacing:-1px;font-variant:small-caps}
+  .logo i{color:var(--accent);font-style:italic}
+  .kicker{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);
+    font-family:"Helvetica Neue",sans-serif}
+  .dateline{display:flex;justify-content:space-between;font-size:11px;letter-spacing:2px;
+    text-transform:uppercase;color:var(--muted);font-family:"Helvetica Neue",sans-serif;
+    padding:8px 0;border-bottom:1px solid var(--rule);margin-bottom:24px}
+  .grid{display:grid;grid-template-columns:280px 1fr 320px;gap:34px}
+  @media(max-width:1080px){.grid{grid-template-columns:1fr}}
+  .col h2{font-size:15px;font-variant:small-caps;letter-spacing:1px;
+    border-bottom:1px solid var(--ink);padding-bottom:6px;margin-bottom:14px}
+  .card{margin-bottom:28px}
+  .card h2{font-size:14px;font-variant:small-caps;letter-spacing:1px;
+    border-bottom:1px solid var(--ink);padding-bottom:6px;margin-bottom:14px}
+  .stat{display:flex;justify-content:space-between;padding:7px 0;font-size:14px;color:var(--muted);
+    border-bottom:1px dotted var(--rule)}
+  .stat:last-child{border-bottom:0}
+  .stat b{color:var(--ink);font-variant-numeric:tabular-nums}
+  .node{padding:0 0 14px 0;margin-bottom:14px;border-bottom:1px solid var(--rule)}
+  .node h3{font-size:15px;font-weight:700}
+  .node p{font-size:12.5px;color:var(--muted);margin-top:4px;font-family:"Helvetica Neue",sans-serif;line-height:1.5}
+  .node.agenda h3::before{content:"§ ";color:var(--accent)}
+  .node.intent h3{font-style:italic}
+  .node.fact h3::before{content:"“";color:var(--muted)}
+  .node.fact h3::after{content:"”";color:var(--muted)}
+  .node.bias h3{color:var(--accent)}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:30px}
+  .lane-title{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);
+    font-family:"Helvetica Neue",sans-serif;margin-bottom:14px;font-weight:700}
+  .log{font-size:13px;padding:7px 0;border-bottom:1px dotted var(--rule);color:#3a352e}
+  .log time{color:var(--accent);margin-right:12px;font-variant-numeric:tabular-nums}
+  .budgetbar{height:8px;background:var(--rule);margin-top:12px}
+  .budgetbar i{display:block;height:100%;width:62%;background:var(--accent)}
+  .score{display:flex;flex-direction:column;gap:0}
+  .score div{display:flex;justify-content:space-between;padding:7px 0;font-size:13.5px;
+    border-bottom:1px dotted var(--rule)}
+  .score div b{color:var(--accent)}
+  .dropcap::first-letter{font-size:38px;float:left;line-height:.85;padding-right:6px;color:var(--accent)}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo">origin<i>weave</i></div>
+    <div class="kicker">Run Review · 只读实时运行图</div>
+  </div>
+  <div class="dateline">
+    <span>Run · obscura_kitesurf</span>
+    <span>Status · Live</span>
+    <span>M0e</span>
+  </div>
+
+  <div class="grid">
+    <div class="col">
+      <div class="card">
+        <h2>Blackboard</h2>
+        <div class="stat"><span>Sources</span><b>7</b></div>
+        <div class="stat"><span>Claims</span><b>12</b></div>
+        <div class="stat"><span>Facts</span><b>19</b></div>
+        <div class="stat"><span>Intent open</span><b>3</b></div>
+        <div class="stat"><span>Intent done</span><b>11</b></div>
+      </div>
+      <div class="card">
+        <h2>Budget</h2>
+        <div class="stat"><span>Steps</span><b>14 / 60</b></div>
+        <div class="stat"><span>Tokens</span><b>38.2k</b></div>
+        <div class="stat"><span>Wall</span><b>2m41s</b></div>
+        <div class="stat"><span>Cost</span><b>$0.14 / $1</b></div>
+        <div class="budgetbar"><i></i></div>
+      </div>
+      <div class="card">
+        <h2>Bias Scorecard</h2>
+        <div class="score">
+          <div><span>改写</span><b>0.62</b></div>
+          <div><span>夸大</span><b>0.31</b></div>
+          <div><span>省略</span><b>0.78</b></div>
+          <div><span>归因</span><b>0.10</b></div>
+          <div><span>循环</span><b>0.44</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>溯源 DAG · 议程 → Intent → Fact</h2>
+      <p class="dropcap" style="font-family:'Helvetica Neue',sans-serif;font-size:12.5px;color:#6b6459;margin-bottom:16px">
+        从被检资料的断言出发，调度逐步提出 Intent 并落成可校验的 Fact，最终汇入偏差记分卡。</p>
+      <div class="cols">
+        <div>
+          <div class="lane-title">Agenda</div>
+          <div class="node agenda"><h3>A1 定位源头</h3><p>优先级 0.92 · 谱系深度 0</p></div>
+          <div class="node agenda"><h3>A2 最早出现时间</h3><p>优先级 0.71 · 存档 CDX</p></div>
+        </div>
+        <div>
+          <div class="lane-title">Intent / Fact</div>
+          <div class="node intent"><h3>I1 search “kitesurf…”</h3><p>worker · exa · done</p></div>
+          <div class="node fact"><h3>F1 source_earlier</h3><p>Cloudflare 博客 2023-02 · 逐字引用 ✓</p></div>
+          <div class="node fact"><h3>F2 claim_supported</h3><p>confidence 0.88 · 2 evidence</p></div>
+          <div class="node bias"><h3>D1 selective_omission</h3><p>分数 0.78 · README 略去关键限制</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Event Log</h2>
+      <div class="log"><time>t+00:03</time>run_started</div>
+      <div class="log"><time>t+00:11</time>claim_extracted · c1</div>
+      <div class="log"><time>t+00:19</time>intent_added · I1</div>
+      <div class="log"><time>t+00:42</time>intent_claimed · pi#1</div>
+      <div class="log"><time>t+01:07</time>fact_added · F1</div>
+      <div class="log"><time>t+01:33</time>prompt_used · extract.v3</div>
+      <div class="log"><time>t+02:10</time>fact_added · F2</div>
+      <div class="log"><time>t+02:41</time>budget_tick · step 14</div>
+    </div>
+  </div>
+</body>
+</html>

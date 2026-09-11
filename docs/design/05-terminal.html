@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>05 · Terminal — originweave</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#050a06;color:#33ff66;font-family:"SF Mono",Menlo,Consolas,monospace;
+    padding:20px;font-size:13px;line-height:1.55;text-shadow:0 0 6px rgba(51,255,102,.45)}
+  .crt{position:fixed;inset:0;pointer-events:none;z-index:9;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 1px,transparent 1px 3px)}
+  .topbar{border:1px solid #33ff66;padding:10px 16px;margin-bottom:16px;display:flex;gap:22px;flex-wrap:wrap}
+  .logo{font-weight:700;letter-spacing:1px}
+  .dim{color:#1f9e44;text-shadow:none}
+  .live{color:#b6ff4d;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .grid{display:grid;grid-template-columns:1fr 1.6fr 1.2fr;gap:16px}
+  @media(max-width:1000px){.grid{grid-template-columns:1fr}}
+  .panel{border:1px solid #1f9e44;padding:14px}
+  .panel h2{font-size:12px;color:#b6ff4d;margin-bottom:12px;letter-spacing:1px}
+  .panel h2::before{content:"┌─ "}
+  .panel h2::after{content:" ─┐"}
+  .stat{display:flex;justify-content:space-between;padding:3px 0}
+  .stat b{color:#b6ff4d}
+  pre.node{border-left:2px solid #33ff66;padding:6px 6px 6px 12px;margin-bottom:10px;white-space:pre-wrap}
+  .node.agenda{color:#ffe14d;border-color:#ffe14d}
+  .node.intent{color:#5cc8ff;border-color:#5cc8ff}
+  .node.fact{color:#33ff66;border-color:#33ff66}
+  .node.bias{color:#ff6ba6;border-color:#ff6ba6}
+  .log{padding:2px 0}
+  .log time{color:#1f9e44}
+  .bar{margin-top:8px}
+  .bar span{color:#b6ff4d}
+  .bar u{text-decoration:none}
+  .score span{margin-right:12px;color:#ff6ba6}
+  .cursor{display:inline-block;width:8px;background:#33ff66;animation:blink 1s steps(1) infinite}
+</style>
+</head>
+<body>
+  <div class="crt"></div>
+  <div class="topbar">
+    <span class="logo">$ originweave ui</span>
+    <span class="dim">--run examples/obscura_kitesurf</span>
+    <span class="dim">--port 8765</span>
+    <span class="live">[ LIVE ]</span>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>BLACKBOARD</h2>
+      <div class="stat"><span>sources</span><b>7</b></div>
+      <div class="stat"><span>claims</span><b>12</b></div>
+      <div class="stat"><span>facts</span><b>19</b></div>
+      <div class="stat"><span>intents open</span><b>3</b></div>
+      <div class="stat"><span>intents done</span><b>11</b></div>
+      <h2 style="margin-top:18px">BUDGET</h2>
+      <div class="stat"><span>steps</span><b>14/60</b></div>
+      <div class="stat"><span>tokens</span><b>38.2k</b></div>
+      <div class="stat"><span>wall</span><b>2m41s</b></div>
+      <div class="stat"><span>cost</span><b>$0.14/$1</b></div>
+      <div class="bar">[<span>████████████████</span><u>░░░░░░░░</u>] 62%</div>
+      <h2 style="margin-top:18px">BIAS DIMS</h2>
+      <div class="score">
+        <div>改写 .. 0.62</div><div>夸大 .. 0.31</div><div>省略 .. 0.78</div>
+        <div>归因 .. 0.10</div><div>循环 .. 0.44</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>DAG  AGENDA -> INTENT -> FACT</h2>
+      <pre class="node agenda">[A1] 定位源头            prio=0.92 depth=0
+[A2] 最早出现时间        prio=0.71 cdx</pre>
+      <pre class="node intent">  └─> (I1) search "kitesurf"
+          worker=exa  status=done</pre>
+      <pre class="node fact">        └─> (F1) source_earlier
+            Cloudflare Blog 2023-02
+            evidence: "…" [substring OK ✓]
+        └─> (F2) claim_supported
+            confidence=0.88  evidence=2</pre>
+      <pre class="node bias">        └─> (D1) selective_omission
+            score=0.78  README 略去关键限制</pre>
+    </div>
+
+    <div class="panel">
+      <h2>EVENTS  tail -f events.jsonl</h2>
+      <div class="log"><time>t+00:03</time> run_started</div>
+      <div class="log"><time>t+00:11</time> claim_extracted c1</div>
+      <div class="log"><time>t+00:19</time> intent_added I1</div>
+      <div class="log"><time>t+00:42</time> intent_claimed pi#1</div>
+      <div class="log"><time>t+01:07</time> fact_added F1</div>
+      <div class="log"><time>t+01:33</time> prompt_used extract.v3</div>
+      <div class="log"><time>t+02:10</time> fact_added F2</div>
+      <div class="log"><time>t+02:41</time> budget_tick step=14</div>
+      <div class="log"><span class="cursor"></span></div>
+    </div>
+  </div>
+</body>
+</html>

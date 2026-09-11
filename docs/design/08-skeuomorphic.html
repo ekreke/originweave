@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>08 · Skeuomorphic — originweave</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:#4a3b2a;
+    background-image:radial-gradient(circle at 50% 0%,#6b563c,#332619 80%);
+    color:#f6efdf;font-family:Georgia,"Songti SC",serif;padding:30px;min-height:100vh}
+  .topbar{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:28px;
+    background:linear-gradient(#8a6f4d,#6a5133);border:1px solid #caa874;border-radius:10px;
+    padding:16px 24px;box-shadow:0 6px 0 #2b1f13,0 10px 22px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,240,200,.5)}
+  .logo{font-size:24px;font-weight:700;color:#fdf3d8;text-shadow:0 2px 0 #3a2a18,0 1px 6px rgba(0,0,0,.5);letter-spacing:.5px}
+  .chip{font-size:12.5px;padding:7px 16px;border-radius:20px;color:#3a2a18;font-weight:700;
+    background:linear-gradient(#f3e2bd,#d8c295);border:1px solid #b59a6a;
+    box-shadow:inset 0 1px 0 #fffbe9,0 2px 3px rgba(0,0,0,.4)}
+  .live{background:linear-gradient(#c9f0a8,#8fce5c);color:#1f3a0e}
+  .grid{display:grid;grid-template-columns:300px 1fr 330px;gap:26px}
+  @media(max-width:1100px){.grid{grid-template-columns:1fr}}
+  .card{padding:22px;margin-bottom:26px;border-radius:14px;
+    background:linear-gradient(#fbf3df,#efe3c6);
+    border:1px solid #b49b70;color:#3a2a18;
+    box-shadow:0 5px 0 #b09468,0 9px 20px rgba(0,0,0,.5),inset 0 1px 0 #fffdf5}
+  .card h2{font-size:14px;text-transform:uppercase;letter-spacing:1.4px;color:#7a5c33;
+    border-bottom:2px solid #d7c39a;padding-bottom:9px;margin-bottom:14px;text-shadow:0 1px 0 #fff}
+  .stat{display:flex;justify-content:space-between;padding:9px 4px;font-size:14px;border-bottom:1px dashed #cfbb95}
+  .stat:last-child{border-bottom:0}
+  .stat b{color:#5a3d1c}
+  .node{padding:14px 15px;border-radius:10px;margin-bottom:14px;
+    background:linear-gradient(#fdf8ea,#f0e6cc);border:1px solid #c4ab80;
+    box-shadow:inset 0 1px 0 #fff,0 2px 5px rgba(0,0,0,.18)}
+  .node h3{font-size:14px}
+  .node p{font-size:12px;color:#7a6647;margin-top:5px}
+  .node.agenda{border-left:8px solid #c99a2e}
+  .node.intent{border-left:8px solid #3f7fb5}
+  .node.fact{border-left:8px solid #4f9c4a}
+  .node.bias{border-left:8px solid #b5462f}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .lane-title{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#8a6b3f;margin-bottom:14px;font-weight:700}
+  .arrow{text-align:center;font-size:18px;color:#a98e60;margin:-4px 0 8px}
+  .log{font-size:12.5px;padding:9px 0;border-bottom:1px dashed #d8c6a0;color:#5f4a2b}
+  .log time{font-weight:700;color:#8a5a1f;margin-right:10px;font-variant-numeric:tabular-nums}
+  .budgetbar{height:16px;border-radius:8px;margin-top:14px;background:#e0d2b0;
+    box-shadow:inset 0 2px 4px rgba(0,0,0,.35);overflow:hidden;border:1px solid #b49b70}
+  .budgetbar i{display:block;height:100%;width:62%;background:linear-gradient(#7fc25a,#4f8c33);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
+  .score{display:flex;flex-wrap:wrap;gap:10px}
+  .score span{font-size:12px;padding:8px 14px;border-radius:20px;color:#5a3d1c;
+    background:linear-gradient(#f3e2bd,#d8c295);border:1px solid #b59a6a;
+    box-shadow:inset 0 1px 0 #fffbe9,0 2px 3px rgba(0,0,0,.25)}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo">originweave</div>
+    <div class="chip">run · obscura_kitesurf</div>
+    <div class="chip live">● LIVE</div>
+    <div class="chip">M0e · 只读运行图</div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>Blackboard 黑板</h2>
+        <div class="stat"><span>Sources</span><b>7</b></div>
+        <div class="stat"><span>Claims</span><b>12</b></div>
+        <div class="stat"><span>Facts</span><b>19</b></div>
+        <div class="stat"><span>Intent open</span><b>3</b></div>
+        <div class="stat"><span>Intent done</span><b>11</b></div>
+      </div>
+      <div class="card">
+        <h2>Budget 预算</h2>
+        <div class="stat"><span>Steps</span><b>14 / 60</b></div>
+        <div class="stat"><span>Tokens</span><b>38.2k</b></div>
+        <div class="stat"><span>Wall</span><b>2m41s</b></div>
+        <div class="stat"><span>Cost</span><b>$0.14 / $1</b></div>
+        <div class="budgetbar"><i></i></div>
+      </div>
+      <div class="card">
+        <h2>偏差记分卡</h2>
+        <div class="score">
+          <span>改写 0.62</span><span>夸大 0.31</span><span>省略 0.78</span>
+          <span>归因 0.10</span><span>循环 0.44</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>溯源 DAG · 议程 → Intent → Fact</h2>
+      <div class="cols">
+        <div>
+          <div class="lane-title">Agenda</div>
+          <div class="node agenda"><h3>A1 定位源头</h3><p>优先级 0.92 · 谱系深度 0</p></div>
+          <div class="node agenda"><h3>A2 最早出现时间</h3><p>优先级 0.71 · 存档 CDX</p></div>
+        </div>
+        <div>
+          <div class="lane-title">Intent / Fact</div>
+          <div class="node intent"><h3>I1 search “kitesurf…”</h3><p>worker · exa · done</p></div>
+          <div class="arrow">↓</div>
+          <div class="node fact"><h3>F1 source_earlier</h3><p>Cloudflare 博客 2023-02 · 逐字引用 ✓</p></div>
+          <div class="arrow">↓</div>
+          <div class="node fact"><h3>F2 claim_supported</h3><p>confidence 0.88 · 2 evidence</p></div>
+          <div class="node bias"><h3>D1 selective_omission</h3><p>分数 0.78 · README 略去关键限制</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Event Log 事件</h2>
+      <div class="log"><time>t+00:03</time>run_started</div>
+      <div class="log"><time>t+00:11</time>claim_extracted · c1</div>
+      <div class="log"><time>t+00:19</time>intent_added · I1</div>
+      <div class="log"><time>t+00:42</time>intent_claimed · pi#1</div>
+      <div class="log"><time>t+01:07</time>fact_added · F1</div>
+      <div class="log"><time>t+01:33</time>prompt_used · extract.v3</div>
+      <div class="log"><time>t+02:10</time>fact_added · F2</div>
+      <div class="log"><time>t+02:41</time>budget_tick · step 14</div>
+    </div>
+  </div>
+</body>
+</html>
