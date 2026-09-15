@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     trace.add_argument("--max-steps", type=int, default=None)
     trace.add_argument("--max-wall", default=None)
     trace.add_argument("--max-cost", type=float, default=None)
+    trace.add_argument("--auto", action="store_true", help="full auto; skip HITL gates")
     trace.add_argument("--json", action="store_true")
 
     ui = sub.add_parser("ui", help="serve the read-only run view")
