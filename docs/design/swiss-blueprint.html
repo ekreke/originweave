@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>09 · Swiss / Blueprint · 瑞士蓝图 — originweave</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --c-paper: 243 246 249;
+  --c-panel: 255 255 255;
+  --c-panel2: 250 251 253;
+  --c-wash: 235 238 242;
+  --c-ink: 15 27 45;
+  --c-muted: 91 107 128;
+  --c-hairline: 219 227 236;
+  --c-accent: 29 78 216;
+  --c-accent-soft: 213 222 244;
+  --c-accent2: 8 145 178;
+  --c-ok: 47 158 104;
+  --c-warn: 194 135 43;
+  --c-danger: 209 73 91;
+  --c-k-origin: 15 27 45;
+  --c-k-goal: 15 27 45;
+  --c-k-fact: 29 78 216;
+  --c-k-citation: 194 135 43;
+  --c-k-source: 47 158 104;
+  --c-k-boundary: 91 107 128;
+  --c-k-compare: 8 145 178;
+  --c-k-deviation: 209 73 91;
+  --c-k-intent: 8 145 178;
+  --radius: 0px;
+  --radius-sm: calc(0px - 1px);
+  --font-ui: 'Space Grotesk', Inter, 'PingFang SC', sans-serif;
+  --font-mono: 'JetBrains Mono', Menlo, monospace;
+  --font-display: 'Space Grotesk', Inter, sans-serif;
+}
+.dark{
+  --c-paper: 10 18 32;
+  --c-panel: 15 26 46;
+  --c-panel2: 13 23 40;
+  --c-wash: 18 26 40;
+  --c-ink: 226 236 248;
+  --c-muted: 125 143 168;
+  --c-hairline: 30 47 74;
+  --c-accent: 91 140 255;
+  --c-accent-soft: 21 35 63;
+  --c-accent2: 45 212 191;
+  --c-ok: 67 201 138;
+  --c-warn: 224 165 74;
+  --c-danger: 239 107 125;
+  --c-k-origin: 226 236 248;
+  --c-k-goal: 226 236 248;
+  --c-k-fact: 91 140 255;
+  --c-k-citation: 224 165 74;
+  --c-k-source: 67 201 138;
+  --c-k-boundary: 125 143 168;
+  --c-k-compare: 45 212 191;
+  --c-k-deviation: 239 107 125;
+  --c-k-intent: 45 212 191;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:rgb(var(--c-paper));color:rgb(var(--c-ink));
+  font-family:var(--font-ui);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:rgb(var(--c-hairline));border-radius:9px}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;cursor:pointer}
+
+/* shell */
+.appbar{height:52px;display:flex;align-items:center;gap:16px;padding:0 16px;
+  background:rgb(var(--c-panel));border-bottom:1px solid rgb(var(--c-hairline));position:sticky;top:0;z-index:30}
+.brand{font-weight:700;font-size:15px;letter-spacing:-.2px}
+.brand i{font-style:normal;color:rgb(var(--c-accent))}
+.crumbs{color:rgb(var(--c-muted));font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crumbs b{color:rgb(var(--c-ink));font-weight:600}
+.crumbs i{color:rgb(var(--c-hairline));font-style:normal;margin:0 6px}
+.nav{display:flex;gap:2px;background:rgb(var(--c-wash));border-radius:var(--radius);padding:2px}
+.nav a{font-size:12px;padding:4px 10px;border-radius:var(--radius-sm);color:rgb(var(--c-muted))}
+.nav a.on{background:rgb(var(--c-panel));color:rgb(var(--c-ink));font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.tools{margin-left:auto;display:flex;gap:6px;align-items:center}
+.btn{font-size:12.5px;border:1px solid rgb(var(--c-hairline));background:rgb(var(--c-panel));
+  border-radius:var(--radius-sm);padding:6px 11px}
+.btn:hover{background:rgb(var(--c-wash))}
+.btn.primary{background:rgb(var(--c-accent));border-color:rgb(var(--c-accent));color:rgb(var(--c-paper))}
+.btn.primary:hover{filter:brightness(1.05)}
+.btn.danger{color:rgb(var(--c-danger));border-color:rgb(var(--c-danger) / .45)}
+.btn.sm{padding:3px 8px;font-size:11.5px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.live{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:rgb(var(--c-ok));white-space:nowrap}
+.live::before{content:"";width:7px;height:7px;border-radius:50%;background:rgb(var(--c-ok))}
+.live.warn{color:rgb(var(--c-warn))}
+.live.warn::before{background:rgb(var(--c-warn))}
+
+/* layout */
+.wrap{padding:14px;max-width:1600px;margin:0 auto}
+.layout{display:grid;grid-template-columns:262px minmax(0,1fr) 330px;gap:14px;
+  padding:14px;height:calc(100vh - 52px);min-height:640px}
+.panel{background:rgb(var(--c-panel));border:1px solid rgb(var(--c-hairline));
+  border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.panel-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:10px 13px;border-bottom:1px solid rgb(var(--c-hairline))}
+.panel-hd h2{font-size:10.5px;font-weight:700;letter-spacing:1.3px;color:rgb(var(--c-muted));text-transform:uppercase;margin:0}
+.panel-hd .cnt{font-size:11px;color:rgb(var(--c-muted))}
+.scroll{overflow:auto;min-height:0}
+.list{padding:6px}
+.row{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:var(--radius-sm);cursor:pointer;color:rgb(var(--c-ink))}
+.row:hover{background:rgb(var(--c-wash))}
+.row.sel{background:rgb(var(--c-accent-soft))}
+.row .lbl{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .lbl em{font-style:normal;color:rgb(var(--c-muted));font-size:11px;margin-left:5px}
+.row .st{font-size:10.5px;color:rgb(var(--c-muted))}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;background:rgb(var(--c-hairline))}
+.dot.running,.dot.claimed{background:rgb(var(--c-accent));animation:pulse 1.6s infinite}
+.dot.completed,.dot.done{background:rgb(var(--c-ok))}
+.dot.paused,.dot.awaiting{background:rgb(var(--c-warn))}
+.dot.dropped{background:rgb(var(--c-muted));opacity:.5}
+.dot.queued{background:rgb(var(--c-hairline))}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* tabs */
+.tabs{display:flex;gap:2px;background:rgb(var(--c-wash));border-radius:var(--radius-sm);padding:2px}
+.tabs button{border:0;background:transparent;font-size:11.5px;padding:4px 10px;border-radius:calc(var(--radius-sm) - 1px);color:rgb(var(--c-muted))}
+.tabs button.on{background:rgb(var(--c-panel));color:rgb(var(--c-ink));font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.tabs button:disabled{opacity:.35;cursor:not-allowed}
+
+/* tables */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;color:rgb(var(--c-muted));font-weight:600;font-size:10.5px;text-transform:uppercase;
+  letter-spacing:.5px;padding:7px 12px;border-bottom:1px solid rgb(var(--c-hairline));position:sticky;top:0;background:rgb(var(--c-panel))}
+td{padding:8px 12px;border-bottom:1px solid rgb(var(--c-hairline));color:rgb(var(--c-ink));vertical-align:top}
+tr:last-child td{border-bottom:0}
+tbody tr:hover{background:rgb(var(--c-wash))}
+.mono{font-family:var(--font-mono);font-size:11px}
+.muted{color:rgb(var(--c-muted))}
+.tag{display:inline-block;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:5px;
+  background:rgb(var(--c-wash));color:rgb(var(--c-muted));white-space:nowrap}
+.tag.ok{background:rgb(var(--c-ok) / .14);color:rgb(var(--c-ok))}
+.tag.warn{background:rgb(var(--c-warn) / .16);color:rgb(var(--c-warn))}
+.tag.bad{background:rgb(var(--c-danger) / .14);color:rgb(var(--c-danger))}
+.tag.acc{background:rgb(var(--c-accent-soft));color:rgb(var(--c-accent))}
+.sev{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
+.sev.high{background:rgb(var(--c-danger))}
+.sev.medium{background:rgb(var(--c-warn))}
+.sev.low{background:rgb(var(--c-muted))}
+
+/* graph */
+.dagwrap{position:relative;flex:1;min-height:0;background:rgb(var(--c-wash))}
+.dagwrap svg{width:100%;height:100%;display:block}
+.gedge{fill:none;stroke:rgb(var(--c-muted) / .55);stroke-width:1.4}
+.gedge.dependency{stroke-dasharray:5 4}
+.gedge.goal-derived{stroke-dasharray:1.5 4}
+.gedge.spawns{stroke:rgb(var(--c-accent2) / .7);stroke-dasharray:4 3}
+.gedge.decomposes{stroke-dasharray:7 4;stroke-width:1.6}
+.gedge.hot{stroke:rgb(var(--c-accent));stroke-width:2;opacity:1}
+.glabel{font-family:var(--font-mono);font-size:9px;fill:rgb(var(--c-muted))}
+.gnode{cursor:pointer}
+.gnode .bg{fill:rgb(var(--c-panel));stroke:rgb(var(--c-hairline));stroke-width:1}
+.gnode .bar{stroke:none}
+.gnode .gk{font-size:8.5px;font-weight:700;letter-spacing:.7px;fill:rgb(var(--c-muted));text-transform:uppercase}
+.gnode .gt{font-size:11.5px;font-weight:600;fill:rgb(var(--c-ink))}
+.gnode .gm{font-size:9px;fill:rgb(var(--c-muted))}
+.gnode .glyph{fill:rgb(var(--c-muted))}
+.gnode.sel .bg{stroke:rgb(var(--c-accent));stroke-width:2}
+.gnode.dim{opacity:.28}
+.gnode.intent .bg{stroke-dasharray:4 3}
+.gnode.intent.status-claimed .bg{stroke:rgb(var(--c-accent));animation:dash 1s linear infinite}
+.gnode.intent.status-awaiting_human .bg{stroke:rgb(var(--c-warn));stroke-width:2}
+.gnode.intent.status-dropped{opacity:.45}
+.gnode.intent.status-dropped .gt{text-decoration:line-through}
+.gnode.deviation .bg{stroke:rgb(var(--c-danger))}
+@keyframes dash{to{stroke-dashoffset:-14}}
+.gkind-origin .bar{fill:rgb(var(--c-k-origin))}
+.gkind-goal .bar{fill:rgb(var(--c-k-goal))}
+.gkind-fact .bar{fill:rgb(var(--c-k-fact))}
+.gkind-citation .bar{fill:rgb(var(--c-k-citation))}
+.gkind-source .bar{fill:rgb(var(--c-k-source))}
+.gkind-boundary .bar{fill:rgb(var(--c-k-boundary))}
+.gkind-compare .bar{fill:rgb(var(--c-k-compare))}
+.gkind-deviation .bar{fill:rgb(var(--c-k-deviation))}
+.gkind-intent .bar{fill:rgb(var(--c-k-intent))}
+.gkind-fact.role-main-claim .gt{font-weight:700}
+.gkind-deviation .glyph{fill:rgb(var(--c-k-deviation))}
+.legend{padding:12px;border-right:1px solid rgb(var(--c-hairline));overflow:auto;flex:0 0 212px}
+.legend h3{font-size:10px;font-weight:700;letter-spacing:1.1px;color:rgb(var(--c-muted));text-transform:uppercase;margin:0 0 8px}
+.legend h3+*{margin-top:8px}
+.legend h3.mt{margin-top:18px}
+.lg-row{display:flex;align-items:center;gap:8px;font-size:11.5px;color:rgb(var(--c-ink));padding:3px 0}
+.lg-sw{width:11px;height:11px;border-radius:3px;flex:none}
+.lg-line{width:22px;height:0;border-top:2px solid rgb(var(--c-muted));flex:none}
+.lg-line.dependency{border-top-style:dashed}
+.lg-line.goal-derived{border-top-style:dotted}
+.lg-line.spawns{border-top-color:rgb(var(--c-accent2));border-top-style:dashed}
+.lg-line.decomposes{border-top-style:dashed;border-top-width:3px}
+
+/* inspector */
+.insp-bd{padding:13px;overflow:auto}
+.insp h3{font-size:14px;margin:6px 0 3px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:11.5px;margin:8px 0}
+.kv dt{color:rgb(var(--c-muted))}
+.kv dd{margin:0;font-family:var(--font-mono);font-size:11px;word-break:break-all}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:11px 0}
+.cell{border:1px solid rgb(var(--c-hairline));border-radius:var(--radius-sm);padding:8px 10px}
+.cell .l{font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;color:rgb(var(--c-muted))}
+.cell .v{font-size:16px;font-weight:700;margin-top:2px}
+.budget{margin:11px 0}
+.budget .lbl{display:flex;justify-content:space-between;font-size:11px;color:rgb(var(--c-muted));margin-bottom:4px}
+.bar{height:6px;background:rgb(var(--c-wash));border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;background:rgb(var(--c-accent))}
+.bar i.warn{background:rgb(var(--c-warn))}
+.bar i.bad{background:rgb(var(--c-danger))}
+.quote{margin:9px 0;border-left:2px solid rgb(var(--c-accent));background:rgb(var(--c-wash));
+  padding:7px 10px;font-size:11.5px;color:rgb(var(--c-ink))}
+.quote .src{display:block;margin-top:5px;font-size:10.5px;color:rgb(var(--c-muted));font-family:var(--font-mono)}
+.note{margin:9px 0;border:1px solid rgb(var(--c-warn) / .4);background:rgb(var(--c-warn) / .08);
+  border-radius:var(--radius-sm);padding:8px 10px;font-size:11.5px;color:rgb(var(--c-ink))}
+.gate{margin:11px 0;border:1px solid rgb(var(--c-warn) / .55);background:rgb(var(--c-warn) / .1);
+  border-radius:var(--radius-sm);padding:10px 11px}
+.gate .h{font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:rgb(var(--c-warn))}
+.gate p{margin:6px 0;font-size:11.5px}
+.gate .acts{display:flex;gap:6px;margin-top:8px}
+
+/* cards / forms */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.card{background:rgb(var(--c-panel));border:1px solid rgb(var(--c-hairline));border-radius:var(--radius);padding:15px}
+.card .bar2{height:4px;width:44px;border-radius:99px;background:rgb(var(--c-accent));margin-bottom:10px}
+.card h3{margin:0 0 4px;font-size:15px}
+.card p{margin:0;color:rgb(var(--c-muted));font-size:12px}
+.meta{display:flex;gap:14px;margin-top:12px;color:rgb(var(--c-muted));font-size:11px}
+.field{margin:12px 0}
+.field label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:rgb(var(--c-muted));margin-bottom:5px}
+.input,select,textarea{width:100%;font:inherit;font-size:12.5px;padding:8px 10px;border-radius:var(--radius-sm);
+  border:1px solid rgb(var(--c-hairline));background:rgb(var(--c-panel));color:rgb(var(--c-ink))}
+.auth_row{display:flex;gap:8px;flex-wrap:wrap}
+.auth_opt{border:1px solid rgb(var(--c-hairline));border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:rgb(var(--c-muted))}
+.auth_opt.on{background:rgb(var(--c-accent-soft));border-color:rgb(var(--c-accent));color:rgb(var(--c-ink));font-weight:600}
+
+/* events */
+.tl{padding:6px 13px 14px}
+.tl-item{display:grid;grid-template-columns:64px 84px 1fr;gap:10px;padding:7px 0;border-bottom:1px solid rgb(var(--c-hairline));font-size:12px}
+.tl-item:last-child{border-bottom:0}
+.tl .at{font-family:var(--font-mono);font-size:10.5px;color:rgb(var(--c-muted))}
+.tl .ev{font-family:var(--font-mono);font-size:10.5px;font-weight:600}
+.tl .ev.info{color:rgb(var(--c-muted))}
+.tl .ev.success{color:rgb(var(--c-ok))}
+.tl .ev.warning{color:rgb(var(--c-warn))}
+.tl .ev.danger{color:rgb(var(--c-danger))}
+.route{display:none}
+.route.on{display:block}
+.layout-route{display:none}
+.layout-route.on{display:grid;grid-template-columns:262px minmax(0,1fr) 330px;gap:14px;
+  padding:14px;height:calc(100vh - 52px);min-height:640px}
+@media (max-width:1180px){.layout-route.on{grid-template-columns:228px minmax(0,1fr) 300px}}
+.toast{position:fixed;right:16px;bottom:16px;background:rgb(var(--c-ink));color:rgb(var(--c-paper));
+  padding:9px 14px;border-radius:var(--radius-sm);font-size:12.5px;opacity:0;transform:translateY(8px);
+  transition:.2s;z-index:80;pointer-events:none}
+.toast.on{opacity:1;transform:none}
+.hint-pill{font-size:10.5px;padding:4px 8px;border-radius:var(--radius-sm);background:rgb(var(--c-wash));color:rgb(var(--c-muted))}
+body{background-image:linear-gradient(rgb(var(--c-hairline)) 1px,transparent 1px),linear-gradient(90deg,rgb(var(--c-hairline)) 1px,transparent 1px);background-size:24px 24px} .panel{background:rgb(var(--c-panel))} .brand{letter-spacing:-.3px} .panel-hd h2{color:rgb(var(--c-accent))}
+</style>
+</head>
+<body>
+
+<header class="appbar">
+  <div class="brand">origin<i>weave</i></div>
+  <nav class="crumbs" id="crumbs"></nav>
+  <nav class="nav" id="nav">
+    <a href="#/" data-route="overview">总览</a>
+    <a href="#/projects/obscura-kitesurf" data-route="project">项目</a>
+    <a href="#/projects/obscura-kitesurf/runs/new" data-route="newRun">新建核验</a>
+    <a href="#/projects/obscura-kitesurf/runs/run_009" data-route="console">审阅台</a>
+    <a href="#/settings" data-route="settings">设置</a>
+  </nav>
+  <div class="tools" id="tools">
+    <button class="btn sm" onclick="window.__toast&&window.__toast('Refresh（只读，Mock）')">&#8635; Refresh</button>
+    <button class="btn sm" onclick="window.__toast&&window.__toast('Continue（由 server 调度）')">&#9654; Continue</button>
+    <button class="btn sm danger" onclick="window.__toast&&window.__toast('Delete（只读，Mock）')">&#9003; Delete</button>
+    <button class="btn sm" onclick="window.__toast&&window.__toast('Inspect')">&#8981; Inspect</button>
+    <button class="btn sm" onclick="window.__toast&&window.__toast('Human：写 Hint / Gate 决策')">&#9998; Human</button>
+    <button class="btn sm" onclick="window.__toast&&window.__toast('Replay 步进（只读、不触网）')">&#9198; Replay</button>
+    <button class="btn sm" onclick="window.__toast&&window.__toast('Snapshot')">&#10063; Snapshot</button>
+  </div>
+  <div class="live" id="livebadge">LIVE</div>
+  <button class="btn sm" id="themebtn" title="切换亮/暗">&#9788; Theme</button>
+</header>
+
+<!-- ===================== overview ===================== -->
+<section class="route" data-route-view="overview">
+  <div class="wrap">
+    <div class="panel-hd" style="border:0;padding-left:0"><h2>总览 · 项目与 run 汇总</h2><span class="cnt" id="ov-cnt"></span></div>
+    <div class="cards" id="ov-projects"></div>
+    <div class="panel" style="margin-top:16px">
+      <div class="panel-hd"><h2>Recent Runs</h2><span class="cnt mono">只读视图 · 由事件派生</span></div>
+      <div class="scroll"><table><thead><tr>
+        <th>Run</th><th>Title</th><th>Status</th><th>Facts</th><th>Dev.</th><th>Conf.</th><th>Steps</th><th>Cost</th>
+      </tr></thead><tbody id="ov-runs"></tbody></table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== project ===================== -->
+<section class="route" data-route-view="project">
+  <div class="wrap">
+    <div class="panel" style="margin-bottom:16px">
+      <div style="padding:16px">
+        <div class="card" style="border:0;padding:0">
+          <div class="bar2" style="background:rgb(var(--c-accent))"></div>
+          <h3 id="pj-name"></h3>
+          <p id="pj-desc"></p>
+          <div class="meta"><span id="pj-meta"></span></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-hd"><h2>Runs</h2><span class="cnt"><a class="btn sm" href="#/projects/obscura-kitesurf/runs/new">+ 新建核验</a></span></div>
+      <div class="scroll"><table><thead><tr>
+        <th>Run</th><th>Title</th><th>Status</th><th>Facts</th><th>Dev.</th><th>Conf.</th><th>Steps</th><th>Updated</th>
+      </tr></thead><tbody id="pj-runs"></tbody></table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== new run ===================== -->
+<section class="route" data-route-view="newRun">
+  <div class="wrap" style="max-width:760px">
+    <div class="panel">
+      <div class="panel-hd"><h2>新建核验</h2><span class="cnt">POST /api/runs</span></div>
+      <div style="padding:16px">
+        <div class="note">提交后由 <b>server 排队与调度</b>；前端只发起请求，不做执行编排（架构红线）。</div>
+        <div class="field">
+          <label>输入类型 mode</label>
+          <div class="auth_row" id="mode-row">
+            <span class="auth_opt on" data-mode="url">url · 网页资料</span>
+            <span class="auth_opt" data-mode="text">text · 纯文本</span>
+          </div>
+        </div>
+        <div class="field"><label>资料 A target</label><input class="input" value="https://obscura.example/kitesurf-teaser"></div>
+        <div class="field"><label>goal · 停止条件</label><textarea class="input" rows="3">以 2024 原始风洞 benchmark 为边界，判定营销页核心说法是否越界。</textarea></div>
+        <div class="field"><label>maxSteps</label><input class="input" value="40"></div>
+        <div class="field">
+          <label>HITL 模式</label>
+          <div class="auth_row"><span class="auth_opt on">人工介入（Gate A/B/C）</span><span class="auth_opt">--auto 全自动</span></div>
+        </div>
+        <button class="btn primary" onclick="window.__toast&&window.__toast('已提交 → run status: queued')">提交核验</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== run console (hero) ===================== -->
+<section class="route layout-route" data-route-view="console">
+  <aside class="panel">
+    <div class="panel-hd"><h2>TASKS</h2><span class="cnt" id="task-cnt"></span></div>
+    <div class="scroll list" id="task-list"></div>
+  </aside>
+
+  <section class="panel">
+    <div class="panel-hd">
+      <div class="tabs" id="tabs">
+        <button class="on" data-tab="dag">PROVENANCE DAG</button>
+        <button data-tab="facts">FACTS</button>
+        <button data-tab="intents">INTENTS</button>
+        <button data-tab="events">EVENTS</button>
+      </div>
+      <span class="cnt mono" id="tab-cnt"></span>
+    </div>
+
+    <div class="scroll" style="flex:1;display:flex;min-height:0" data-tabpane="dag">
+      <div class="legend">
+        <h3>节点 kind</h3>
+        <div id="lg-nodes"></div>
+        <h3 class="mt">边 relation</h3>
+        <div id="lg-edges"></div>
+        <h3 class="mt">意图 status</h3>
+        <div id="lg-status"></div>
+        <div class="muted" style="margin-top:16px;font-size:10.5px;line-height:1.6">
+          滚轮缩放 · 拖拽平移 · 悬停高亮邻居 · 点击节点查看详情。<br>虚线边=待确认/依赖。
+        </div>
+      </div>
+      <div class="dagwrap"><svg id="dag"></svg></div>
+    </div>
+
+    <div class="scroll" style="flex:1;display:none" data-tabpane="facts">
+      <table><thead><tr><th>ID</th><th>Kind</th><th>Role</th><th>Statement</th><th>Conf.</th><th>Evidence</th></tr></thead>
+      <tbody id="tb-facts"></tbody></table>
+    </div>
+
+    <div class="scroll" style="flex:1;display:none" data-tabpane="intents">
+      <table><thead><tr><th>ID</th><th>Type</th><th>Question</th><th>Status</th><th>From</th><th>Claimed by</th></tr></thead>
+      <tbody id="tb-intents"></tbody></table>
+    </div>
+
+    <div class="scroll" style="flex:1;display:none" data-tabpane="events">
+      <div class="tl" id="tl-events"></div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <div class="panel-hd"><h2>INSPECTOR</h2><span class="cnt mono" id="insp-kind"></span></div>
+    <div class="insp-bd" id="inspector"></div>
+  </aside>
+</section>
+
+<!-- ===================== settings ===================== -->
+<section class="route" data-route-view="settings">
+  <div class="wrap" style="max-width:760px">
+    <div class="panel">
+      <div class="panel-hd"><h2>设置</h2><span class="cnt">客户端只读 · 离线优先</span></div>
+      <div style="padding:16px">
+        <div class="field"><label>主题 theme</label>
+          <div class="auth_row"><span class="auth_opt on" onclick="window.__toggleTheme&&window.__toggleTheme()">跟随本页 toggle</span><span class="auth_opt">system</span></div>
+        </div>
+        <div class="field"><label>search provider</label>
+          <div class="auth_row"><span class="auth_opt on">exa</span><span class="auth_opt">parallel</span></div>
+        </div>
+        <div class="field"><label>prompt provider</label>
+          <div class="auth_row"><span class="auth_opt on">local</span><span class="auth_opt">langfuse</span></div>
+        </div>
+        <div class="field"><label>LIVE 开关（ORIGINWEAVE_LIVE）</label>
+          <div class="auth_row"><span class="auth_opt on">LIVE=0 · 离线 cache/mock</span><span class="auth_opt">LIVE=1 · 触网</span></div>
+        </div>
+        <div class="field"><label>run dir</label><input class="input mono" value="examples/obscura_kitesurf"></div>
+        <div class="muted" style="font-size:11.5px">契约与信息结构以 <span class="mono">docs/overview/dashboard.md</span> 为准。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const DATA = {"project": {"id": "obscura-kitesurf", "name": "obscura-kitesurf", "description": "对 obscura kitesurf 营销落地页做溯源与偏差判定。", "runCount": 9, "updatedAt": "2026-09-16 00:40"}, "projects": [{"id": "obscura-kitesurf", "name": "obscura-kitesurf", "description": "营销页核心说法溯源", "runCount": 9, "updatedAt": "2026-09-16 00:40"}, {"id": "citation-watch", "name": "citation-watch", "description": "科技报道二手转述核查", "runCount": 4, "updatedAt": "2026-09-14 18:12"}], "runs": [{"id": "run_009", "projectId": "obscura-kitesurf", "title": "obscura kitesurf 营销页核验", "status": "awaiting_human", "sourceType": "url", "facts": 7, "deviations": 2, "confidence": 0.78, "steps": {"current": 17, "total": 40}, "budget": {"steps": 17, "stepsMax": 40, "tokens": 184320, "cost": 1.82, "costMax": 5.0, "elapsed": "6m12s", "wallMax": "20m"}, "updatedAt": "2026-09-16 00:40"}, {"id": "run_008", "projectId": "obscura-kitesurf", "title": "上代产品对比声明核验", "status": "completed", "sourceType": "url", "facts": 12, "deviations": 4, "confidence": 0.91, "steps": {"current": 31, "total": 31}, "budget": {"steps": 31, "stepsMax": 32, "tokens": 441200, "cost": 4.12, "costMax": 5.0, "elapsed": "18m03s", "wallMax": "20m"}, "updatedAt": "2026-09-15 22:10"}, {"id": "run_007", "projectId": "obscura-kitesurf", "title": "benchmark 口径复核", "status": "paused", "sourceType": "text", "facts": 5, "deviations": 1, "confidence": 0.63, "steps": {"current": 9, "total": 24}, "budget": {"steps": 9, "stepsMax": 24, "tokens": 98110, "cost": 0.74, "costMax": 5.0, "elapsed": "3m41s", "wallMax": "20m"}, "updatedAt": "2026-09-14 12:02"}, {"id": "run_006", "projectId": "citation-watch", "title": "转载稿材料声明核验", "status": "queued", "sourceType": "url", "facts": 0, "deviations": 0, "confidence": 0.0, "steps": {"current": 0, "total": 30}, "budget": {"steps": 0, "stepsMax": 30, "tokens": 0, "cost": 0.0, "costMax": 5.0, "elapsed": "—", "wallMax": "20m"}, "updatedAt": "2026-09-14 09:55"}], "nodes": [{"id": "origin", "kind": "origin", "role": "origin", "label": "obscura_kitesurf 资料 A", "subtitle": "营销落地页 · URL", "status": "verified", "confidence": 1.0, "note": "溯源起点：待核验的资料 A。", "evidence": []}, {"id": "goal", "kind": "goal", "role": "goal", "label": "停止条件 · 2024 原始 benchmark", "subtitle": "first-principles 判定边界", "status": "verified", "confidence": 1.0, "note": "goal 由第一性原理定义；不派生 boundary 即无法判定是否越界。", "evidence": []}, {"id": "f1", "kind": "fact", "role": "main-claim", "label": "该板比竞品快 40%", "subtitle": "核心抽象论点 · main-claim", "status": "flagged", "confidence": 0.72, "note": "抽象论点已拆解为 3 条子断言；数值口径待 verify 阶段裁定。", "evidence": []}, {"id": "f2", "kind": "fact", "role": "sub-claim", "label": "风洞 A 组测试为最优", "subtitle": "sub-claim", "status": "verified", "confidence": 0.88, "note": "已回链到 WindSports 原文。", "evidence": [{"id": "e1", "quote": "A 组在 30 节风速下取得最低阻力系数。", "sourceTitle": "WindSports 原文", "url": "https://windsports.example/review/obscura", "locator": "p.4 ¶2"}]}, {"id": "f3", "kind": "fact", "role": "sub-claim", "label": "比上代快 40%", "subtitle": "sub-claim", "status": "review", "confidence": 0.61, "note": "原文口径为风洞 12%，宣称 40% 存疑。", "evidence": []}, {"id": "f4", "kind": "fact", "role": "sub-claim", "label": "量产版材料与样机一致", "subtitle": "sub-claim", "status": "open", "confidence": 0.4, "note": "尚无来源，Intent i004 待探索。", "evidence": []}, {"id": "b1", "kind": "boundary", "role": "none", "label": "仅适用 2024 风洞 A 组", "subtitle": "goal 派生的边界事实", "status": "verified", "confidence": 0.9, "note": "越过该边界即停止判定。", "evidence": []}, {"id": "c1", "kind": "citation", "role": "none", "label": "引述 WindSports 评测", "subtitle": "citation", "status": "verified", "confidence": 0.86, "note": "A 中的转述环节。", "evidence": []}, {"id": "s1", "kind": "source", "role": "none", "label": "WindSports 原文（2024-03）", "subtitle": "一手来源", "status": "verified", "confidence": 0.93, "note": "可回链的一手材料。", "evidence": [{"id": "e2", "quote": "相较上一代，A 组阻力下降约 12%。", "sourceTitle": "WindSports 原文", "url": "https://windsports.example/review/obscura", "locator": "p.6 ¶1"}]}, {"id": "p1", "kind": "compare", "role": "none", "label": "compare（facts × sources × goal）", "subtitle": "比对引擎", "status": "verified", "confidence": 0.8, "note": "汇总 facts × sources × goal，产出 deviation。", "evidence": []}, {"id": "d1", "kind": "deviation", "role": "none", "label": "数值夸大：12% → 40%", "subtitle": "severity=high · confidence=0.83", "status": "flagged", "confidence": 0.83, "note": "宣称数值与一手来源口径不一致。", "evidence": [{"id": "e3", "quote": "相较上一代，A 组阻力下降约 12%。", "sourceTitle": "WindSports 原文", "url": "https://windsports.example/review/obscura", "locator": "p.6 ¶1"}]}, {"id": "d2", "kind": "deviation", "role": "none", "label": "省略样本量 n=12", "subtitle": "severity=medium · confidence=0.66", "status": "review", "confidence": 0.66, "note": "A 未提及样本量，影响置信度。", "evidence": [{"id": "e4", "quote": "样本量 n=12，测试周期 6 天。", "sourceTitle": "WindSports 原文", "url": "https://windsports.example/review/obscura", "locator": "p.4 ¶5"}]}, {"id": "i1", "kind": "intent", "role": "none", "label": "decompose：拆解核心论点", "subtitle": "status=done", "status": "verified", "confidence": 1.0, "note": "产出了 f2/f3/f4。", "evidence": []}, {"id": "i2", "kind": "intent", "role": "none", "label": "explore：为 f2 找一手来源", "subtitle": "status=done", "status": "verified", "confidence": 1.0, "note": "产出了 c1 → s1。", "evidence": []}, {"id": "i3", "kind": "intent", "role": "none", "label": "verify：比对 f3 与 s1", "subtitle": "status=claimed · worker-2", "status": "open", "confidence": 0.0, "note": "worker-2 认领中（心跳 12s 前）。", "evidence": []}, {"id": "i4", "kind": "intent", "role": "none", "label": "explore：验证 f4 材料一致性", "subtitle": "status=open", "status": "open", "confidence": 0.0, "note": "待认领。", "evidence": []}, {"id": "i5", "kind": "intent", "role": "none", "label": "verify：d1 口径歧义裁决", "subtitle": "status=awaiting_human · Gate B", "status": "review", "confidence": 0.0, "note": "置信度低/来源冲突，已发 REQUEST_HUMAN。", "evidence": []}, {"id": "i6", "kind": "intent", "role": "none", "label": "decompose：拆解竞品对比声明", "subtitle": "status=dropped", "status": "review", "confidence": 0.0, "note": "死胡同，保留以维持完整因果链。", "evidence": []}], "edges": [{"source": "origin", "target": "f1", "relation": "main-chain", "label": "Bootstrap"}, {"source": "f1", "target": "f2", "relation": "decomposes", "label": "decompose"}, {"source": "f1", "target": "f3", "relation": "decomposes", "label": "decompose"}, {"source": "f1", "target": "f4", "relation": "decomposes", "label": "decompose"}, {"source": "f2", "target": "c1", "relation": "main-chain", "label": "cite"}, {"source": "c1", "target": "s1", "relation": "main-chain", "label": "link"}, {"source": "f3", "target": "s1", "relation": "dependency", "label": "evidence"}, {"source": "f1", "target": "p1", "relation": "dependency", "label": "verify"}, {"source": "f3", "target": "p1", "relation": "dependency", "label": ""}, {"source": "p1", "target": "d1", "relation": "spawns", "label": "detect"}, {"source": "p1", "target": "d2", "relation": "spawns", "label": "detect"}, {"source": "d1", "target": "goal", "relation": "goal-derived", "label": "resolve"}, {"source": "d2", "target": "goal", "relation": "goal-derived", "label": ""}, {"source": "goal", "target": "b1", "relation": "goal-derived", "label": "boundary"}, {"source": "f1", "target": "i1", "relation": "spawns", "label": "intent"}, {"source": "f2", "target": "i2", "relation": "spawns", "label": "intent"}, {"source": "f3", "target": "i3", "relation": "spawns", "label": "intent"}, {"source": "f4", "target": "i4", "relation": "spawns", "label": "intent"}, {"source": "d1", "target": "i5", "relation": "spawns", "label": "intent"}, {"source": "f3", "target": "i6", "relation": "spawns", "label": "intent"}], "intents": [{"id": "i1", "type": "decompose", "status": "done", "from": "f1", "question": "把「快 40%」拆成可独立验证的子断言。", "producedFacts": ["f2", "f3", "f4"], "claimedBy": "worker-1"}, {"id": "i2", "type": "explore", "status": "done", "from": "f2", "question": "f2 的风洞结论是否有一手来源？", "producedFacts": ["c1", "s1"], "claimedBy": "worker-1"}, {"id": "i3", "type": "verify", "status": "claimed", "from": "f3", "question": "比对 f3 与 s1 的数值口径是否一致。", "producedFacts": [], "claimedBy": "worker-2"}, {"id": "i4", "type": "explore", "status": "open", "from": "f4", "question": "量产版材料是否与样机一致？", "producedFacts": [], "claimedBy": null}, {"id": "i5", "type": "verify", "status": "awaiting_human", "from": "d1", "question": "12% 与 40% 的口径冲突如何裁定？", "producedFacts": [], "claimedBy": "worker-2"}, {"id": "i6", "type": "decompose", "status": "dropped", "from": "f3", "question": "拆解竞品对比声明。", "producedFacts": [], "claimedBy": "worker-3"}], "hints": [{"id": "h1", "text": "优先核对原始 benchmark 的测试环境。", "author": "human", "createdAt": "00:31"}, {"id": "h2", "text": "注意 A 引用的图表是否被裁剪。", "author": "agent", "createdAt": "00:33"}], "deviations": [{"id": "d1", "title": "数值夸大：12% → 40%", "summary": "宣称数值与一手来源口径不一致。", "severity": "high", "confidence": 0.83, "nodeId": "d1"}, {"id": "d2", "title": "省略样本量 n=12", "summary": "A 未提及样本量，影响结论可信度。", "severity": "medium", "confidence": 0.66, "nodeId": "d2"}], "events": [{"at": "00:00:01", "event": "PROJECT", "message": "run 创建，初始化 origin / goal", "tone": "info"}, {"at": "00:00:12", "event": "REASON", "message": "Bootstrap：抽取核心抽象论点 f1", "tone": "info"}, {"at": "00:00:19", "event": "INTENT", "message": "新 Intent i1（decompose, from=f1）", "tone": "info"}, {"at": "00:00:25", "event": "EXECUTE", "message": "worker-1 认领 i1", "tone": "info"}, {"at": "00:01:03", "event": "CONCLUDE", "message": "i1 产出 f2 / f3 / f4", "tone": "success"}, {"at": "00:02:11", "event": "INTENT", "message": "新 Intent i2（explore, from=f2）", "tone": "info"}, {"at": "00:02:40", "event": "CONCLUDE", "message": "i2 产出 c1 → s1", "tone": "success"}, {"at": "00:03:02", "event": "EXECUTE", "message": "worker-2 认领 i3", "tone": "info"}, {"at": "00:04:18", "event": "HINT", "message": "human：优先核对原始 benchmark 的测试环境", "tone": "info"}, {"at": "00:05:27", "event": "REASON", "message": "p1 比对完成，检出 d1 / d2", "tone": "warning"}, {"at": "00:06:02", "event": "REQUEST_HUMAN", "message": "Gate B：d1 口径歧义，run → awaiting_human", "tone": "warning"}], "report": {"verdict": "部分偏差（1 项高置信度）", "summary": "核心抽象论点可拆解并回链；「快 40%」与一手来源 12% 口径不一致，另有一项样本量省略。", "findings": ["d1", "d2"], "sources": ["e2", "e3"]}};
+const KINDS = [
+  ["origin","origin"],["goal","goal"],["fact","fact"],["citation","citation"],
+  ["source","source"],["boundary","boundary"],["compare","compare"],["deviation","deviation"],["intent","intent"]
+];
+const REL = [["main-chain","主链"],["dependency","依赖"],["goal-derived","goal 派生"],["decomposes","拆解"],["spawns","派生 Intent"],["resolves","消解"]];
+const ISTAT = [["open","待认领"],["claimed","认领中"],["done","已完成"],["dropped","死胡同"],["awaiting_human","待人工"]];
+const STATUS_ZH = {queued:"排队",running:"执行中",paused:"已暂停",completed:"已完成",awaiting_human:"待人工"};
+
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+
+/* ---- theme ---- */
+(function(){
+  const KEY = "ow-theme-swiss-blueprint";
+  const saved = localStorage.getItem(KEY);
+  if (saved === "dark" || (saved === null && false)) document.documentElement.classList.add("dark");
+  window.__toggleTheme = function(){
+    const on = document.documentElement.classList.toggle("dark");
+    localStorage.setItem(KEY, on ? "dark" : "light");
+  };
+  window.__toast = function(msg){
+    const t = $("#toast"); if (!t) return;
+    t.textContent = msg; t.classList.add("on");
+    clearTimeout(t.__h); t.__h = setTimeout(() => t.classList.remove("on"), 1600);
+  };
+  document.addEventListener("DOMContentLoaded", () => { $("#themebtn").onclick = window.__toggleTheme; });
+})();
+
+/* ---- router ---- */
+const ROUTES = ["overview","project","newRun","console","settings"];
+function currentRoute(){
+  const h = location.hash.replace(/^#/, "") || "/";
+  if (h.indexOf("/settings") === 0) return "settings";
+  if (/\/runs\/new$/.test(h)) return "newRun";
+  if (/\/runs\//.test(h)) return "console";
+  if (/^\/projects\//.test(h)) return "project";
+  return "overview";
+}
+function crumbs(r){
+  const p = DATA.project.name;
+  const map = {
+    overview: "总览",
+    project: "Researches <i>/</i> <b>" + esc(p) + "</b>",
+    newRun: "Researches <i>/</i> " + esc(p) + " <i>/</i> <b>新建核验</b>",
+    console: "Researches <i>/</i> " + esc(p) + " <i>/</i> <b>run_009</b>",
+    settings: "设置",
+  };
+  return map[r] || "";
+}
+function render(){
+  const r = currentRoute();
+  $$("[data-route-view]").forEach(s => s.classList.toggle("on", s.dataset.routeView === r));
+  $$("#nav a").forEach(a => a.classList.toggle("on", a.dataset.route === r));
+  $("#crumbs").innerHTML = crumbs(r);
+  if (r !== "console") { const lb = $("#livebadge"); lb.className = "live"; lb.textContent = "LIVE"; }
+  if (r === "console") renderConsole();
+  else if (r === "overview") renderOverview();
+  else if (r === "project") renderProject();
+}
+
+/* ---- shared bits ---- */
+function statusTag(s){
+  const cls = {completed:"ok",awaiting_human:"warn",paused:"warn",running:"acc",claimed:"acc",done:"ok"}[s] || "";
+  return '<span class="tag ' + cls + '">' + esc(s) + "</span>";
+}
+function bar(v, max, cls){
+  const pct = Math.max(0, Math.min(100, max ? (v / max) * 100 : 0));
+  return '<div class="bar"><i class="' + (cls || "") + '" style="width:' + pct.toFixed(0) + '%"></i></div>';
+}
+function runRow(r){
+  return "<tr><td class='mono'>" + esc(r.id) + "</td><td>" + esc(r.title) + "</td><td>" + statusTag(r.status) +
+    "</td><td class='mono'>" + r.facts + "</td><td class='mono'>" + r.deviations +
+    "</td><td class='mono'>" + r.confidence.toFixed(2) + "</td><td class='mono'>" + r.steps.current + "/" + r.steps.total +
+    "</td>" + (r.budget ? "<td class='mono'>$" + r.budget.cost.toFixed(2) + "</td>" : "<td class='mono muted'>" + esc(r.updatedAt) + "</td>") + "</tr>";
+}
+function renderOverview(){
+  const pj = DATA.projects.map(p => '<div class="card"><div class="bar2"></div><h3>' + esc(p.name) + "</h3><p>" + esc(p.description) +
+    '</p><div class="meta"><span>' + p.runCount + " runs</span><span>updated " + esc(p.updatedAt) + "</span></div></div>").join("");
+  $("#ov-projects").innerHTML = pj;
+  $("#ov-cnt").textContent = DATA.projects.length + " 个项目 · " + DATA.runs.length + " 个近期 run";
+  $("#ov-runs").innerHTML = DATA.runs.map(runRow).join("");
+}
+function renderProject(){
+  const p = DATA.project;
+  $("#pj-name").textContent = p.name;
+  $("#pj-desc").textContent = p.description;
+  $("#pj-meta").innerHTML = "<span>" + p.runCount + " runs</span><span>updated " + esc(p.updatedAt) + "</span>";
+  $("#pj-runs").innerHTML = DATA.runs.map(runRow).join("");
+}
+
+/* ---- console ---- */
+function renderTasks(){
+  const cur = "run_009";
+  $("#task-cnt").textContent = DATA.runs.length + " total";
+  $("#task-list").innerHTML = DATA.runs.map(r => {
+    const dcls = r.status === "awaiting_human" ? "awaiting" : r.status;
+    return '<div class="row ' + (r.id === cur ? "sel" : "") + '" onclick="window.__toast&&window.__toast(\'' + r.id + ' · ' + r.status + '\')">' +
+      '<span class="dot ' + dcls + '"></span><span class="lbl"><b>' + esc(r.title) + "</b><em>" + esc(r.id) + "</em></span>" +
+      '<span class="st">' + STATUS_ZH[r.status] + "</span></div>";
+  }).join("");
+}
+function renderLegend(){
+  $("#lg-nodes").innerHTML = KINDS.map(k => '<div class="lg-row"><span class="lg-sw" style="background:rgb(var(--c-k-' + k[0] + '))"></span>' + k[1] + "</div>").join("");
+  $("#lg-edges").innerHTML = REL.map(r => '<div class="lg-row"><span class="lg-line ' + r[0] + '"></span>' + r[1] + "</div>").join("");
+  $("#lg-status").innerHTML = ISTAT.map(s => '<div class="lg-row"><span class="lg-sw" style="background:transparent;border:2px dashed rgb(var(--c-muted))' + (s[0] === "claimed" ? ";border-color:rgb(var(--c-accent))" : s[0] === "awaiting_human" ? ";border-color:rgb(var(--c-warn))" : "") + '"></span>' + s[1] + "</div>").join("");
+}
+function renderTables(){
+  const facts = DATA.nodes.filter(n => ["origin","goal","fact","citation","source","boundary","compare","deviation"].indexOf(n.kind) >= 0);
+  $("#tb-facts").innerHTML = facts.map(n => "<tr><td class='mono'>" + esc(n.id) + "</td><td>" + esc(n.kind) +
+    "</td><td class='mono muted'>" + esc(n.role) + "</td><td>" + esc(n.label) + "</td><td class='mono'>" + n.confidence.toFixed(2) +
+    "</td><td class='mono muted'>" + n.evidence.length + "</td></tr>").join("");
+  $("#tb-intents").innerHTML = DATA.intents.map(i => "<tr><td class='mono'>" + esc(i.id) + "</td><td><span class='tag acc'>" + esc(i.type) +
+    "</span></td><td>" + esc(i.question) + "</td><td>" + statusTag(i.status) + "</td><td class='mono muted'>" + esc(i.from) +
+    "</td><td class='mono muted'>" + esc(i.claimedBy || "—") + "</td></tr>").join("");
+  $("#tl-events").innerHTML = DATA.events.map(e => '<div class="tl-item"><span class="at">' + esc(e.at) + '</span><span class="ev ' + e.tone + '">' +
+    esc(e.event) + "</span><span>" + esc(e.message) + "</span></div>").join("");
+}
+function renderInspector(node){
+  const box = $("#inspector");
+  if (!node){
+    box.innerHTML = '<p class="muted" style="font-size:11.5px">点击 DAG 节点或 FACT/INTENT 行查看详情。</p>' + budgetHtml() + gateHtml();
+    return;
+  }
+  $("#insp-kind").textContent = node.kind;
+  let ev = "";
+  if (node.evidence && node.evidence.length){
+    ev = node.evidence.map(e => '<div class="quote">' + esc(e.quote) + '<span class="src">' + esc(e.sourceTitle) + " · " + esc(e.locator) + "<br>" + esc(e.url) + "</span></div>").join("");
+  }
+  box.innerHTML =
+    '<h3>' + esc(node.label) + "</h3>" +
+    '<div class="muted" style="font-size:11.5px">' + esc(node.subtitle || "") + "</div>" +
+    '<dl class="kv"><dt>id</dt><dd>' + esc(node.id) + "</dd><dt>kind</dt><dd>" + esc(node.kind) +
+    "</dd><dt>role</dt><dd>" + esc(node.role || "none") + "</dd><dt>status</dt><dd>" + esc(node.status) +
+    "</dd><dt>confidence</dt><dd>" + node.confidence.toFixed(2) + "</dd></dl>" +
+    (node.note ? '<div class="note">' + esc(node.note) + "</div>" : "") + ev +
+    budgetHtml() + gateHtml() +
+    '<div class="hint-pill" style="display:block;margin-top:8px">Hints · ' + DATA.hints.length + " 条</div>";
+}
+function budgetHtml(){
+  const r = DATA.runs[0], b = r.budget;
+  return '<div class="grid2"><div class="cell"><div class="l">facts</div><div class="v">' + r.facts +
+    '</div></div><div class="cell"><div class="l">deviations</div><div class="v">' + r.deviations + "</div></div></div>" +
+    '<div class="budget"><div class="lbl"><span>steps</span><span class="mono">' + b.steps + "/" + b.stepsMax + "</span></div>" + bar(b.steps, b.stepsMax) + "</div>" +
+    '<div class="budget"><div class="lbl"><span>cost</span><span class="mono">$' + b.cost.toFixed(2) + "/$" + b.costMax.toFixed(2) + "</span></div>" + bar(b.cost, b.costMax, "warn") + "</div>" +
+    '<div class="budget"><div class="lbl"><span>tokens</span><span class="mono">' + b.tokens.toLocaleString() + "</span></div>" + bar(b.tokens, 300000) + "</div>" +
+    '<div class="muted mono" style="font-size:10.5px">elapsed ' + esc(b.elapsed) + " / wall max " + esc(b.wallMax) + " · replay 可复现</div>";
+}
+function gateHtml(){
+  const r = DATA.runs[0];
+  if (r.status !== "awaiting_human") return "";
+  return '<div class="gate"><div class="h">Gate B · 歧义裁决</div>' +
+    "<p>" + esc("d1 数值口径冲突（12% vs 40%）置信度不足，需人工裁定。") + "</p>" +
+    '<div class="acts"><button class="btn sm primary" onclick="window.__toast&&window.__toast(\'approve → 写入 HUMAN_INPUT\')">approve</button>' +
+    '<button class="btn sm" onclick="window.__toast&&window.__toast(\'edit → 修正口径\')">edit</button>' +
+    '<button class="btn sm danger" onclick="window.__toast&&window.__toast(\'reject → 新 Intent\')">reject</button></div></div>';
+}
+function renderConsole(){
+  renderTasks(); renderLegend(); renderTables(); renderInspector(null);
+  $("#tab-cnt").textContent = DATA.nodes.length + " nodes · " + DATA.edges.length + " edges · " + DATA.events.length + " events";
+  const r = DATA.runs[0];
+  const lb = $("#livebadge");
+  lb.className = "live warn";
+  lb.textContent = "LIVE · " + DATA.intents.filter(i => i.status !== "done" && i.status !== "dropped").length + " open · awaiting human";
+  initGraph();
+}
+
+/* ---- tabs ---- */
+function bindTabs(){
+  $$("#tabs button").forEach(b => b.onclick = () => {
+    $$("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+    $$("[data-tabpane]").forEach(p => { p.style.display = p.dataset.tabpane === b.dataset.tab ? (b.dataset.tab === "dag" ? "flex" : "block") : "none"; });
+  });
+}
+
+/* ---- D3 graph ---- */
+let graphBuilt = false;
+function glyph(kind){
+  if (kind === "origin") return '<circle class="glyph" r="4" fill="none" stroke="currentColor" stroke-width="1.6"/>';
+  if (kind === "goal") return '<circle class="glyph" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle class="glyph" r="1.6"/>';
+  if (kind === "fact") return '<rect class="glyph" x="-3.6" y="-3.6" width="7.2" height="7.2"/>';
+  if (kind === "citation") return '<path class="glyph" d="M0,-4.4L4.4,3.6L-4.4,3.6Z"/>';
+  if (kind === "source") return '<path class="glyph" d="M0,-4.6L4.6,0L0,4.6L-4.6,0Z"/>';
+  if (kind === "boundary") return '<rect class="glyph" x="-3.6" y="-3.6" width="7.2" height="7.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 1.6"/>';
+  if (kind === "compare") return '<path class="glyph" d="M-4.4,-2.6L0,-4.6L4.4,-2.6L4.4,2.6L0,4.6L-4.4,2.6Z"/>';
+  if (kind === "deviation") return '<path class="glyph" d="M0,-4.6L4.6,4L-4.6,4Z"/>';
+  return '<text class="glyph" y="3.4" text-anchor="middle" font-size="10" font-weight="700">?</text>';
+}
+const XIDX = {origin:0, goal:6, fact:1, citation:3.4, source:4.6, boundary:1.8, compare:5.0, deviation:5.6, intent:0.6};
+const kindLabel = {origin:"ORIGIN",goal:"GOAL",fact:"FACT",citation:"CITATION",source:"SOURCE",boundary:"BOUNDARY",compare:"COMPARE",deviation:"DEVIATION",intent:"INTENT"};
+function initGraph(){
+  if (graphBuilt) return; graphBuilt = true;
+  const svg = d3.select("#dag");
+  const defs = svg.append("defs");
+  defs.append("marker").attr("id","arrow").attr("viewBox","0 0 10 10").attr("refX",9).attr("refY",5)
+    .attr("markerWidth",6).attr("markerHeight",6).attr("orient","auto-start-reverse")
+    .append("path").attr("d","M0,0L10,5L0,10z").attr("fill","rgb(var(--c-muted) / .6)");
+  const root = svg.append("g");
+  const zoom = d3.zoom().scaleExtent([0.35,3]).on("zoom", ev => root.attr("transform", ev.transform));
+  svg.call(zoom);
+  const W = $("#dag").clientWidth || 900, H = $("#dag").clientHeight || 620;
+  const nodes = DATA.nodes.map(d => Object.assign({}, d));
+  const edges = DATA.edges.map(d => Object.assign({}, d));
+  const wOf = n => Math.max(132, Math.min(204, (n.label.length * 6.4) + 50));
+  const hOf = n => (n.role === "main-claim" ? 50 : 44);
+  const link = root.append("g").selectAll("line").data(edges).join("line")
+    .attr("class", d => "gedge " + d.relation).attr("marker-end","url(#arrow)");
+  const ltext = root.append("g").selectAll("text").data(edges.filter(e => e.label)).join("text")
+    .attr("class","glabel").attr("text-anchor","middle").text(d => d.label);
+  const FROM = {}, NODEKIND = {};
+  DATA.intents.forEach(i => { FROM[i.id] = i.from; });
+  DATA.nodes.forEach(n => { NODEKIND[n.id] = n.kind; });
+  const xidx = d => d.kind === "intent" ? ((XIDX[NODEKIND[FROM[d.id]]] || 1) + 0.4) : (XIDX[d.kind] || 1);
+  const sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(edges).id(d => d.id).distance(d => d.relation === "spawns" ? 60 : 112).strength(0.35))
+    .force("charge", d3.forceManyBody().strength(-700))
+    .force("x", d3.forceX(d => 70 + xidx(d) * 168).strength(0.55))
+    .force("y", d3.forceY(d => H * (d.kind === "intent" ? 0.78 : 0.33)).strength(0.5))
+    .force("collide", d3.forceCollide(86));
+  const node = root.append("g").selectAll("g").data(nodes).join("g")
+    .attr("class", d => "gnode gkind-" + d.kind + " role-" + (d.role || "none") + (d.kind === "intent" ? " intent status-" + d.status : ""))
+    .call(d3.drag().on("start", ds).on("drag", dd).on("end", de));
+  node.append("rect").attr("class","bg").attr("rx",5).attr("ry",5)
+    .attr("x", d => -wOf(d)/2).attr("y", d => -hOf(d)/2).attr("width", wOf).attr("height", hOf);
+  node.append("rect").attr("class","bar").attr("x", d => -wOf(d)/2).attr("y", d => -hOf(d)/2)
+    .attr("width", 3).attr("height", hOf).attr("rx",1.5);
+  node.append("g").attr("class","glyphbox").attr("transform", d => "translate(" + (-wOf(d)/2 + 15) + "," + (-hOf(d)/2 + 14) + ")")
+    .html(d => glyph(d.kind));
+  node.append("text").attr("class","gk").attr("x", d => -wOf(d)/2 + 27).attr("y", d => -hOf(d)/2 + 17).text(d => kindLabel[d.kind]);
+  node.append("text").attr("class","gt").attr("x", d => -wOf(d)/2 + 10).attr("y", d => -hOf(d)/2 + 33).text(d => d.label.length > 26 ? d.label.slice(0,25) + "…" : d.label);
+  node.append("text").attr("class","gm").attr("x", d => -wOf(d)/2 + 10).attr("y", d => -hOf(d)/2 + hOf(d) - 6).text(d => d.subtitle ? (d.subtitle.length > 30 ? d.subtitle.slice(0,29) + "…" : d.subtitle) : "");
+  node.on("click", (ev, d) => { ev.stopPropagation(); select(d, node, link); });
+  node.on("mouseover", (ev, d) => { link.attr("class", l => "gedge " + l.relation + ((l.source.id === d.id || l.target.id === d.id) ? " hot" : "")); });
+  node.on("mouseout", () => link.attr("class", l => "gedge " + l.relation));
+  let sel = null;
+  function select(d, ns, ls){
+    sel = d.id;
+    ns.classed("sel", n => n.id === d.id);
+    ls.classed("hot", l => l.source.id === d.id || l.target.id === d.id);
+    renderInspector(d);
+  }
+  window.__selectNode = id => { const d = nodes.find(n => n.id === id); if (d) select(d, node, link); };
+  sim.on("tick", () => {
+    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    ltext.attr("x", d => (d.source.x + d.target.x)/2).attr("y", d => (d.source.y + d.target.y)/2 - 3);
+    node.attr("transform", d => "translate(" + d.x + "," + d.y + ")");
+  });
+  function fit(){
+    const b = root.node().getBBox();
+    const w = $("#dag").clientWidth || 900, h = $("#dag").clientHeight || 600;
+    if (!b.width || !b.height) return;
+    const k = Math.min((w - 64) / b.width, (h - 64) / b.height, 1.1);
+    const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+    svg.call(zoom.transform, d3.zoomIdentity.translate(w / 2 - k * cx, h / 2 - k * cy).scale(k));
+  }
+  sim.on("end", fit);
+  setTimeout(fit, 1400);
+  window.addEventListener("resize", () => { if (currentRoute() === "console") fit(); });
+  function ds(ev, d){ if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
+  function dd(ev, d){ d.fx = ev.x; d.fy = ev.y; }
+  function de(ev, d){ if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }
+}
+
+window.addEventListener("hashchange", render);
+document.addEventListener("DOMContentLoaded", () => {
+  bindTabs();
+  $$("#mode-row .auth_opt").forEach(o => o.onclick = () => { $$("#mode-row .auth_opt").forEach(x => x.classList.toggle("on", x === o)); });
+  render();
+});
+</script>
+</body>
+</html>
