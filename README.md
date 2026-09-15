@@ -18,15 +18,17 @@ make cloc        # src/originweave 逻辑代码行数
 | target | 作用 |
 |---|---|
 | `install` | `uv sync`，安装运行依赖 + dev 依赖（ruff / mypy / pytest）。 |
-| `run` | 起本地测试环境，离线优先（`LIVE=1` 触网）。 |
-| `demo` | 端到端跑样例（mock / 缓存）。 |
+| `run` | 起本地测试环境，离线优先（`LIVE=1` 触网）。**M0a 阶段为 stub，仅打印 not implemented。** |
+| `demo` | 端到端跑样例（mock / 缓存）。**M0a 阶段为 stub，仅打印 not implemented。** |
 | `test` | `pytest`。 |
 | `lint` | `ruff check` + `mypy`。 |
 | `fmt` | `ruff format`。 |
-| `ui` | 只起只读 UI 服务。 |
-| `replay` | `originweave replay <run-dir>`。 |
+| `ui` | 只起只读 UI 服务。**M0a 阶段为 stub，仅打印 not implemented。** |
+| `replay` | `originweave replay <run-dir>`。**M0a 阶段为 stub，仅打印 not implemented。** |
 | `cloc` | 仅统计 `src/originweave` 逻辑代码行数。 |
 | `clean` | 清缓存与临时 run。 |
+
+> `run` / `demo` / `ui` / `replay` 依赖的业务逻辑由后续 milestone 落地（见 `milestones.md`）。
 
 ## 结构
 

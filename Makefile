@@ -50,4 +50,5 @@ cloc: ## Count logical lines under src/originweave (excludes tests/fixtures/gene
 
 clean: ## Remove caches and temporary runs
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov build dist runs
+	rm -rf frontend/dist frontend/node_modules
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
