@@ -201,8 +201,8 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 - 容器镜像与 server 镜像分离：server 常驻，runtime 短命。
 - 安全边界：容器内可触网执行检索；server 仅负责编排与持久化。
 
-> **M1/M1c 的临时态**：容器化在 M3 落地。在此之前，引擎以**库层 + 进程内 Dispatcher**
-> 运行（M1 单测驱动；M1c 由 server 进程内调用以打通 proto/前端）。这是**显式、临时**的
+> **M1/M1c-1 的临时态**：容器化在 M3 落地。在此之前，引擎以**库层 + 进程内 Dispatcher**
+> 运行（M1 单测驱动；M1c-1 由 server 进程内调用以打通 proto/前端）。这是**显式、临时**的
 > 例外，红线 3 的正式满足在 M3；Dispatcher 接口必须与 M3 的容器 Dispatcher 一致，
 > 使 M3 只需替换执行后端而不改编排。
 
@@ -211,7 +211,7 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 1. **前端不拥有执行编排**：前端只调用 server API，不启动/调度任务。
 2. **server 拥有调度与运行时生命周期**：run 的排队、执行、停止、回收都归 server。
 3. **实际任务执行发生在临时容器**：任何执行路径都必须显式建模为 container-per-run，
-   不允许在 server 进程内直接跑重任务（M1/M1c 的进程内 Dispatcher 为第 6 节所述临时态，
+   不允许在 server 进程内直接跑重任务（M1/M1c-1 的进程内 Dispatcher 为第 6 节所述临时态，
    正式满足在 M3）。
 4. **provider/model/runtime 解耦**：替换检索 / prompt / model provider 不应改动编排代码。
 5. **黑板是唯一事实来源**：所有状态变更经事件写回黑板，不得旁路。

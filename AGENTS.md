@@ -23,7 +23,7 @@
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
   `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
 - **stub（打印 “not implemented yet”、返回 0）**：`ui` / `mcp` / `capabilities install-obscura`。
-  `make demo` / `run` / `ui` 依赖这些实现（`demo` 归 M4，`ui` 归 M1c）。
+  `make demo` / `run` / `ui` 依赖这些实现（`demo` 归 M4，`ui` 归 M1c-1）。
   `replay` 已接线，`examples/copilot_productivity/` 已含录制好的 `events.jsonl` 与
   `capabilities/**`（M0d），`make replay` 可离线复现 Board。
 - 样例 fixture 由 `scripts/build_sample_fixtures.py` 确定性生成（`--check` 校验）；
@@ -31,9 +31,9 @@
 - **默认离线**（`LIVE=0`）：capability 走录制回放，不触网。`exa` / `parallel` / `langfuse`
   以及 `model` 的**真实调用 M3 才落地**，现在调用会抛 `ProviderUnavailableError`。
 - `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出）：前端 TS 由
-  `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`），server Python 归 M1c（根 `buf.gen.yaml`）。
+  `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`），server Python 归 M1c-1（根 `buf.gen.yaml`）。
 - **前端（`frontend/`，M1b 脚手架）**：React + Vite + TS + React Flow + Connect；目前是
-  **无数据空壳**（不接 mock），真实数据接线与 DAG/Gate UI 归 **M1c**。`prompts/` 目录仍不存在。
+  **无数据空壳**（不接 mock），真实数据接线与 DAG/Gate UI 归 **M1c-2**。`prompts/` 目录仍不存在。
 
 ## 常用命令
 
@@ -89,6 +89,6 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   契约见 `blackboard-protocol.md` §2.6/§5；仅当 `Run.analysis` 含 `relation` 时启用。
 - `runs/` 与 `*.jsonl` 不入库（`.gitignore` 已就绪）；运行产物不要提交。
 - 布局：src layout，包在 `src/originweave/`；测试 `tests/`；样例 `examples/`；proto 契约
-  `proto/`（M1b）；前端 `frontend/`（M1b 脚手架、M1c 接线）；CI 在 `.github/workflows/ci.yml`
+  `proto/`（M1b）；前端 `frontend/`（M1b 脚手架、M1c-2 接线）；CI 在 `.github/workflows/ci.yml`
   （ruff → mypy → pytest 顺序）。
 - 当前 git 分支为 `develop`（`main` 为发布分支）；仓库无 CONTRIBUTING/PR 模板，未约定合并流程。

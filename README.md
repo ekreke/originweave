@@ -4,7 +4,7 @@
 
 > 当前处于 **M1b（前端脚手架）**：脚手架、配置/capability 层、事件日志与 `replay`，
 > `examples/copilot_productivity/` 离线样例，以及 `proto/` 契约与 `frontend/` 界面壳均已就绪
-> （前端为无数据空壳）。**CLI 无 `trace`**：起 run 走 server / proto API（M1c），`ui` / `mcp` 仍为占位。
+> （前端为无数据空壳）。**CLI 无 `trace`**：起 run 走 server / proto API（M1c-1），`ui` / `mcp` 仍为占位。
 > 版本与里程碑见 `milestones.md`。
 
 ## 快速开始
@@ -36,7 +36,7 @@ make frontend-build      # tsc -b && vite build
 | `run` | 起本地测试环境，离线优先（`LIVE=1` 触网）。**尚未实现（后续 milestone）。** |
 | `demo` | 端到端跑样例（server + 前端）。**归 M4，尚未接线。** |
 | `fixtures` | 重新生成样例的 `events.jsonl` 与 `capabilities/**`（确定性、产物入库）。 |
-| `proto` | 由 `proto/` 生成 server Python 代码（需 `buf` + `protoc-gen-connect-python`；M1c）。 |
+| `proto` | 由 `proto/` 生成 server Python 代码（需 `buf` + `protoc-gen-connect-python`；M1c-1）。 |
 | `frontend-install` / `frontend-gen` / `frontend-dev` / `frontend-build` / `frontend-lint` / `frontend-typecheck` / `frontend-test` | 前端（`frontend/`，M1b）：安装 / proto 生成 / dev / 构建 / lint / tsc / vitest。 |
 | `test` | `pytest`。 |
 | `lint` | `ruff check` + `mypy`。 |
@@ -57,7 +57,7 @@ tests/             # 单测
 scripts/           # 辅助脚本
 examples/          # 端到端样例（离线 fixtures）
 proto/             # Connect/buf proto 契约
-frontend/          # React + Vite + TS 界面（M1b 脚手架、M1c 接线）
+frontend/          # React + Vite + TS 界面（M1b 脚手架、M1c-2 接线）
 .github/workflows/ # CI
 ```
 

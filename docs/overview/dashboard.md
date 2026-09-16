@@ -2,7 +2,7 @@
 
 本文定义只读运行视图（dashboard）的**信息结构**与**冻结 proto 契约**。
 此前的前端 mock 构建（MSW handler）已随 `frontend/` 清理移除；**本文件与 `proto/` 即契约
-事实来源**，M1c 起前后端共同遵守。
+事实来源**，M1c-1 / M1c-2 起前后端共同遵守。
 
 ## 1. 定位
 
@@ -77,7 +77,7 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 
 代码生成：
 - **TypeScript（前端，M1b）**：`pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，本地 `protoc-gen-es`）→ `frontend/src/gen`
-- **Python（server，M1c）**：`buf generate proto`（根 `buf.gen.yaml`，`protoc_builtin: python` + `protoc-gen-connect-python`）→ `src/originweave/gen`
+- **Python（server，M1c-1）**：`buf generate proto`（根 `buf.gen.yaml`，`protoc_builtin: python` + `protoc-gen-connect-python`）→ `src/originweave/gen`
 
 生成物均为构建产物：不入库，且排除 ruff/mypy。
 
@@ -135,5 +135,5 @@ goal, max_steps?, max_wall?, max_cost?, auto?
 DAG（`desc → f1 核心结论 → c1 引用 → s1 原始来源 → p1 比对 → d1/d2 偏差`）。
 该产物已随 `frontend/` 清理移除，样例仅作契约与命名参考。
 
-约定：M1c 落地 server/proto 后，**同一批方法与字段**应由真实服务提供；契约若变更，
+约定：M1c-1 落地 server/proto 后，**同一批方法与字段**应由真实服务提供；契约若变更，
 先改本文件与 `proto/`，再同步前后端。
