@@ -23,13 +23,22 @@
 
 ```text
 Board {
+  status,               # queued | running | awaiting_human | paused | stopped | completed | failed
   origin:  Fact,        # 特殊 Fact，role=origin
   goal:    Fact,        # 特殊 Fact，role=goal
   facts:   Fact[],      # 已确认的发现
   intents: Intent[],    # 待探索的方向（粉笔问号）
-  hints:   Hint[]       # 经验提示（便利贴）
+  hints:   Hint[],      # 经验提示（便利贴）
+  edges:   Edge[],      # provenance 边
+  entities:  Entity[],  # 实体-关系图节点（analysis 含 relation 时）
+  relations: Relation[],# 实体-关系图边
+  decisions: HumanDecision[],   # HUMAN_INPUT 记录
+  waitingFor?: { gate, question },   # 仅 status = awaiting_human
+  verdict?: str         # COMPLETE 后的整体判定
 }
 ```
+
+> `Board` 是 `reduce(events) -> Board` 的产物（纯函数 fold）；事件是唯一事实来源。
 
 ### 2.1 Fact（已确认的发现）
 ```text
@@ -61,7 +70,7 @@ Evidence { id, quote, sourceTitle, url, locator }
 ```text
 Intent {
   id,                   # "i002"
-  type,                 # decompose | explore | verify
+  type,                 # decompose | explore | verify | extract | relate
   status,               # open | claimed | done | dropped | awaiting_human
   from,                 # 来源 Fact id，或 "origin"
   question,             # 探索声明（一句话，可审计）
@@ -76,6 +85,8 @@ Intent {
 - `decompose` — 把抽象论点拆解为可独立验证的子断言（claim → sub-claim）。
 - `explore` — 为某个 Fact 寻找引用/一手来源（→ citation / source）。
 - `verify` — 对事实与来源做比对、判定偏差（→ compare / deviation）。
+- `extract` — 从 A 抽取实体（→ `Entity`；`analysis` 含 relation 时）。
+- `relate` — 判别实体间关系（→ `Relation`；可带证据或标记 `inferred`）。
 
 ### 2.3 Hint（经验提示）
 ```text
@@ -83,6 +94,47 @@ Hint { id, text, author, createdAt }   # author: human | agent
 ```
 Hint 表达"经验提示"（如"优先核对原始 benchmark 的测试环境"），不参与 DAG 连通性，
 不改变事实，只影响 Reason 的取向。人类可随时写入。
+
+### 2.4 Edge（provenance 边）
+```text
+Edge { id, source, target, relation, note }
+     # relation: main-chain | dependency | goal-derived | decomposes | spawns | resolves
+```
+- **结构性边**由 reducer 自动推导：`spawns`（`intent.from → intent`）、
+  `resolves`（`intent → producedFacts`）、`decomposes`（`decompose` 型 intent 的
+  `from → producedFacts`）。
+- **语义性边**（`main-chain` / `dependency` / `goal-derived`）无法从字段推出，
+  必须由事件 `payload.edges` 显式携带。
+
+### 2.5 HumanDecision（人工裁决记录）
+```text
+HumanDecision { gate, decision, text, targets[], author:human, at }
+```
+由 `HUMAN_INPUT` 事件派生；与 `Hint` 不同，它是对 Gate 的**控制决策**，会解除
+`awaiting_human`。
+
+### 2.6 Entity / Relation（实体-关系图）
+```text
+Entity {
+  id, name, type,          # type: person | organization | product | location | event | other
+  aliases: string[],       # 同名/别名归并结果
+  status,                  # verified | open | flagged
+  confidence, note,
+  position, evidence: Evidence[]
+}
+
+Relation {
+  id, source, target,      # Entity id（有向）
+  type,                    # 关系本体（见 product-overview.md 第 4 节「关系本体」表）
+  label,                   # 原文表述
+  status,                  # verified | inferred | open | flagged
+  confidence, inferred,    # inferred=true 表示无来源推断（渲染虚线）
+  note, evidence: Evidence[]
+}
+```
+与溯源 DAG 并列的**第二张图**，共享同一 run 与事件溯源。实体按规范化名称归并
+（累积 `aliases`）；关系允许无来源推断，但必须 `status=inferred` + `inferred=true`
+并带置信度，渲染为虚线。本体只建正向类型，反向标签由渲染层派生。
 
 ## 3. 三层职责（对应架构红线）
 
@@ -111,7 +163,7 @@ Write Back → 把结论写回黑板（Fact + Evidence）
 |---|---|---|
 | `Bootstrap` | 初始阶段直接尝试解决整个问题：**抽取核心抽象论点 + 直接尝试判定** | Fact + 可能的 Complete |
 | `Reason` | 读图判断：完成了吗？下一步往哪走？ | Complete / 新 Intent(s) / 无操作 |
-| `Explore` | 认领一条 Intent，执行探索，产出结论 | 一个 Fact |
+| `Explore` | 认领一条 Intent，执行探索，产出结论 | 一个 Fact（`extract`/`relate` 时产出 Entity/Relation） |
 
 ### 4.3 一道题的完整生命周期
 ```text
@@ -128,31 +180,42 @@ Write Back → 把结论写回黑板（Fact + Evidence）
 
 关键：`extract / fetch / link / compare` **不是写死的阶段**，而是 Intent `type` 按需涌现。
 
+`--mode relation`（或 `both`）时，同一循环改为处理 `extract`（抽实体）与 `relate`
+（判关系）两类 Intent，产出写入 `entities` / `relations` 而非 `facts`；事件溯源、
+心跳释放、Stigmergy 与 Gate 机制不变。
+
 ## 5. 事件协议（冻结）
 
 run 的全部状态由 append-only 事件派生。事件取代此前的领域事件命名；领域含义
 （claim 抽取、比对等）降为 `Fact.kind/note`。
 
-| 事件 | 含义 | `payload` 关键字段 |
+| 事件 | 含义 | `payload` 内容 |
 |---|---|---|
-| `PROJECT` | run 创建，初始化 origin/goal | `originId`, `goalId` |
-| `INTENT` | 新 Intent 写入黑板 | `intentId`, `intentType`, `from`, `question` |
+| `PROJECT` | run 创建，初始化 origin/goal | `origin: Fact`, `goal: Fact` |
+| `INTENT` | 新 Intent 写入黑板 | `intent: Intent`, `edges: Edge[]`（语义边，可空） |
 | `EXECUTE` | Worker 认领并开始执行某 Intent | `intentId`, `worker`, `model` |
-| `CONCLUDE` | Worker 写下结论 Fact | `intentId`, `produced` |
+| `CONCLUDE` | Worker 写下结论 Fact | `intentId`, `facts: Fact[]`, `edges: Edge[]`（语义边） |
 | `REASON` | Reason 任务开始/结束 | `phase`(start\|end), `triggerFacts` |
 | `COMPLETE` | 判定到达 goal，run 结束 | `verdict` |
 | `HEARTBEAT` | 执行中 Intent 的心跳 | `intentId` |
 | `RELEASE` | 心跳超时，Intent 释放回 `open` | `intentId`, `reason` |
-| `HINT` | 注入 Hint | `hintId`, `author`(`human\|agent`) |
+| `HINT` | 注入 Hint | `hint: Hint`（含 `text`） |
 | `REQUEST_HUMAN` | 关键节点请求人工介入，run → `awaiting_human` | `gate`, `question` |
-| `HUMAN_INPUT` | 人类输入 | `gate`, `decision`, `author=human` |
+| `HUMAN_INPUT` | 人类输入 | `gate`, `decision`, `text?`, `targets?`, `author=human` |
+| `ENTITY` | 抽取/归并到实体 | `entity: Entity` |
+| `RELATION` | 判别出实体间关系 | `relation: Relation` |
+
+`PROJECT`/`INTENT`/`CONCLUDE`/`HINT`/`ENTITY`/`RELATION` 的 payload **携带完整对象**
+（而非仅 id），使 reducer 无需回查即可重建黑板；结构性边由 reducer 从 Intent 字段自动
+推导（见 §2.4），payload 只带语义边。
 
 ```text
 Event {
   id,
   at,
   type,      # PROJECT | INTENT | EXECUTE | CONCLUDE | REASON | COMPLETE |
-             # HEARTBEAT | RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT
+             # HEARTBEAT | RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT |
+             # ENTITY | RELATION
   message,   # 人类可读摘要（UI 时间线）
   tone,      # info | success | warning | danger
   payload    # 与 type 对应的结构化字段，见上表

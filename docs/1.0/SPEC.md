@@ -35,16 +35,16 @@
 
 目标：可配置、离线优先，外部能力以可替换 provider 接入。
 
-- [ ] `init` 生成默认配置（`originweave init`），含 `LIVE` 与 `auto`（HITL 默认人工介入）开关；落盘位置与格式在实现时确定并回写 `agent-design.md`
-- [ ] 配置加载与校验（`LIVE=0` 默认离线）
-- [ ] capability 抽象接口：`search` 与 `prompt` 两个 capability 的最小 Protocol
-- [ ] search provider 注册表：`exa` / `parallel`（可 import，未配置时给出清晰报错）
-- [ ] prompt provider 注册表：`local` / `langfuse`
-- [ ] 本地 cache / mock 后端：离线时返回录制内容（与 M0d 的 fixtures 对接）
-- [ ] capability 调用可录制：产出可重放的请求/响应记录
-- [ ] 单测：配置加载、provider 选择、离线/联机分支
+- [x] `init` 生成默认配置（`originweave init`），含 `LIVE` 与 `auto`（HITL 默认人工介入）开关；落盘位置与格式在实现时确定并回写 `agent-design.md`
+- [x] 配置加载与校验（`LIVE=0` 默认离线）
+- [x] capability 抽象接口：`search` 与 `prompt` 两个 capability 的最小 Protocol
+- [x] search provider 注册表：`exa` / `parallel`（可 import，未配置时给出清晰报错）
+- [x] prompt provider 注册表：`local` / `langfuse`
+- [x] 本地 cache / mock 后端：离线时返回录制内容（与 M0d 的 fixtures 对接）
+- [x] capability 调用可录制：产出可重放的请求/响应记录
+- [x] 单测：配置加载、provider 选择、离线/联机分支
 
-验收：`trace`/capability 调用在 `LIVE=0` 下不触网且有可预期的 mock 行为。
+验收：capability 层在 `LIVE=0` 下不触网且有可预期的 mock 行为（`trace` 循环属 M1，仍为 stub）。
 
 ---
 
@@ -52,12 +52,12 @@
 
 目标：一次 run 的全部状态由 append-only 黑板事件派生，且可只读重放。
 
-- [ ] run 目录布局落地（`events.jsonl`、`input/`、`sources/`、`capabilities/`、`report.md`）
-- [ ] 黑板协议事件 writer：`PROJECT/INTENT/EXECUTE/CONCLUDE/REASON/COMPLETE/HEARTBEAT/RELEASE/HINT/REQUEST_HUMAN/HUMAN_INPUT`（`Event{id,at,type,message,tone,payload}`）
-- [ ] 由事件重建黑板状态（`Board{origin,goal,facts,intents,hints}`）的 reducer
-- [ ] `originweave replay <run-dir>` 只读、不触网、复现含人工输入在内的结论（替换当前 stub）
-- [ ] 保留策略：`runs/` 与 `*.jsonl` 不入库（`.gitignore` 已就绪，需确认新布局覆盖）
-- [ ] 单测：写入 → 重放一致性（byte-level 或结构级）
+- [x] run 目录布局落地（`events.jsonl`、`input/`、`sources/`、`capabilities/`、`report.md`；其中 `report.md` 于 M2 生成）
+- [x] 黑板协议事件 writer：`PROJECT/INTENT/EXECUTE/CONCLUDE/REASON/COMPLETE/HEARTBEAT/RELEASE/HINT/REQUEST_HUMAN/HUMAN_INPUT`（`Event{id,at,type,message,tone,payload}`）
+- [x] 由事件重建黑板状态（`Board{origin,goal,facts,intents,hints}` + `edges/status/decisions/waitingFor/verdict`）的 reducer
+- [x] `originweave replay <run-dir>` 只读、不触网、复现含人工输入在内的结论（替换当前 stub）
+- [x] 保留策略：`runs/` 与 `*.jsonl` 不入库（`.gitignore` 已就绪，需确认新布局覆盖）
+- [x] 单测：写入 → 重放一致性（byte-level 或结构级）
 
 验收：同一 run dir 连续两次 `replay` 结果一致；replay 过程无网络访问。
 
@@ -158,3 +158,28 @@ Hint 注入、Gate C 行为均可观测。
 
 验收：从 UI 发起一次核验并看到由抽象论点拆解出的 DAG + 记分卡，可在 Gate 处人工介入；
 `replay` 复现同一结论；架构红线未被突破（前端不编排、server 拥有调度、执行在临时容器内）。
+
+---
+
+## M5 · 实体/组织关系图
+
+目标：从资料 A 抽取实体（人 / 组织 / 产品 / 地点等）并判别实体间关系，产出独立的
+**实体-关系图**（与溯源 DAG 并列、共享同一 run 与事件溯源）；关系用「预定义本体 +
+`other`」，允许无来源推断但必须显式标注。
+
+- [ ] 领域模型：`Entity` / `Relation` / `EntityGraph`（`src/originweave/model.py`），字段与 `product-overview.md` 第 4 节一致
+- [ ] 关系本体：预定义正向类型 + `other`（反向标签由渲染层派生，不建反向型）
+- [ ] 事件 `ENTITY` / `RELATION` writer + reducer 分支（纯 fold，追加式）
+- [ ] Intent 类型 `extract`（实体抽取）/ `relate`（关系判别），复用 OODA 与 Dispatcher
+- [ ] 实体消歧/合并：按规范化名称归并同名实体，`aliases` 累积（保证重放确定性）
+- [ ] `originweave trace <target> --mode relation|both`（替换 stub），离线可跑
+- [ ] run dir 产物 `entity-graph.json`（可由事件重建，非事实来源）+ `--json` 输出
+- [ ] 无来源推断标注：`Relation.status=inferred` + 置信度，渲染为虚线
+- [ ] server：`RunDetail.entityGraph` 与 `POST /api/runs` 的 `analysis` 字段
+- [ ] dashboard：`RELATIONS`（关系图，复用图组件）与 `ENTITIES`（实体表）页签
+- [ ] 单测：给定 fixture 输入产出确定性 `EntityGraph`（实体 / 关系 / 证据或 `inferred` 断言）
+- [ ] 关系样例 fixture（含多个组织，新增于 `examples/`）
+
+验收：`trace <target> --mode relation` 离线产出一张实体-关系图，每条关系或带
+`quote+url` 证据、或标记 `inferred`（虚线 + 置信度）；UI 的 `RELATIONS` 页签可查看并
+回链证据；`replay` 复现同一张图；架构红线未被突破。

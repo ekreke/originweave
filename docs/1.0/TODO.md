@@ -5,7 +5,7 @@
 
 ## 下一个任务
 
-- **M0c · 黑板事件日志与事件溯源**（见 `SPEC.md` 的 M0c 小节）
+- **M0d · 迁入 obscura_kitesurf spike**（见 `SPEC.md` 的 M0d 小节）
 
 ## 待确认决策
 
@@ -16,6 +16,9 @@
 - [ ] Docker runtime 的镜像来源与构建归属（server 仓内构建 vs 独立镜像）
 - [ ] HITL Gate 的默认范围与配置粒度（三个 Gate 是否可逐项开关；`auto` 是否支持 per-gate）
 - [ ] Worker 并发数 N 的默认值与上限（受预算 `--max-cost` 约束）
+- [ ] 关系图渲染库选型（M4 前端从零重建时统一选定，provenance DAG 与 RELATIONS 复用同一渲染器）
+- [ ] 关系样例 fixture 来源（新增含多个组织的样例 vs 复用 `obscura_kitesurf`）
+- [ ] 实体消歧粒度：同名/别名归一的规范化规则（大小写、全称/简称、去空白）
 
 ## 已知风险 / 缺口
 
@@ -29,10 +32,19 @@
 
 ## 已完成（近期）
 
+- **M5 契约入库**（未实现）：`milestones.md` 增 M5；`SPEC.md` 增 M5 小节；`overview/` 新增
+  `Entity`/`Relation`/`EntityGraph`、关系本体表、`ENTITY`/`RELATION` 事件、Intent `extract`/`relate`、
+  CLI `trace --mode`、`Run.analysis` 与 `dashboard` 的 `RELATIONS`/`ENTITIES` 页签、`RunDetail.entityGraph`；
+  `dashboard.md` 新建 run body 的 `mode` 改名 `sourceType` 并新增 `analysis`。
+
+- **M0c 黑板事件日志与事件溯源**：`model.py`（Board/Fact/Intent/Hint/Edge/HumanDecision）、
+  `events.py`（`Event` + 11 种 type）、`store.py`（run 目录 + append-only `events.jsonl`）、
+  `reduce.py`（纯函数 fold，自动推导 `spawns`/`resolves`/`decomposes`，语义边来自 payload）、
+  CLI 接线 `replay`（只读 stdout，`--json`）。63 测试通过，ruff + mypy strict 全绿。
 - **M0b 配置与 capability 层骨架**：`config.py`（`originweave.toml`，`tomllib` 读 / `tomli-w` 写，
   未知键报错，`ORIGINWEAVE_LIVE` 覆盖）、`capabilities/`（Protocol + exa/parallel/local/langfuse
   注册表 + 录制/回放 + `build_search`/`build_prompt` 离线-联机接线）、CLI 接线 `init` 与
-  `capabilities list`；33 测试通过，ruff + mypy strict 全绿。
+  `capabilities list`。
 - 引入**黑板架构**（参考 Cairn）：新增 `docs/overview/blackboard-protocol.md`，
   重写 `agent-design.md` 的循环为 OODA + Bootstrap/Reason/Explore；领域模型新增
   `Fact/Intent/Hint`、`origin/goal` 特殊 Fact、`Fact.role`、`Intent.type`，事件改为

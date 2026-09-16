@@ -1,8 +1,8 @@
 """Command line entry point.
 
-M0b wires ``init`` and ``capabilities list``. ``trace`` / ``ui`` / ``replay`` /
-``mcp`` and ``capabilities install-obscura`` remain placeholders until later
-milestones.
+M0b wires ``init`` and ``capabilities list``; M0c wires ``replay``.
+``trace`` / ``ui`` / ``mcp`` and ``capabilities install-obscura`` remain
+placeholders until later milestones.
 """
 
 from __future__ import annotations
@@ -15,6 +15,9 @@ from pathlib import Path
 
 from . import config
 from .capabilities import ENV_VARS, LANGFUSE_ENV_VARS, PROMPT_PROVIDERS, SEARCH_PROVIDERS
+from .model import ModelError
+from .reduce import ReduceError, reduce, render_canonical, render_summary
+from .store import RunStore
 
 FALLBACK_VERSION = "0.0.0"
 
@@ -51,6 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     replay = sub.add_parser("replay", help="replay a run directory")
     replay.add_argument("run_dir")
+    replay.add_argument("--json", action="store_true", help="emit the canonical board as JSON")
 
     capabilities = sub.add_parser("capabilities", help="inspect or install capabilities")
     capabilities.add_argument("action", choices=["list", "install-obscura"])
@@ -108,6 +112,20 @@ def _cmd_capabilities(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_replay(args: argparse.Namespace) -> int:
+    store = RunStore(Path(args.run_dir))
+    if not store.events_path.is_file():
+        print(f"no event log at {store.events_path}", file=sys.stderr)
+        return 1
+    try:
+        board = reduce(store.read_events())
+    except (ModelError, ReduceError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    sys.stdout.write(render_canonical(board) if args.json else render_summary(board))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -118,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_init(args)
     if args.command == "capabilities":
         return _cmd_capabilities(args)
+    if args.command == "replay":
+        return _cmd_replay(args)
     print(_NOT_IMPLEMENTED.format(command=args.command), file=sys.stderr)
     return 0
 

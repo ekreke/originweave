@@ -107,8 +107,9 @@ Observe → Orient → Decide → Act → Write Back → (回 Observe)
 | `Explore` | 认领一条 Intent，执行探索 | 一个 Fact |
 
 ### 3.3 Intent 三型（抽象论点适配）
-`decompose`（拆解抽象论点）/ `explore`（找来源）/ `verify`（比对判偏差）。
-三者不是写死的阶段，而是按需涌现的 Intent 类型。
+`decompose`（拆解抽象论点）/ `explore`（找来源）/ `verify`（比对判偏差），外加
+`extract`（抽实体）/ `relate`（判关系）用于实体-关系图。
+五者不是写死的阶段，而是按需涌现的 Intent 类型。
 
 ### 3.4 抽象论点落图
 ```text
@@ -117,6 +118,13 @@ f1 --Intent(decompose)--> f2/f3/f4 子断言(role=sub-claim)
 f2 --Intent(explore)--> c1 引用 --> s1 源头(Evidence: quote+url+locator)
 f1..f4 × s* --Intent(verify)--> p1 比对 --> d1/d2 偏差
 全部子断言回链且偏差判定完成 --> COMPLETE(记分卡)
+```
+
+`--mode relation|both` 时并行产出**实体-关系图**（`blackboard-protocol.md` §2.6）：
+```text
+origin(资料A) --Intent(extract)--> e1/e2/e3 实体(Entity: name+type+evidence?)
+e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
+实体按规范化名称归并(aliases) --> COMPLETE(关系图)
 ```
 
 细节（字段、边 relation、事件协议）见 [`blackboard-protocol.md`](blackboard-protocol.md)。
@@ -157,13 +165,21 @@ f1..f4 × s* --Intent(verify)--> p1 比对 --> d1/d2 偏差
 ├── input/              # 资料 A 快照（URL 抓取或文本）
 ├── sources/            # 来源快照（可回链的原文/存档）
 ├── capabilities/       # 录制的 capability 请求/响应（离线重放用）
+├── entity-graph.json   # 实体-关系图快照（可重建，非事实来源）
 └── report.md           # 最终产物（可再生成）
+```
+
+`events.jsonl` 每行一个 Event（`id` 单调 `e0001`、`at` 为 ISO-8601 UTC）：
+```json
+{"id":"e0001","at":"2026-09-16T00:00:00+00:00","type":"PROJECT","message":"","tone":"info","payload":{"origin":{...},"goal":{...}}}
+{"id":"e0002","at":"2026-09-16T00:00:01+00:00","type":"INTENT","message":"","tone":"info","payload":{"intent":{"id":"i001","type":"explore","from":"origin",...},"edges":[]}}
 ```
 
 约定：
 
 - `runs/` 与 `*.jsonl` 已加入 `.gitignore`，运行产物不入库。
-- `originweave replay <run-dir>` 必须**只读**，不触网，字节级复现结论。
+- `originweave replay <run-dir>` 必须**只读**：`reduce(events) -> Board` 后输出到 stdout
+  （默认摘要，`--json` 为 canonical Board），**不写任何文件**、不触网。
 - 事件是唯一事实来源；任何视图（UI、report）都可由事件重建。
 - 人类输入（`HUMAN_INPUT`）同样是事件，重放时一并复现。
 
