@@ -18,7 +18,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-dependencies = []
+dependencies = [
+    "tomli-w>=1.2.0",
+]
 
 [project.scripts]
 originweave = "originweave.cli:main"

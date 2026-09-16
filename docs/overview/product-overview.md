@@ -152,7 +152,9 @@ originweave init
 
 `--auto`：全自动，跳过 HITL Gate（默认人工介入）。
 
-实现状态：以上命令当前均为 stub（`src/originweave/cli.py`），逐个 milestone 落地。
+实现状态：`init`（生成 `originweave.toml`，已存在需 `--force`）与
+`capabilities list` 已实现（M0b）；`trace` / `ui` / `replay` / `mcp` /
+`capabilities install-obscura` 仍为占位，逐个 milestone 落地（`src/originweave/cli.py`）。
 
 ## 6. 非目标（Non-goals）
 

@@ -32,6 +32,63 @@
   （见 `Makefile` 的 `run` target 与 `ORIGINWEAVE_LIVE`）。
 - 能力调用需可录制（record）与重放（replay），录制产物即 M0d 的 fixtures。
 
+### 2.1 配置（`originweave.toml`）
+
+配置为**项目内 `originweave.toml`**（由 `originweave init` 生成；已存在时不覆盖，
+需 `--force`）。读取用标准库 `tomllib`，写入用 `tomli-w`。**命令行 flag 覆盖配置值**
+（该合并待 M1/M3 接线；M0b 仅提供配置加载与 provider 解析）。
+
+```toml
+# 下方注释仅为说明；`originweave init` 生成的文件是纯净数据，不含注释。
+[live]                 # false = 离线优先（默认）
+enabled = false
+[hitl]                 # false = 三个 Gate 默认人工介入
+auto = false
+[capability.search]
+provider = "exa"       # exa | parallel
+[capability.prompt]
+provider = "local"     # local | langfuse
+directory = "prompts"  # local provider 的模板目录
+[budget]
+max_steps = 60
+max_wall = "10m"
+max_cost = 2.0
+[run]
+dir = "runs"
+```
+
+- **未知键会报错**（`ConfigError`），避免 `max_step` 之类的拼写错误被静默忽略。
+- **离线/联机开关的三处写法与优先级**（都指同一个 `[live].enabled`）：
+  1. `originweave.toml` 的 `[live].enabled`（默认 `false`）
+  2. 环境变量 `ORIGINWEAVE_LIVE`（`1/true/yes/on` / `0/false/no/off`），**覆盖**配置文件
+  3. `trace --auto` 只控制 HITL，不改变联网开关
+  行为：`false`（离线）→ capability 走**录制回放**（`Cached*`，不触网）；
+  `true`（联机）→ 走**真实调用并录制**（`Recording*`）。解析入口为
+  `capabilities.build_search()` / `build_prompt()`。
+- **凭据只从环境变量读取**，不写入配置：`EXA_API_KEY` / `PARALLEL_API_KEY` /
+  `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
+- `local` prompt provider 从仓库 `prompts/` 目录读取 `*.txt` / `*.md` 模板。
+- 现状（M0b）：provider 注册表、离线/联机接线与凭据校验就绪；`exa`/`parallel`/`langfuse`
+  的**真实联网调用在 M3 落地**，当前调用会给出明确错误。
+
+### 2.2 录制与重放布局
+
+每次 capability 调用存成**一个 JSON 文件**，按请求哈希直查，保证离线重放确定且不触网：
+
+```text
+<run-dir>/capabilities/<provider>/<request_hash>.json
+{
+  "provider": "exa",
+  "op": "search",
+  "params": { "query": "...", "limit": 10 },
+  "response": [ ... ],
+  "recordedAt": "<ISO-8601 UTC>"
+}
+```
+
+`request_hash = sha256(canonical(provider + op + params))[:16]`（参数排序后哈希，
+与书写顺序无关）。`LIVE=1` 时边调用边写入；`LIVE=0` 时只读该目录，未命中即报错。
+
 ## 3. 黑板循环
 
 originweave 采用**黑板架构**：一块共享的 append-only 全局状态（黑板），

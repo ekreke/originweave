@@ -2,15 +2,19 @@
 
 给定资料 A，定位其核心说法的真实源头，判定 A 相对源头的偏差，输出**可审计的溯源 DAG + 偏差记分卡**（每项结论带来源 URL + 逐字引用，可回链、可重放）。
 
-> 当前处于 **M0a 脚手架**阶段：仓库结构、依赖管理、Makefile、CI 与 README 已就绪；业务逻辑由后续子任务填充。
+> 当前处于 **M0b（配置与 capability 层骨架）**阶段：脚手架已就绪，`originweave init`
+> 与 `originweave capabilities list` 可用；`trace` / `ui` / `replay` / `mcp` 仍为占位。
+> 版本与里程碑见 `milestones.md`，设计与契约见 `docs/overview/`。
 
 ## 快速开始
 
 ```bash
-make install     # uv sync，安装运行 + dev 依赖
-make lint        # ruff check + mypy
-make test        # pytest
-make cloc        # src/originweave 逻辑代码行数
+make install             # uv sync，安装运行 + dev 依赖
+uv run originweave init  # 生成项目内 originweave.toml（已存在需 --force）
+uv run originweave capabilities list   # 查看 provider 与凭据就绪情况
+make lint                # ruff check + mypy
+make test                # pytest
+make cloc                # src/originweave 逻辑代码行数
 ```
 
 ## Makefile
@@ -18,13 +22,13 @@ make cloc        # src/originweave 逻辑代码行数
 | target | 作用 |
 |---|---|
 | `install` | `uv sync`，安装运行依赖 + dev 依赖（ruff / mypy / pytest）。 |
-| `run` | 起本地测试环境，离线优先（`LIVE=1` 触网）。**M0a 阶段为 stub，仅打印 not implemented。** |
-| `demo` | 端到端跑样例（mock / 缓存）。**M0a 阶段为 stub，仅打印 not implemented。** |
+| `run` | 起本地测试环境，离线优先（`LIVE=1` 触网）。**尚未实现（后续 milestone）。** |
+| `demo` | 端到端跑样例（mock / 缓存）。**尚未实现（后续 milestone）。** |
 | `test` | `pytest`。 |
 | `lint` | `ruff check` + `mypy`。 |
 | `fmt` | `ruff format`。 |
-| `ui` | 只起只读 UI 服务。**M0a 阶段为 stub，仅打印 not implemented。** |
-| `replay` | `originweave replay <run-dir>`。**M0a 阶段为 stub，仅打印 not implemented。** |
+| `ui` | 只起只读 UI 服务。**尚未实现（后续 milestone）。** |
+| `replay` | `originweave replay <run-dir>`。**尚未实现（后续 milestone）。** |
 | `cloc` | 仅统计 `src/originweave` 逻辑代码行数。 |
 | `clean` | 清缓存与临时 run。 |
 
