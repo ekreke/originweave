@@ -1,0 +1,310 @@
+// originweave v1 API contract.
+//
+// Source of truth for field names and semantics:
+//   docs/overview/product-overview.md §4   (domain model)
+//   docs/overview/blackboard-protocol.md   (board elements, event protocol)
+//   docs/overview/dashboard.md §4          (proto service contract)
+//
+// Field names are snake_case; the default proto3 JSON name is lowerCamelCase,
+// which matches the frozen JSON field names (e.g. source_title -> sourceTitle).
+// String fields whose value set is frozen are documented inline and MUST keep
+// the exact literals listed in the docs.
+
+syntax = "proto3";
+
+package originweave.v1;
+
+import "google/protobuf/struct.proto";
+
+// ---------------------------------------------------------------- common
+
+message Vec2 {
+  double x = 1;
+  double y = 2;
+}
+
+message Evidence {
+  string id = 1;
+  string quote = 2; // verbatim quote from the source
+  string source_title = 3;
+  string url = 4;
+  string locator = 5;
+}
+
+message Edge {
+  string id = 1;
+  string source = 2; // Fact / Intent id
+  string target = 3;
+  // main-chain | dependency | goal-derived | decomposes | spawns | resolves
+  string relation = 4;
+  string note = 5;
+}
+
+// ---------------------------------------------------------------- project / run
+
+message Project {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  int32 run_count = 4;
+  string updated_at = 5;
+  string accent = 6;
+}
+
+message IntentCounts {
+  int32 open = 1;
+  int32 done = 2;
+}
+
+message Steps {
+  int32 current = 1;
+  int32 total = 2;
+}
+
+message Budget {
+  int64 tokens = 1;
+  double cost = 2;
+  string elapsed = 3;
+}
+
+message Run {
+  string id = 1; // "run_009"
+  string project_id = 2;
+  string title = 3;
+  string source_type = 4; // url | text
+  string analysis = 5;    // provenance | relation | both
+  // queued | running | awaiting_human | paused | stopped | completed | failed
+  string status = 6;
+  string goal = 7;
+  int32 facts = 8;
+  int32 deviations = 9;
+  int32 entities = 10;
+  int32 relations = 11;
+  IntentCounts intents = 12;
+  double confidence = 13;
+  Steps steps = 14;
+  Budget budget = 15;
+  string created_at = 16;
+  string updated_at = 17;
+}
+
+// ---------------------------------------------------------------- board elements
+
+message Fact {
+  string id = 1;
+  string label = 2;
+  string subtitle = 3;
+  // origin | goal | fact | citation | source | boundary | compare | deviation
+  string kind = 4;
+  string role = 5;   // main-claim | sub-claim | none
+  string status = 6; // verified | open | flagged | review
+  double confidence = 7;
+  string note = 8;
+  Vec2 position = 9;
+  repeated Evidence evidence = 10;
+}
+
+message Intent {
+  string id = 1;
+  // decompose | explore | verify | extract | relate
+  string type = 2;
+  // open | claimed | done | dropped | awaiting_human
+  string status = 3;
+  string from = 4; // source Fact id, or "origin"
+  string question = 5;
+  repeated string produced_facts = 6;
+  optional string claimed_by = 7;
+  optional string heartbeat_at = 8;
+  string created_at = 9;
+}
+
+message Hint {
+  string id = 1;
+  string text = 2;
+  string author = 3; // human | agent
+  string created_at = 4;
+}
+
+message WaitingFor {
+  string gate = 1;
+  string question = 2;
+}
+
+message HumanDecision {
+  string gate = 1;
+  string decision = 2;
+  string text = 3;
+  repeated string targets = 4;
+  string author = 5; // human
+  string at = 6;
+}
+
+message Entity {
+  string id = 1;
+  string name = 2;
+  // person | organization | product | location | event | other
+  string type = 3;
+  repeated string aliases = 4;
+  string status = 5; // verified | open | flagged
+  double confidence = 6;
+  string note = 7;
+  Vec2 position = 8;
+  repeated Evidence evidence = 9;
+}
+
+message Relation {
+  string id = 1;
+  string source = 2; // Entity id
+  string target = 3; // Entity id
+  string type = 4;   // relation ontology, see product-overview.md §4
+  string label = 5;
+  string status = 6; // verified | inferred | open | flagged
+  double confidence = 7;
+  bool inferred = 8;
+  string note = 9;
+  repeated Evidence evidence = 10;
+}
+
+message EntityGraph {
+  repeated Entity entities = 1;
+  repeated Relation relations = 2;
+}
+
+message Deviation {
+  string id = 1;
+  string title = 2;
+  string summary = 3;
+  string severity = 4; // high | medium | low
+  double confidence = 5;
+  string node_id = 6;
+}
+
+message Report {
+  string run_id = 1;
+  string verdict = 2;
+  string summary = 3;
+  repeated Deviation findings = 4;
+  repeated Evidence sources = 5;
+}
+
+// ---------------------------------------------------------------- events
+
+message Event {
+  string id = 1;
+  string at = 2;
+  // PROJECT | INTENT | EXECUTE | CONCLUDE | REASON | COMPLETE | HEARTBEAT |
+  // RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT | ENTITY | RELATION
+  string type = 3;
+  string message = 4;
+  string tone = 5; // info | success | warning | danger
+  // Per-type payload. Field names inside Struct MUST use the lowerCamelCase JSON
+  // names from blackboard-protocol.md §5 (e.g. sourceTitle, producedFacts).
+  google.protobuf.Struct payload = 6;
+}
+
+// ---------------------------------------------------------------- run detail
+
+message RunDetail {
+  Run run = 1;
+  Fact origin = 2;
+  Fact goal = 3;
+  repeated Fact facts = 4;
+  repeated Intent intents = 5;
+  repeated Hint hints = 6;
+  repeated Edge edges = 7;
+  optional EntityGraph entity_graph = 8;
+  repeated Deviation deviations = 9;
+  repeated Event events = 10;
+  optional WaitingFor waiting_for = 11;
+  optional Report report = 12;
+  repeated HumanDecision decisions = 13;
+}
+
+// ---------------------------------------------------------------- service
+
+service OriginweaveService {
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  rpc GetProject(GetProjectRequest) returns (GetProjectResponse);
+  rpc ListProjectRuns(ListProjectRunsRequest) returns (ListProjectRunsResponse);
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+  rpc GetRun(GetRunRequest) returns (GetRunResponse);
+  rpc CreateRun(CreateRunRequest) returns (CreateRunResponse);
+  rpc AddHint(AddHintRequest) returns (AddHintResponse);
+  rpc SubmitHumanInput(SubmitHumanInputRequest) returns (SubmitHumanInputResponse);
+}
+
+message ListProjectsRequest {}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+}
+
+message GetProjectRequest {
+  string project_id = 1;
+}
+
+message GetProjectResponse {
+  Project project = 1;
+}
+
+message ListProjectRunsRequest {
+  string project_id = 1;
+}
+
+message ListProjectRunsResponse {
+  repeated Run runs = 1;
+}
+
+message ListRunsRequest {
+  optional string project_id = 1;
+}
+
+message ListRunsResponse {
+  repeated Run runs = 1;
+}
+
+message GetRunRequest {
+  string run_id = 1;
+}
+
+message GetRunResponse {
+  RunDetail run_detail = 1;
+}
+
+message CreateRunRequest {
+  string project_id = 1;
+  optional string title = 2;
+  string source_type = 3; // url | text
+  optional string analysis = 4; // provenance | relation | both (default provenance)
+  string goal = 5;
+  // Budget overrides; unset fields fall back to the [budget] config.
+  optional int32 max_steps = 6;
+  optional string max_wall = 7; // duration string, e.g. "10m"
+  optional double max_cost = 8; // USD
+  optional bool auto = 9; // true = skip HITL gates
+}
+
+message CreateRunResponse {
+  Run run = 1;
+}
+
+message AddHintRequest {
+  string run_id = 1;
+  string text = 2; // author is fixed to "human"
+}
+
+message AddHintResponse {
+  Hint hint = 1;
+}
+
+message SubmitHumanInputRequest {
+  string run_id = 1;
+  string gate = 2;     // confirm-claim | arbitrate | review
+  string decision = 3; // approve | edit | reject
+  optional string text = 4;
+  repeated string targets = 5;
+}
+
+message SubmitHumanInputResponse {
+  Run run = 1;
+}

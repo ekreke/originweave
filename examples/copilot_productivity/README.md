@@ -59,6 +59,9 @@ examples/copilot_productivity/
 未命中即报 `CacheMissError`（不会触网）。清单同时由 `scripts/build_sample_fixtures.py`
 的 `SEARCH_QUERIES` / `PROMPT_NAMES` 暴露，供后续任务的查询与其对齐。
 
+> `model` capability（M1）的录制 `capabilities/model/*.json` **尚未加入**；M1 落地引擎时
+> 需为样例补录并在本节登记（见 `docs/1.0/TODO.md`）。
+
 ## 运行
 
 ```bash
@@ -66,7 +69,7 @@ make replay       # = originweave replay examples/copilot_productivity（只读�
 make fixtures     # 重新生成 events.jsonl + capabilities/**（应逐字节一致）
 ```
 
-`make demo`（`trace` 端到端）依赖 M1/M2 的编排实现；真实联网结果具时效性，因此**离线可复现
+`make demo`（server + 前端的端到端）依赖 M1b/M4；真实联网结果具时效性，因此**离线可复现
 的对象是这份录制快照**，而不是“重新联网再跑一遍”。
 
 ## 事件日志

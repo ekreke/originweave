@@ -10,8 +10,8 @@
   `milestones.md` 定位活跃版本，再读 `docs/1.0/SPEC.md` 确定下一个子任务。
 - **进度只写回 SPEC 的 checkbox**（由 `checkpoint` 阶段更新，且必须能指向仓库真实文件）。
   `milestones.md` 的表格只是索引，不要手改其状态。
-- 领域模型 / 黑板协议 / REST / CLI / run dir 布局是**冻结契约**，定义在
-  `docs/overview/*`；改代码时若动到契约，必须同步改对应文档。
+- 领域模型 / 黑板协议 / proto 契约 / CLI / run dir 布局是**冻结契约**，定义在
+  `docs/overview/*` 与 `proto/`；改代码时若动到契约，必须同步改对应文档。
 - 本仓库按 `dev-workflow` 流水线推进（progress-tracker → implement → testing-stage →
   checkpoint），每次迭代只推进一个子任务。
 
@@ -20,15 +20,18 @@
 - 已实现：`originweave init`（写 `originweave.toml`，已存在需 `--force`）、
   `originweave capabilities list`、配置加载/校验、capability 注册表与录制/回放，
   以及事件日志 → 黑板 reducer → `originweave replay <run-dir>`（只读、不触网）。
-- **stub（打印 “not implemented yet”、返回 0）**：`trace` / `ui` / `mcp` /
-  `capabilities install-obscura`。`make demo` / `run` / `ui` 依赖这些实现，现在只会命中 stub。
+- **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
+  `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
+- **stub（打印 “not implemented yet”、返回 0）**：`ui` / `mcp` / `capabilities install-obscura`。
+  `make demo` / `run` / `ui` 依赖这些实现（`demo` 归 M4，`ui` 归 M1b）。
   `replay` 已接线，`examples/copilot_productivity/` 已含录制好的 `events.jsonl` 与
   `capabilities/**`（M0d），`make replay` 可离线复现 Board。
 - 样例 fixture 由 `scripts/build_sample_fixtures.py` 确定性生成（`--check` 校验）；
   改样例事件/录制后要重跑该脚本。资料 A 与来源是**冻结快照**，重新联网结果具时效性。
 - **默认离线**（`LIVE=0`）：capability 走录制回放，不触网。`exa` / `parallel` / `langfuse`
-  的**真实联网调用 M3 才落地**，现在调用会抛 `ProviderUnavailableError`。
-- `prompts/` 目录与前端源码当前都不存在（前端 M4 从零重建）。
+  以及 `model` 的**真实调用 M3 才落地**，现在调用会抛 `ProviderUnavailableError`。
+- `proto/` 契约已定义（生成代码由 `buf generate` 产出、**不入库**）；前端源码与 `prompts/`
+  目录当前不存在（前端 M1b 从零重建）。
 
 ## 常用命令
 
@@ -49,15 +52,15 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
 2. server 拥有调度、持久化与运行时生命周期。
 3. 实际任务执行必须建模为 **container-per-run**，不得在 server 进程内直接跑重任务。
 4. 黑板是唯一事实来源，所有状态变更经事件写回，不得旁路。
-5. provider/model/runtime 解耦：替换检索或 prompt provider 不应改动编排代码。
+5. provider/model/runtime 解耦：替换检索 / prompt / model provider 不应改动编排代码。
 
 ## 约定与坑
 
 - **配置**：项目内 `originweave.toml`；`tomllib` 读、`tomli-w` 写。未知键直接抛
   `ConfigError`（防 `max_step` 之类拼写错误被静默忽略）。`CONFIG_FILENAME` 是**相对路径**，
   测试靠 `monkeypatch.chdir(tmp_path)`，不要在库代码里假设绝对路径。
-- **离线开关优先级**：`ORIGINWEAVE_LIVE` 环境变量覆盖 `[live].enabled`；`--auto` 只控制
-  HITL，不改变联网开关。
+- **离线开关优先级**：`ORIGINWEAVE_LIVE` 环境变量覆盖 `[live].enabled`；HITL 开关
+  （`[hitl].auto` 或 `CreateRunRequest.auto`）只控制 Gate，不改变联网开关（CLI `--auto` 已随 `trace` 移除）。
 - **凭据只从环境变量读**，不写入配置：`EXA_API_KEY` / `PARALLEL_API_KEY` /
   `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
 - **capability 录制布局**：`<run-dir>/capabilities/<provider>/<request_hash>.json`，
@@ -71,6 +74,7 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
 - **实体-关系图（M5）走同一 reducer**：事件 `ENTITY`/`RELATION`、模型 `Entity`/`Relation`/`EntityGraph`，
   契约见 `blackboard-protocol.md` §2.6/§5；仅当 `Run.analysis` 含 `relation` 时启用。
 - `runs/` 与 `*.jsonl` 不入库（`.gitignore` 已就绪）；运行产物不要提交。
-- 布局：src layout，包在 `src/originweave/`；测试 `tests/`；样例 `examples/`；CI 在
-  `.github/workflows/ci.yml`（ruff → mypy → pytest 顺序）。
+- 布局：src layout，包在 `src/originweave/`；测试 `tests/`；样例 `examples/`；proto 契约
+  `proto/`（M1b）；前端 `frontend/`（M1b 从零重建）；CI 在 `.github/workflows/ci.yml`
+  （ruff → mypy → pytest 顺序）。
 - 当前 git 分支为 `develop`（`main` 为发布分支）；仓库无 CONTRIBUTING/PR 模板，未约定合并流程。

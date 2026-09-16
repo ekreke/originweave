@@ -14,6 +14,9 @@ htmlcov/
 runs/
 *.jsonl
 !examples/**/*.jsonl
+# generated proto code (build artifact; run `buf generate proto`)
+src/originweave/gen/
+frontend/src/gen/
 .DS_Store
 .idea/
 .vscode/

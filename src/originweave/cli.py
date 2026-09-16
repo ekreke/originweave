@@ -1,8 +1,9 @@
 """Command line entry point.
 
-M0b wires ``init`` and ``capabilities list``; M0c wires ``replay``.
-``trace`` / ``ui`` / ``mcp`` and ``capabilities install-obscura`` remain
-placeholders until later milestones.
+``init`` / ``capabilities list`` (M0b) and ``replay`` (M0c) are wired.
+``ui`` / ``mcp`` and ``capabilities install-obscura`` remain placeholders until
+later milestones. A run is started through the server / proto API, not the CLI
+(see ``docs/overview/product-overview.md`` section 5).
 """
 
 from __future__ import annotations
@@ -35,18 +36,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="originweave", description=__doc__)
     parser.add_argument("--version", action="version", version=_version())
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
-
-    trace = sub.add_parser("trace", help="trace a document A back to its sources")
-    trace.add_argument("target", help="URL or file path of document A")
-    trace.add_argument("--out", default="report.md")
-    trace.add_argument("--run", default=None)
-    trace.add_argument("--provider", choices=["exa", "parallel"], default=None)
-    trace.add_argument("--prompt-provider", choices=["local", "langfuse"], default=None)
-    trace.add_argument("--max-steps", type=int, default=None)
-    trace.add_argument("--max-wall", default=None)
-    trace.add_argument("--max-cost", type=float, default=None)
-    trace.add_argument("--auto", action="store_true", help="full auto; skip HITL gates")
-    trace.add_argument("--json", action="store_true")
 
     ui = sub.add_parser("ui", help="serve the read-only run view")
     ui.add_argument("--run", default=None)

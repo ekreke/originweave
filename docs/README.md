@@ -8,13 +8,14 @@
 
 ```text
 milestones.md                     # 版本与里程碑索引（仓库根目录）
+proto/                            # Connect/buf proto 契约（字段源：overview/）
 docs/
 ├── README.md                     # 本文件：导航、术语表、更新规则
 ├── overview/                     # 跨版本稳定的设计与契约
 │   ├── product-overview.md       # 产品定义、领域模型、CLI 面、非目标
 │   ├── blackboard-protocol.md    # 黑板元素、事件协议、OODA 循环、HITL
 │   ├── agent-design.md           # capability / 运行时、预算、容器模型、架构红线
-│   └── dashboard.md              # 只读 UI 结构 + 冻结的 REST 契约
+│   └── dashboard.md              # 只读 UI 结构 + 冻结的 proto 契约
 ├── 1.0/
 │   ├── SPEC.md                   # 活跃版本的里程碑 checklist（进度真相）
 │   └── TODO.md                   # 滚动待办与已知阻塞
@@ -49,18 +50,19 @@ docs/
 | **deviation** | A 相对源头的偏差项（篡改、改写、省略、归因错误、时间错置等），带 `severity` 与 `confidence`。 |
 | **run** | 一次端到端核验的执行实例，产出 DAG + 偏差记分卡 + report；`analysis` 含 relation 时另含实体-关系图。 |
 | **run dir** | 一次 run 的持久化目录，含 append-only 事件日志与快照，可 `replay` 重放。 |
-| **capability** | 外部能力抽象（检索、prompt 获取等），provider 可替换。 |
+| **capability** | 外部能力抽象（检索 `search`、prompt `prompt`、模型 `model`），provider 可替换。 |
 | **verdict** | report 的整体判定（如"部分偏差"）。 |
 
 ## 更新规则
 
 1. **进度只写回 SPEC**：milestone 小节的 checkbox 是进度的唯一载体，由 `checkpoint`
    阶段更新；更新前必须确认仓库状态确实支持该勾选。
-2. **契约优先**：领域模型、黑板协议、REST 契约、CLI 面、run dir 布局属于 `overview/`，
-   变更需同步修改对应文档，不允许只改代码。
+2. **契约优先**：领域模型、黑板协议、proto 契约、CLI 面、run dir 布局属于 `overview/` 与
+   `proto/`，变更需同步修改对应文档，不允许只改代码。
 3. **架构红线**（任何改动都不得突破）：
    - 前端不拥有执行编排（frontend does not own execution orchestration）。
    - server 拥有调度、持久化与运行时生命周期。
    - 实际任务执行发生在**每次 run 一个临时容器**（container-per-run）中。
+   - provider/model/runtime 解耦（替换 provider 不改编排代码）。
    - 黑板是唯一事实来源，所有状态变更经事件写回，不得旁路。
 4. **文档语言**：中文，代码标识符与字段名保留英文。

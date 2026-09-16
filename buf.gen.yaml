@@ -1,0 +1,27 @@
+# Code generation for the v1 API.
+#
+# Toolchain (M1b; install once):
+#   python                     -> protoc/buf builtin (no extra binary)
+#   protoc-gen-connect-python  -> Connect Python plugin
+#   protoc-gen-es              -> `npm i -g @bufbuild/protoc-gen-es`
+#
+# Run from the repo root:
+#   buf generate proto
+#
+# Generated code is a build artifact: not committed, excluded from ruff/mypy
+# (see pyproject.toml) and from git (see .gitignore).
+
+version: v2
+
+inputs:
+  - directory: proto
+
+plugins:
+  - protoc_builtin: python
+    out: src/originweave/gen
+  - local: protoc-gen-connect-python
+    out: src/originweave/gen
+  - local: protoc-gen-es
+    out: frontend/src/gen
+    opt:
+      - target=ts

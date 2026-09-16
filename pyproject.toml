@@ -39,6 +39,7 @@ packages = ["src/originweave"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+extend-exclude = ["src/originweave/gen"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -50,6 +51,7 @@ known-first-party = ["originweave"]
 python_version = "3.11"
 strict = true
 files = ["src"]
+exclude = ["src/originweave/gen"]
 warn_unused_configs = true
 
 [tool.pytest.ini_options]

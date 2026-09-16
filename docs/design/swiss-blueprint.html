@@ -326,7 +326,7 @@ body{background-image:linear-gradient(rgb(var(--c-hairline)) 1px,transparent 1px
 <section class="route" data-route-view="newRun">
   <div class="wrap" style="max-width:760px">
     <div class="panel">
-      <div class="panel-hd"><h2>新建核验</h2><span class="cnt">POST /api/runs</span></div>
+      <div class="panel-hd"><h2>新建核验</h2><span class="cnt">CreateRun</span></div>
       <div style="padding:16px">
         <div class="note">提交后由 <b>server 排队与调度</b>；前端只发起请求，不做执行编排（架构红线）。</div>
         <div class="field">
@@ -341,7 +341,7 @@ body{background-image:linear-gradient(rgb(var(--c-hairline)) 1px,transparent 1px
         <div class="field"><label>maxSteps</label><input class="input" value="40"></div>
         <div class="field">
           <label>HITL 模式</label>
-          <div class="auth_row"><span class="auth_opt on">人工介入（Gate A/B/C）</span><span class="auth_opt">--auto 全自动</span></div>
+          <div class="auth_row"><span class="auth_opt on">人工介入（Gate A/B/C）</span><span class="auth_opt">auto 全自动</span></div>
         </div>
         <button class="btn primary" onclick="window.__toast&&window.__toast('已提交 → run status: queued')">提交核验</button>
       </div>

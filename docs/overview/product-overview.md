@@ -26,8 +26,8 @@ originweave 的四条硬性原则：
 
 | | 内容 |
 |---|---|
-| 输入 | 资料 A：网页 URL（`sourceType: url`）或纯文本（`sourceType: text`）；以及可选的 `goal`（停止条件/判定标准） |
-| 产物 | ① 溯源 DAG（Fact/Intent 节点 + 边 + 证据）② 偏差记分卡（deviation 列表）③ report（verdict + summary + findings + sources）④ append-only 事件时间线 ⑤ 实体-关系图（可选，`--analysis relation\|both`） |
+| 输入 | 资料 A：网页 URL（`sourceType: url`）或纯文本（`sourceType: text`）；以及 `goal`（停止条件/判定标准；`CreateRun` 必填） |
+| 产物 | ① 溯源 DAG（Fact/Intent 节点 + 边 + 证据）② 偏差记分卡（deviation 列表）③ report（verdict + summary + findings + sources）④ append-only 事件时间线 ⑤ 实体-关系图（可选，`CreateRun.analysis=relation\|both`） |
 
 ## 4. 领域模型（冻结契约）
 
@@ -58,7 +58,7 @@ Run {
 }
 ```
 `status` 语义：`awaiting_human` = HITL Gate 挂起（见 `blackboard-protocol.md` 第 7 节）；
-`paused` = 人工暂停（可恢复）；`stopped` = 预算（`--max-steps`/`--max-wall`/`--max-cost`）
+`paused` = 人工暂停（可恢复）；`stopped` = 预算（`max_steps`/`max_wall`/`max_cost`，`CreateRun` 字段）
 触顶或人工终止，已落盘中间态（不可续跑，需新建 run）；`failed` = 执行异常终止。
 `paused`/`stopped`/`failed` 的 run 在 `replay` 时仍可完整复现到终止点。
 
@@ -198,26 +198,27 @@ Event {
 
 ## 5. CLI 面（冻结）
 
+**起一次 run 的入口是 server / proto API**（见 `dashboard.md` §4 与 `proto/`），CLI 只提供
+本地工具：离线重放、只读视图、能力检查、MCP 暴露与配置初始化。
+
 ```text
 originweave --version
-
-originweave trace <target> [--out report.md] [--run <dir>]
-                 [--provider exa|parallel] [--prompt-provider local|langfuse]
-                 [--max-steps N] [--max-wall <dur>] [--max-cost <usd>]
-                 [--analysis provenance|relation|both] [--auto] [--json]
+originweave init
+originweave replay <run-dir> [--json]
 originweave ui   [--run <dir>] [--port 8765]
-originweave replay <run-dir>
 originweave capabilities list|install-obscura
 originweave mcp [--run <dir>]
-originweave init
 ```
 
-`--auto`：全自动，跳过 HITL Gate（默认人工介入）。
-`--analysis`：`provenance`（默认）只跑溯源 DAG；`relation` 只跑实体-关系图；`both` 两者都跑。
+说明：
+- **无 `trace`**：核验由 `OriginweaveService.CreateRun`（proto）发起，编排与调度归 server
+  （架构红线 2），不在 CLI 内跑重任务。
+- `analysis`（`provenance|relation|both`）、预算（`max_steps`/`max_wall`/`max_cost`）与
+  `auto`（跳过 HITL Gate）是 `CreateRunRequest` 的字段（或配置 `[hitl].auto`），不是 CLI flag。
 
 实现状态：`init`（生成 `originweave.toml`，已存在需 `--force`）、`capabilities list`
-（M0b）与 `replay`（M0c，只读重放）已实现；`trace` / `ui` / `mcp` /
-`capabilities install-obscura` 仍为占位，逐个 milestone 落地（`src/originweave/cli.py`）。
+（M0b）与 `replay`（M0c，只读重放）已实现；`ui` / `mcp` / `capabilities install-obscura`
+仍为占位，逐个 milestone 落地（`src/originweave/cli.py`）。
 
 ## 6. 非目标（Non-goals）
 

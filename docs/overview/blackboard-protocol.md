@@ -180,7 +180,7 @@ Write Back → 把结论写回黑板（Fact + Evidence）
 
 关键：`extract / fetch / link / compare` **不是写死的阶段**，而是 Intent `type` 按需涌现。
 
-`--analysis relation`（或 `both`）时，同一循环改为处理 `extract`（抽实体）与 `relate`
+`analysis` 含 `relation`（或 `both`）时，同一循环改为处理 `extract`（抽实体）与 `relate`
 （判关系）两类 Intent，产出写入 `entities` / `relations` 而非 `facts`；事件溯源、
 心跳释放、Stigmergy 与 Gate 机制不变。
 
@@ -238,7 +238,7 @@ Worker A 写入新 Fact  →  图变化（环境更新）  →  Worker B 下一�
 
 ## 7. 人机协同（HITL）
 
-默认**人工介入**；`--auto` 切换为全自动。两种模式并存：
+默认**人工介入**；`[hitl].auto` / `CreateRunRequest.auto` 切换为全自动。两种模式并存：
 
 | 模式 | 机制 | 阻塞 |
 |---|---|---|

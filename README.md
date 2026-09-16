@@ -2,9 +2,9 @@
 
 给定资料 A，定位其核心说法的真实源头，判定 A 相对源头的偏差，输出**可审计的溯源 DAG + 偏差记分卡**（每项结论带来源 URL + 逐字引用，可回链、可重放）。
 
-> 当前处于 **M0d（离线样例）**之后：脚手架、配置/capability 层、事件日志与 `replay`，
-> 以及 `examples/copilot_productivity/` 离线样例均已就绪；`trace` / `ui` / `mcp` 仍为占位。
-> 版本与里程碑见 `milestones.md`，设计与契约见 `docs/overview/`。
+> 当前处于 **M0d（离线样例）之后**：脚手架、配置/capability 层、事件日志与 `replay`，以及
+> `examples/copilot_productivity/` 离线样例均已就绪。**CLI 无 `trace`**：起 run 走 server /
+> proto API（`proto/`，M1b），`ui` / `mcp` 仍为占位。版本与里程碑见 `milestones.md`。
 
 ## 快速开始
 
@@ -24,8 +24,9 @@ make cloc                # src/originweave 逻辑代码行数
 |---|---|
 | `install` | `uv sync`，安装运行依赖 + dev 依赖（ruff / mypy / pytest）。 |
 | `run` | 起本地测试环境，离线优先（`LIVE=1` 触网）。**尚未实现（后续 milestone）。** |
-| `demo` | 端到端跑样例（写入 `runs/`）。**尚未实现（依赖 `trace`，后续 milestone）。** |
+| `demo` | 端到端跑样例（server + 前端）。**归 M4，尚未接线。** |
 | `fixtures` | 重新生成样例的 `events.jsonl` 与 `capabilities/**`（确定性、产物入库）。 |
+| `proto` | 由 `proto/` 生成 Python + TS 代码（需 `buf`；M1b）。 |
 | `test` | `pytest`。 |
 | `lint` | `ruff check` + `mypy`。 |
 | `fmt` | `ruff format`。 |
@@ -43,7 +44,9 @@ make cloc                # src/originweave 逻辑代码行数
 src/originweave/   # 包源码（src layout）
 tests/             # 单测
 scripts/           # 辅助脚本
-examples/          # 端到端样例
+examples/          # 端到端样例（离线 fixtures）
+proto/             # Connect/buf proto 契约（M1b）
+frontend/          # React + Vite 前端（M1b 从零重建）
 .github/workflows/ # CI
 ```
 

@@ -3,15 +3,14 @@ SHELL := /bin/bash
 UV ?= uv
 PKG ?= src/originweave
 # RUN_DIR is the committed sample fixture read by replay/ui.
-# RUNS_DIR is where trace writes runtime runs (gitignored) and never the sample.
+# RUNS_DIR is where the server writes runtime runs (gitignored), never the sample.
 RUN_DIR ?= examples/copilot_productivity
-DEMO_INPUT ?= examples/copilot_productivity/input/document.md
 RUNS_DIR ?= runs
 PORT ?= 8765
 LIVE ?= 0
 
 .DEFAULT_GOAL := help
-.PHONY: help install run demo fixtures test lint fmt ui replay cloc clean
+.PHONY: help install run demo fixtures proto test lint fmt ui replay cloc clean
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -23,11 +22,15 @@ install: ## Sync runtime + dev dependencies into .venv
 run: install ## Start the local test env (offline-first; LIVE=1 to hit the network)
 	ORIGINWEAVE_LIVE=$(LIVE) $(UV) run originweave ui --run $(RUN_DIR) --port $(PORT)
 
-demo: install ## Run the end-to-end sample (writes to runs/; trace lands in M1)
-	ORIGINWEAVE_LIVE=$(LIVE) $(UV) run originweave trace $(DEMO_INPUT) --run $(RUNS_DIR)/demo
+demo: ## End-to-end sample (server + frontend; lands in M4, not wired yet)
+	@echo "make demo lands in M4 (server + frontend; see docs/1.0/SPEC.md)."
+	@echo "Use 'make replay' for the offline sample."
 
 fixtures: ## Regenerate the committed sample fixtures (events.jsonl + capability recordings)
 	$(UV) run python scripts/build_sample_fixtures.py
+
+proto: ## Generate Python + TS from proto/ (requires buf + protoc-gen-connect-python/protoc-gen-es; M1b)
+	buf generate proto
 
 test: install ## Run the test suite
 	$(UV) run pytest

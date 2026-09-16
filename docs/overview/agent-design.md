@@ -24,13 +24,16 @@
 |---|---|---|
 | `search` | `exa` / `parallel` | 检索来源、定位一手材料 |
 | `prompt` | `local` / `langfuse` | 获取 prompt 模板（本地文件或 Langfuse） |
+| `model` | `local`（录制/回放，M1）；真实 provider 于 M3 | 执行 OODA 任务（Bootstrap/Reason/Explore），返回结构化结果（Fact/Intent） |
 
 要求：
 
 - provider/model/runtime 关注点解耦：编排逻辑不感知具体 provider 的 SDK。
 - 离线优先：`LIVE=0`（默认）时走本地 cache / mock，`LIVE=1` 才触网
   （见 `Makefile` 的 `run` target 与 `ORIGINWEAVE_LIVE`）。
-- 能力调用需可录制（record）与重放（replay），录制产物即 M0d 的 fixtures。
+- 能力调用需可录制（record）与重放（replay），录制产物即 M0d 的 fixtures。`model`
+  与 `search`/`prompt` 同构：`LIVE=0` 读 `capabilities/model/<hash>.json` 回放，
+  `LIVE=1` 调用真实模型并录制（真实调用 M3 落地，当前抛 `ProviderUnavailableError`）。
 
 ### 2.1 配置（`originweave.toml`）
 
@@ -49,6 +52,8 @@ provider = "exa"       # exa | parallel
 [capability.prompt]
 provider = "local"     # local | langfuse
 directory = "prompts"  # local provider 的模板目录
+[capability.model]
+provider = "local"     # local = 录制/回放；真实 provider 于 M3
 [budget]
 max_steps = 60
 max_wall = "10m"
@@ -57,19 +62,23 @@ max_cost = 2.0
 dir = "runs"
 ```
 
+> `[capability.model]` 与 `[budget]` 的其他字段是 M1 的契约；在 M1 落地前，config loader
+> 仍会以未知键拒绝 `[capability.model]`（见 `SPEC.md` M1）。
+
 - **未知键会报错**（`ConfigError`），避免 `max_step` 之类的拼写错误被静默忽略。
 - **离线/联机开关的三处写法与优先级**（都指同一个 `[live].enabled`）：
   1. `originweave.toml` 的 `[live].enabled`（默认 `false`）
   2. 环境变量 `ORIGINWEAVE_LIVE`（`1/true/yes/on` / `0/false/no/off`），**覆盖**配置文件
-  3. `trace --auto` 只控制 HITL，不改变联网开关
+  3. `[hitl].auto` / `CreateRunRequest.auto` 只控制 HITL，不改变联网开关
   行为：`false`（离线）→ capability 走**录制回放**（`Cached*`，不触网）；
   `true`（联机）→ 走**真实调用并录制**（`Recording*`）。解析入口为
   `capabilities.build_search()` / `build_prompt()`。
 - **凭据只从环境变量读取**，不写入配置：`EXA_API_KEY` / `PARALLEL_API_KEY` /
   `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
 - `local` prompt provider 从仓库 `prompts/` 目录读取 `*.txt` / `*.md` 模板。
-- 现状（M0b）：provider 注册表、离线/联机接线与凭据校验就绪；`exa`/`parallel`/`langfuse`
-  的**真实联网调用在 M3 落地**，当前调用会给出明确错误。
+- 现状：`search`/`prompt` 的 provider 注册表、离线/联机接线与凭据校验就绪（M0b）；
+  `model` capability 于 M1 引入（录制/回放）；三者的**真实联网/模型调用在 M3 落地**，
+  当前 `LIVE=1` 调用会给出明确错误。
 
 ### 2.2 录制与重放布局
 
@@ -120,7 +129,7 @@ f1..f4 × s* --Intent(verify)--> p1 比对 --> d1/d2 偏差
 全部子断言回链且偏差判定完成 --> COMPLETE(记分卡)
 ```
 
-`--analysis relation|both` 时并行产出**实体-关系图**（`blackboard-protocol.md` §2.6）：
+`analysis` 含 `relation`（或 `both`）时并行产出**实体-关系图**（`blackboard-protocol.md` §2.6）：
 ```text
 origin(资料A) --Intent(extract)--> e1/e2/e3 实体(Entity: name+type+evidence?)
 e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
@@ -139,13 +148,13 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 
 ## 4. 预算与停止条件
 
-`trace` 支持三重预算，任一触顶即停止并落盘当前中间态：
+`CreateRun` / 配置支持三重预算，任一触顶即停止并落盘当前中间态：
 
 | 参数 | 含义 |
 |---|---|
-| `--max-steps` | 最大步数（对应 Run.steps.total） |
-| `--max-wall` | 最大墙钟时间 |
-| `--max-cost` | 最大花费（对应 Run.budget.cost） |
+| `max_steps` | 最大步数（对应 Run.steps.total） |
+| `max_wall` | 最大墙钟时间 |
+| `max_cost` | 最大花费（对应 Run.budget.cost） |
 
 停止条件（`goal`）由第一性原理定义：日期边界、原始 benchmark、适用范围等。
 **注意**：originweave 的 goal 不是"到达某节点即结束"，而是"停止条件 + 偏差判定
@@ -192,13 +201,19 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 - 容器镜像与 server 镜像分离：server 常驻，runtime 短命。
 - 安全边界：容器内可触网执行检索；server 仅负责编排与持久化。
 
+> **M1/M1b 的临时态**：容器化在 M3 落地。在此之前，引擎以**库层 + 进程内 Dispatcher**
+> 运行（M1 单测驱动；M1b 由 server 进程内调用以打通 proto/前端）。这是**显式、临时**的
+> 例外，红线 3 的正式满足在 M3；Dispatcher 接口必须与 M3 的容器 Dispatcher 一致，
+> 使 M3 只需替换执行后端而不改编排。
+
 ## 7. 架构红线（不可突破）
 
 1. **前端不拥有执行编排**：前端只调用 server API，不启动/调度任务。
 2. **server 拥有调度与运行时生命周期**：run 的排队、执行、停止、回收都归 server。
 3. **实际任务执行发生在临时容器**：任何执行路径都必须显式建模为 container-per-run，
-   不允许在 server 进程内直接跑重任务。
-4. **provider/model/runtime 解耦**：替换检索或 prompt provider 不应改动编排代码。
+   不允许在 server 进程内直接跑重任务（M1/M1b 的进程内 Dispatcher 为第 6 节所述临时态，
+   正式满足在 M3）。
+4. **provider/model/runtime 解耦**：替换检索 / prompt / model provider 不应改动编排代码。
 5. **黑板是唯一事实来源**：所有状态变更经事件写回黑板，不得旁路。
 
 ## 8. MCP 暴露

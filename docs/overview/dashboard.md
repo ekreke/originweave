@@ -1,8 +1,8 @@
 # Dashboard · originweave
 
-本文定义只读运行视图（dashboard）的**信息结构**与**冻结 REST 契约**。
-此前的前端 mock 构建（MSW handler）已随 `frontend/` 清理移除；**本文件即契约事实来源**，
-M4 时前后端共同遵守。
+本文定义只读运行视图（dashboard）的**信息结构**与**冻结 proto 契约**。
+此前的前端 mock 构建（MSW handler）已随 `frontend/` 清理移除；**本文件与 `proto/` 即契约
+事实来源**，M1b 起前后端共同遵守。
 
 ## 1. 定位
 
@@ -63,87 +63,56 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 |---|---|
 | `/` | 总览（项目与 run 汇总） |
 | `/projects/:projectId` | 项目详情 + run 列表 |
-| `/projects/:projectId/runs/new` | 新建核验（提交后走 `POST /api/runs`） |
+| `/projects/:projectId/runs/new` | 新建核验（提交后走 `CreateRun`） |
 | `/settings` | 设置（主题等） |
 
-## 4. 冻结 REST 契约
+## 4. 冻结 proto 契约（Connect）
 
-所有响应为 JSON；错误沿用 `{ "message": ... }` + 合适状态码。
+前后端经 **Connect** 直连（同一份 `.proto`，浏览器无需代理）。契约文件：
+[`../../proto/originweave/v1/originweave.proto`](../../proto/originweave/v1/originweave.proto)；
+消息字段以 `product-overview.md` 第 4 节与 `blackboard-protocol.md` 为准。
 
-### 4.1 端点
+代码生成（M1b）：`buf generate proto`（配置 `buf.gen.yaml`）→ Python（server，`src/originweave/gen`）
+与 TypeScript（前端，`frontend/src/gen`）。生成物为构建产物，排除 ruff/mypy。
 
-| Method | Path | 说明 |
-|---|---|---|
-| GET | `/api/projects` | 列出全部项目 → `Project[]` |
-| GET | `/api/projects/:projectId` | 单个项目 → `Project`；不存在 → 404 |
-| GET | `/api/projects/:projectId/runs` | 某项目下 run 列表 → `Run[]` |
-| GET | `/api/runs` | 全部 run；支持 `?projectId=` 过滤 → `Run[]` |
-| GET | `/api/runs/:runId` | run 详情 → `RunDetail`；不存在 → 404 |
-| POST | `/api/runs` | 新建 run，body 见 4.3 → `Run` |
-| POST | `/api/runs/:runId/hints` | 写一条 Hint，body 见 4.4 → `Hint` |
-| POST | `/api/runs/:runId/human-input` | 提交 HITL Gate 决策，body 见 4.4 → 更新后的 `Run` |
+### 4.1 service 方法
+
+| RPC | 请求 | 响应 | 说明 |
+|---|---|---|---|
+| `ListProjects` | `ListProjectsRequest` | `ListProjectsResponse{projects}` | 列出全部项目 |
+| `GetProject` | `GetProjectRequest{project_id}` | `GetProjectResponse{project}` | 单个项目；不存在 → `NOT_FOUND` |
+| `ListProjectRuns` | `ListProjectRunsRequest{project_id}` | `ListProjectRunsResponse{runs}` | 某项目下 run 列表 |
+| `ListRuns` | `ListRunsRequest{project_id?}` | `ListRunsResponse{runs}` | 全部 run（可按项目过滤） |
+| `GetRun` | `GetRunRequest{run_id}` | `GetRunResponse{run_detail}` | run 详情；不存在 → `NOT_FOUND` |
+| `CreateRun` | `CreateRunRequest` | `CreateRunResponse{run}` | 新建 run（**起一次核验的唯一入口**） |
+| `AddHint` | `AddHintRequest{run_id, text}` | `AddHintResponse{hint}` | 写一条 Hint（`author=human`，非阻塞） |
+| `SubmitHumanInput` | `SubmitHumanInputRequest` | `SubmitHumanInputResponse{run}` | 提交 Gate 决策，解除 `awaiting_human` |
+
+错误沿用 Connect 的统一错误模型（`code` + `message`）。
 
 ### 4.2 RunDetail
 
-```text
-RunDetail {
-  run:        Run,          # 见 product-overview.md 第 4 节
-  origin:     Fact,         # 黑板起点
-  goal:       Fact,         # 黑板终点
-  facts:      Fact[],       # provenance DAG 事实节点
-  intents:    Intent[],     # 待探索/进行中/已完成
-  hints:      Hint[],
-  edges:      Edge[],
-  entityGraph?: {           # analysis 含 relation 时
-    entities:  Entity[],
-    relations: Relation[]
-  },
-  deviations: Deviation[],
-  events:     Event[],
-  waitingFor?: { gate, question },   # 仅当 run.status = awaiting_human
-  report: {
-    runId:    string,
-    verdict:  string,       # 如 "部分偏差"
-    summary:  string,
-    findings: Deviation[],
-    sources:  Evidence[]
-  }
-}
-```
+字段见 proto `RunDetail`：
+`run` · `origin` · `goal` · `facts[]` · `intents[]` · `hints[]` · `edges[]` ·
+`entity_graph?`（`analysis` 含 relation 时） · `deviations[]` · `events[]` ·
+`waiting_for?`（仅 `status = awaiting_human`） · `report?`（未产出时为空） ·
+`decisions[]`（`HUMAN_INPUT` 裁决记录）。
 
-### 4.3 POST /api/runs 请求体
+### 4.3 CreateRunRequest
 
 ```text
-{
-  projectId: string,
-  title?:    string,        # 缺省时按 sourceType 生成（"网页资料核验" / "文本主张核验"）
-  sourceType: "url" | "text",
-  analysis?: "provenance" | "relation" | "both",   # 默认 "provenance"
-  goal:      string,
-  maxSteps:  number,
-  auto?:     boolean        # true = 全自动，跳过 HITL Gate（默认 false）
-}
+project_id, title?, source_type(url|text), analysis?(provenance|relation|both),
+goal, max_steps?, max_wall?, max_cost?, auto?
 ```
-新建的 run 初始化为 `status: "queued"`、计数为 0、`budget` 归零。
+预算三项为**覆盖**，未给出时回落 `[budget]` 配置；`auto=true` 跳过 HITL Gate（默认 false）。
+新建 run 初始化为 `status: "queued"`、计数为 0、`budget` 归零。
 
-### 4.4 HITL 端点
+### 4.4 HITL 方法
 
-写 Hint（主动注入，非阻塞）：
-```text
-POST /api/runs/:runId/hints
-{ text: string }            # author 固定为 "human"
-```
+- `AddHint`（主动注入，非阻塞）：`{ run_id, text }`，`author` 固定为 `human`。
+- `SubmitHumanInput`（被动，解除 `awaiting_human`）：
+  `{ run_id, gate: confirm-claim|arbitrate|review, decision: approve|edit|reject, text?, targets? }`。
 
-提交 Gate 决策（被动，解除 `awaiting_human`）：
-```text
-POST /api/runs/:runId/human-input
-{
-  gate:      "confirm-claim" | "arbitrate" | "review",
-  decision:  "approve" | "edit" | "reject",
-  text?:     string,        # decision=edit 时的修正内容
-  targets?:  string[]       # 作用对象（Fact/Intent id）
-}
-```
 两者均落为 `HINT` / `HUMAN_INPUT` 事件，因此可审计、可重放。
 
 ### 4.5 领域类型
@@ -160,5 +129,5 @@ POST /api/runs/:runId/human-input
 DAG（`desc → f1 核心结论 → c1 引用 → s1 原始来源 → p1 比对 → d1/d2 偏差`）。
 该产物已随 `frontend/` 清理移除，样例仅作契约与命名参考。
 
-约定：M4 落地 server 后，**同一批端点与字段**应由真实 API 提供；契约若变更，
-先改本文件，再同步前后端。
+约定：M1b 落地 server/proto 后，**同一批方法与字段**应由真实服务提供；契约若变更，
+先改本文件与 `proto/`，再同步前后端。

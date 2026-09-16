@@ -8,7 +8,7 @@
 - 产品与领域模型 → [`../overview/product-overview.md`](../overview/product-overview.md)
 - 黑板协议与 HITL → [`../overview/blackboard-protocol.md`](../overview/blackboard-protocol.md)
 - 执行架构与架构红线 → [`../overview/agent-design.md`](../overview/agent-design.md)
-- UI 与 REST 契约 → [`../overview/dashboard.md`](../overview/dashboard.md)
+- UI 与 proto 契约 → [`../overview/dashboard.md`](../overview/dashboard.md)、[`../../proto/`](../../proto/)
 
 > 规则：勾选前必须能指向仓库中的真实文件；仓库状态优先于文档假设。
 
@@ -24,7 +24,7 @@
 - [x] 代码行数统计脚本 — `scripts/cloc.py` + `make cloc`
 - [x] CI — `.github/workflows/ci.yml`（ruff check + mypy + pytest）
 - [x] README — `README.md`（快速开始、Makefile、结构）
-- [x] CLI 骨架 — `src/originweave/cli.py`（`trace/ui/replay/capabilities/mcp/init` 全部声明，dispatch 到占位实现）
+- [x] CLI 骨架 — `src/originweave/cli.py`（`init/replay/capabilities/mcp/ui` 声明并 dispatch；起 run 走 server/proto，`trace` 已在契约重排中移除）
 - [x] smoke 测试 — `tests/test_smoke.py`（版本可用、parser 可构建、无命令打印帮助、子命令为 stub）
 
 验收：`make lint` / `make test` 通过；`originweave --help` 列出全部子命令。
@@ -44,7 +44,7 @@
 - [x] capability 调用可录制：产出可重放的请求/响应记录
 - [x] 单测：配置加载、provider 选择、离线/联机分支
 
-验收：capability 层在 `LIVE=0` 下不触网且有可预期的 mock 行为（`trace` 循环属 M1，仍为 stub）。
+验收：capability 层在 `LIVE=0` 下不触网且有可预期的 mock 行为（引擎循环属 M1，仍为 stub）。
 
 ---
 
@@ -78,33 +78,57 @@
 - [x] 文档：样例说明与预期偏差（`examples/copilot_productivity/README.md`）
 
 验收：全新环境 `originweave replay examples/copilot_productivity` 复现同一 Board、不触网；
-离线 capability 全部命中录制。`make demo` 的 DAG + 记分卡端到端（`trace`，数据具时效性）
+离线 capability 全部命中录制。`make demo` 的 DAG + 记分卡端到端（数据具时效性）
 归 M1/M2，端到端 `make demo` 由 M4 收口。
 
 ---
 
 ## M1 · 黑板与 Agent 循环
 
-目标：实现黑板块与 OODA 工作循环，从 A 抽取抽象论点并拆解、回链来源；
-支持多 Worker 并发与 HITL Gate A。
+目标：实现黑板块与 OODA 工作循环，从 A 抽取抽象论点并拆解、回链来源；支持多 Worker
+真线程并发与 HITL Gate A。引擎为**库层**（进程内 Dispatcher），**不经 CLI 暴露**；
+API 与交互由 M1b 落地。
 
-- [ ] 黑板模型：`Board{origin,goal,facts,intents,hints}` 与 `Fact`（kind/role/status/confidence/evidence）、`Intent`、`Hint`
-- [ ] `origin`/`goal` 特殊 Fact；`Fact.role = main-claim | sub-claim`
+- [x] 黑板模型：`Board{origin,goal,facts,intents,hints}` 与 `Fact`（kind/role/status/confidence/evidence）、`Intent`、`Hint` — `src/originweave/model.py`（M0c）
+- [x] `origin`/`goal` 特殊 Fact（`kind` 区分、`role=none`）；`Fact.role = main-claim | sub-claim` — `model.py`（M0c）
+- [x] DAG 组装与边 relation：`main-chain/dependency/goal-derived/decomposes/spawns/resolves` — `src/originweave/reduce.py`（M0c）
+- [ ] `model` capability：`ModelProvider` Protocol + 录制/回放（`capabilities/model.py`、`record.py`、`[capability.model]`；真实 provider 归 M3）
 - [ ] 三种任务指令：`Bootstrap` / `Reason` / `Explore`
-- [ ] Intent 三型：`decompose` / `explore` / `verify`（type 字段与调度分支）
+- [ ] Intent 三型调度分支：`decompose` / `explore` / `verify`
 - [ ] 抽象论点抽取与拆解（`Bootstrap` → `main-claim`；`Intent(decompose)` → `sub-claim`）
 - [ ] 来源回链：`citation` / `source` 节点与 `Evidence{quote,sourceTitle,url,locator}` 登记
-- [ ] DAG 组装与边 relation：`main-chain/dependency/goal-derived/decomposes/spawns/resolves`
-- [ ] 多 Worker 并发认领 Intent + 心跳/超时自动释放（`HEARTBEAT`/`RELEASE`）
+- [ ] 多 Worker 真线程并发认领 Intent + 心跳/超时自动释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按确定性顺序提交，保证 Board 确定
 - [ ] Stigmergy：新 Fact 触发新一轮 Reason（去重）
-- [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回
-- [ ] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`
-- [ ] `--auto` 全自动路径（跳过 Gate）
+- [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回（唯一写入者）
+- [ ] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1b）
+- [ ] 自动路径：`[hitl].auto=true`（或 M1b 的 `CreateRunRequest.auto`）跳过 Gate
 - [ ] 单测：给定 fixture 输入，产出确定性 Board/DAG（节点/边/证据断言）
 
 验收：对 `copilot_productivity` 样例，核心抽象论点被拆解为子断言，每条子断言可回溯到
 至少一条带 `quote+url` 的证据或标记为 `open`；≥2 Worker 并发时无 Intent 重复执行；
-Gate A 可挂起并可恢复。
+Gate A 可挂起并可恢复；同一 fixture 两次运行产出同一 Board。
+
+---
+
+## M1b · proto 契约与 server / 前端骨架
+
+目标：把冻结契约落地为 **Connect/buf proto 服务**，起 server 骨架与 React 前端脚手架，
+前后端经 proto 直连（无 mock）；HITL Gate 交互移到前端。server 进程内调用 M1 引擎
+（`agent-design.md` §6 的临时态；容器化归 M3）。
+
+- [ ] proto 契约 `proto/originweave/v1/*.proto`（消息取自 `product-overview.md` 第 4 节；服务见 `dashboard.md` §4）
+- [ ] `buf generate` 产出 Python（server）与 TS（前端）类型；生成物排除 ruff/mypy
+- [ ] server 骨架：只读 run 视图（projects / runs / run detail）+ `CreateRun` + `AddHint` + `SubmitHumanInput`
+- [ ] server 接线 M1 引擎（进程内 Dispatcher）；调度与持久化归 server（红线 2）
+- [ ] 前端脚手架：React + Vite + `@connectrpc/connect-web`，直连 proto、**不接 mock**
+- [ ] 三栏 Swiss/Blueprint 布局 + PROVENANCE DAG / FACTS / INTENTS / EVENTS 页签
+- [ ] DAG 渲染 Intent 节点（open/claimed/done/dropped/awaiting_human）与 `decomposes/spawns/resolves` 边
+- [ ] HITL UI：Gate A/B/C 面板、写 Hint、`awaiting_human` 提示、Replay 步进
+- [ ] `originweave ui` 起只读视图（替换 stub），默认读 run dir / server
+- [ ] 端到端（离线）：起 server → 建 run → 前端看到 DAG → Gate 处人工介入
+
+验收：从前端发起一次核验（样例、离线），看到由抽象论点拆解出的 DAG，可在 Gate 处人工介入；
+架构红线未被突破（前端不编排、server 拥有调度）。
 
 ---
 
@@ -116,12 +140,12 @@ Gate A 可挂起并可恢复。
 - [ ] deviation 分类（篡改 / 改写 / 省略 / 归因错误 / 时间错置等）与 `deviation` 节点
 - [ ] 每项 deviation 带 `severity(high|medium|low)` 与 `confidence`
 - [ ] goal 重定义生效：抽象论点全部拆解 + 回链 + 偏差判定完成才 `COMPLETE`
-- [ ] 整体 `verdict` 与 `Report{summary,findings,sources}` 生成（`report.md` / `--json`）
+- [ ] 整体 `verdict` 与 `Report{summary,findings,sources}` 生成（run dir `report.md`）
 - [ ] **Gate B（歧义裁决）**：置信度低/来源冲突时发起 `REQUEST_HUMAN`
 - [ ] 单测：对样例给出预期偏差集合与阈值行为
 
-验收：`trace --out report.md` 产出含 verdict、逐条 deviation 与来源清单的报告；
-Gate B 可对冲突来源人工裁决并继续。
+验收：run dir 产出 `report.md`（含 verdict、逐条 deviation 与来源清单），并经 server
+`RunDetail.report` 暴露；Gate B 可对冲突来源人工裁决并继续。
 
 ---
 
@@ -132,12 +156,13 @@ Gate B 可对冲突来源人工裁决并继续。
 
 - [ ] Docker runtime：每次 run 一个临时容器，内含 N≥1 Worker，挂载 run dir，run 结束销毁
 - [ ] server 侧容器生命周期管理（创建/监控/回收）与 Dispatcher 接入（协议唯一写入者）
-- [ ] 预算执行：`--max-steps` / `--max-wall` / `--max-cost` 触顶即停并落盘中间态
+- [ ] 预算执行：`max_steps` / `max_wall` / `max_cost` 触顶即停并落盘中间态
 - [ ] 可控性：随时停止/恢复，状态完整保留；Intent 心跳超时释放
 - [ ] 异步 Hint 注入（`author=human|agent`）不阻塞 run
 - [ ] **Gate C（最终审阅）**：记分卡产出前人工确认，可要求重查（新生 Intent）
 - [ ] `search` provider 真实接入：`exa` / `parallel`
 - [ ] `prompt` provider 真实接入：`local` / `langfuse`
+- [ ] `model` provider 真实接入（M1 的录制/回放之后，落地真实调用）
 - [ ] `originweave capabilities list|install-obscura` 实现
 - [ ] `originweave mcp` 暴露 capability / 只读 run 视图（不承担调度）
 - [ ] 集成测试：离线重放路径 + 至少一条真实 provider 冒烟（受凭据约束时可跳过）
@@ -147,19 +172,13 @@ Hint 注入、Gate C 行为均可观测。
 
 ---
 
-## M4 · server API 与 dashboard
+## M4 · 端到端、Deployment 与文档回归
 
-目标：冻结契约落地为真实 server API；前端源码入库并构建；端到端闭环。
+目标：端到端闭环、server 容器化部署，以及文档/契约一致性回归（server 与前端已在 M1b 落地）。
 
-- [ ] server 提供 `dashboard.md` 第 4.1 节的 8 个端点（含 `/hints` 与 `/human-input`），字段与领域模型一致
-- [ ] `originweave ui` 起只读视图（替换 stub），默认读 run dir
+- [ ] 端到端 `make demo`（离线）：资料 A → 抽象论点 → DAG → 记分卡 → 前端可见 → `replay` 可复现
 - [ ] server 运行于 Docker（Deployment 层）
-- [ ] 前端源码入库（仓库中当前无前端源码；需从零纳入版本控制与构建流程）
-- [ ] 前端不接 mock，直连真实 `/api/*`（契约以 `dashboard.md` 为准）
-- [ ] DAG 渲染 Intent 节点（open/claimed/done/dropped/awaiting_human）与 `decomposes/spawns/resolves` 边
-- [ ] HITL UI：Gate A/B/C 交互、写 Hint、`awaiting_human` 提示、Replay 步进、Snapshot、Log
-- [ ] 端到端 `make demo`：A → 抽象论点 → DAG → 记分卡 → UI 可见 → `replay` 可复现
-- [ ] 文档一致性回归：`overview/` 与本文件术语/契约无漂移
+- [ ] 文档一致性回归：`overview/`、`proto/` 与本文件术语/契约无漂移
 
 验收：从 UI 发起一次核验并看到由抽象论点拆解出的 DAG + 记分卡，可在 Gate 处人工介入；
 `replay` 复现同一结论；架构红线未被突破（前端不编排、server 拥有调度、执行在临时容器内）。
@@ -177,14 +196,14 @@ Hint 注入、Gate C 行为均可观测。
 - [ ] 事件 `ENTITY` / `RELATION` writer + reducer 分支（纯 fold，追加式）
 - [ ] Intent 类型 `extract`（实体抽取）/ `relate`（关系判别），复用 OODA 与 Dispatcher
 - [ ] 实体消歧/合并：按规范化名称归并同名实体，`aliases` 累积（保证重放确定性）
-- [ ] `originweave trace <target> --analysis relation|both`（替换 stub），离线可跑
-- [ ] run dir 产物 `entity-graph.json`（可由事件重建，非事实来源）+ `--json` 输出
+- [ ] server `CreateRun(analysis=relation|both)` 触发关系图抽取，离线可跑
+- [ ] run dir 产物 `entity-graph.json`（可由事件重建，非事实来源）
 - [ ] 无来源推断标注：`Relation.status=inferred` + 置信度，渲染为虚线
-- [ ] server：`RunDetail.entityGraph` 与 `POST /api/runs` 的 `analysis` 字段
+- [ ] server：`RunDetail.entity_graph` 与 `CreateRunRequest.analysis`（proto）
 - [ ] dashboard：`RELATIONS`（关系图，复用图组件）与 `ENTITIES`（实体表）页签
 - [ ] 单测：给定 fixture 输入产出确定性 `EntityGraph`（实体 / 关系 / 证据或 `inferred` 断言）
 - [ ] 关系样例 fixture（含多个组织，新增于 `examples/`）
 
-验收：`trace <target> --analysis relation` 离线产出一张实体-关系图，每条关系或带
+验收：`CreateRun(analysis=relation)` 离线产出一张实体-关系图，每条关系或带
 `quote+url` 证据、或标记 `inferred`（虚线 + 置信度）；UI 的 `RELATIONS` 页签可查看并
 回链证据；`replay` 复现同一张图；架构红线未被突破。
