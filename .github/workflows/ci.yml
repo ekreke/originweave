@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
+  python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,10 +26,62 @@ jobs:
         run: uv sync --frozen || uv sync
 
       - name: Lint
-        run: uv run ruff check src tests
+        run: uv run ruff check src tests scripts
 
       - name: Typecheck
         run: uv run mypy src
 
       - name: Test
         run: uv run pytest
+
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: "1.72.0"
+
+      - name: Lint proto
+        run: buf lint proto
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.21.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: "1.72.0"
+
+      - name: Install
+        run: pnpm --dir frontend install --frozen-lockfile
+
+      - name: Generate proto types
+        run: pnpm --dir frontend gen
+
+      - name: Typecheck
+        run: pnpm --dir frontend typecheck
+
+      - name: Lint
+        run: pnpm --dir frontend lint
+
+      - name: Format check
+        run: pnpm --dir frontend format:check
+
+      - name: Test
+        run: pnpm --dir frontend test
+
+      - name: Build
+        run: pnpm --dir frontend build

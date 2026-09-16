@@ -2,7 +2,7 @@
 
 本文定义只读运行视图（dashboard）的**信息结构**与**冻结 proto 契约**。
 此前的前端 mock 构建（MSW handler）已随 `frontend/` 清理移除；**本文件与 `proto/` 即契约
-事实来源**，M1b 起前后端共同遵守。
+事实来源**，M1c 起前后端共同遵守。
 
 ## 1. 定位
 
@@ -12,7 +12,9 @@ Dashboard 是 run 的**审阅台**：查看溯源 DAG、事实/意图表、事�
 
 ## 2. 视觉与布局
 
-选定风格：**Swiss / Blueprint（瑞士蓝图）**，布局为三栏控制台。
+选定风格：**Swiss / Blueprint（瑞士蓝图）**，布局为三栏控制台。图渲染用 **React Flow**
+（`@xyflow/react`）；`docs/design/swiss-blueprint.html` 仅作视觉 tokens / 布局参考
+（该稿用 d3，不作为实现）。
 
 设计取向：**工程制图般的秩序感**——浅色网格纸底 + 蓝图蓝强调，把颜色预算留给语义。
 `Fact` 按 `kind` 用**形状 + 颜色双编码**（origin/goal 圆环、fact 方块、citation 三角、
@@ -64,6 +66,7 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 | `/` | 总览（项目与 run 汇总） |
 | `/projects/:projectId` | 项目详情 + run 列表 |
 | `/projects/:projectId/runs/new` | 新建核验（提交后走 `CreateRun`） |
+| `/projects/:projectId/runs/:runId` | 审阅台（三栏：run 列表 / 图与页签 / INSPECTOR） |
 | `/settings` | 设置（主题等） |
 
 ## 4. 冻结 proto 契约（Connect）
@@ -72,8 +75,11 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 [`../../proto/originweave/v1/originweave.proto`](../../proto/originweave/v1/originweave.proto)；
 消息字段以 `product-overview.md` 第 4 节与 `blackboard-protocol.md` 为准。
 
-代码生成（M1b）：`buf generate proto`（配置 `buf.gen.yaml`）→ Python（server，`src/originweave/gen`）
-与 TypeScript（前端，`frontend/src/gen`）。生成物为构建产物，排除 ruff/mypy。
+代码生成：
+- **TypeScript（前端，M1b）**：`pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，本地 `protoc-gen-es`）→ `frontend/src/gen`
+- **Python（server，M1c）**：`buf generate proto`（根 `buf.gen.yaml`，`protoc_builtin: python` + `protoc-gen-connect-python`）→ `src/originweave/gen`
+
+生成物均为构建产物：不入库，且排除 ruff/mypy。
 
 ### 4.1 service 方法
 
@@ -129,5 +135,5 @@ goal, max_steps?, max_wall?, max_cost?, auto?
 DAG（`desc → f1 核心结论 → c1 引用 → s1 原始来源 → p1 比对 → d1/d2 偏差`）。
 该产物已随 `frontend/` 清理移除，样例仅作契约与命名参考。
 
-约定：M1b 落地 server/proto 后，**同一批方法与字段**应由真实服务提供；契约若变更，
+约定：M1c 落地 server/proto 后，**同一批方法与字段**应由真实服务提供；契约若变更，
 先改本文件与 `proto/`，再同步前后端。

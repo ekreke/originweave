@@ -9,6 +9,7 @@
   （录制/回放）、OODA 三任务、真线程多 Worker + Dispatcher 确定性提交、进程内 Dispatcher、
   Gate A。样例的录制 query/prompt 清单见 `examples/copilot_productivity/README.md`，
   编排需与其对齐；M1 还需为样例补录 `capabilities/model/**`。
+- 随后：M1c（server + 前端接线）。
 
 ## 待确认决策
 
@@ -21,10 +22,13 @@
 - [x] proto 方案 → **Connect / buf**，契约 `proto/originweave/v1/*.proto`（契约重排定）
 - [x] 前端 → **React + Vite + `@connectrpc/connect-web`**，直连 proto、无 mock（契约重排定）
 - [x] OODA 的模型抽象 → 新增 **`model` capability**（与 search/prompt 同构），provider 名 `local`（契约重排定）
+- [x] 前端包管理/工具链 → **pnpm + Vite + React + TS**，ESLint + Prettier + Vitest（M1b 定）
+- [x] 图渲染库 → **React Flow**（`@xyflow/react`），provenance DAG 与 RELATIONS 复用（M1b 定）
+- [x] proto → TS 代码生成 → **本地插件 + 产物不入库**（`@bufbuild/protoc-gen-es`）（M1b 定）
+- [ ] server 监听端口（前端 `transport` 暂用 8787；与 CLI `ui` 的 8765 区分）→ M1c 定
 - [ ] Docker runtime 的镜像来源与构建归属（server 仓内构建 vs 独立镜像）
 - [ ] HITL Gate 的默认范围与配置粒度（三个 Gate 是否可逐项开关；`auto` 是否支持 per-gate）
 - [ ] Worker 并发数 N 的默认值与上限（真线程并发，Dispatcher 确定性提交；受预算约束）
-- [ ] 关系图渲染库选型（M1b 前端统一选定，provenance DAG 与 RELATIONS 复用同一渲染器）
 - [ ] 关系样例 fixture 来源（新增含多个组织的样例 vs 复用 `copilot_productivity`）
 - [ ] 实体消歧粒度：同名/别名归一的规范化规则（大小写、全称/简称、去空白）
 - [ ] CLI `capabilities install-obscura` 命名：旧 `obscura_kitesurf` 占位样例已被从零构建的
@@ -33,12 +37,12 @@
 
 ## 已知风险 / 缺口
 
-- `frontend/`（仅有构建产物，源码从未入库）已整体移除；**M1b 需从零重建前端源码工程**。
-  在此之前 UI 不能视为可维护资产。
+- 前端 `frontend/` 已入库（M1b 脚手架），但**尚无真实数据**（不接 mock）：DAG/Gate UI 与
+  server 接线归 M1c；在此之前 UI 只是可维护的界面壳。
 - `Makefile` 的 `demo` target 依赖 M4 的 server + 前端，现阶段只打印提示（不执行）。
 - 样例的真实数据具时效性：离线可复现的对象是 `examples/copilot_productivity/` 的**录制快照**，
   不保证重新联网再跑一遍结果一致。
-- **契约重排**把 server API 与前端从 M4 提前到 **M1b**，M4 收缩为端到端 / Deployment / 文档回归；
+- **契约重排**把 server API 与前端从 M4 提前到 **M1b/M1c**，M4 收缩为端到端 / Deployment / 文档回归；
   期间 `dashboard.md §4` 已由 REST 改为 proto，`product-overview.md §5` 已移除 `trace`。
 - **契约-代码漂移（M5 范围，未实现）**：`Entity`/`Relation`/`EntityGraph`、`ENTITY`/`RELATION`
   事件、`Intent.extract`/`relate`、`CreateRun.analysis` 已在 `overview/` + `proto/` 冻结契约中，
@@ -49,7 +53,18 @@
 
 ## 已完成（近期）
 
-- **契约重排 + proto 骨架**：`milestones.md` / `SPEC.md` 增 **M1b**（proto + server + 前端），
+- **M1b 前端脚手架**：`frontend/`（pnpm + Vite 8 + React 19 + TS strict）入库；Swiss/Blueprint
+  主题 tokens（浅/深）、三栏布局 + 路由 + GRAPH/FACTS/INTENTS/EVENTS 页签空态、React Flow 空画布、
+  Connect TS 生成接入（`frontend/buf.gen.yaml` + `protoc-gen-es`，产物不入库）、ESLint/Prettier/Vitest；
+  `Makefile` 前端 targets；CI 拆为 `python` / `proto` / `frontend` 三个 job。验收：
+  `typecheck` / `lint` / `test` / `build` / `buf lint proto` 全绿，页面无 mock。
+
+- **M1b/M1c 拆分**：原 M1b 拆为 **M1b（前端脚手架，依赖 M0d，可与 M1 并行）** 与
+  **M1c（server 骨架 + 前后端接线，依赖 M1 + M1b）**；M2 依赖改 M1c。前端栈定为
+  pnpm + Vite + React + TS + React Flow + Connect，TS 生成走本地插件、产物不入库。
+
+- **契约重排 + proto 骨架**：`milestones.md` / `SPEC.md` 增 **M1b**（proto + server + 前端；
+  后在「M1b/M1c 拆分」中拆为前端脚手架与 server 接线），
   M4 收缩；`dashboard.md §4` REST → **Connect proto**；`product-overview.md §5` 移除 CLI `trace`
   （起 run 走 server/proto）；`agent-design.md §2` 增 `model` capability；新增
   `proto/originweave/v1/originweave.proto` + `buf.yaml` / `buf.gen.yaml`；`cli.py` 移除 `trace`。

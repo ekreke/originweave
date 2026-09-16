@@ -10,7 +10,9 @@ PORT ?= 8765
 LIVE ?= 0
 
 .DEFAULT_GOAL := help
-.PHONY: help install run demo fixtures proto test lint fmt ui replay cloc clean
+.PHONY: help install run demo fixtures proto test lint fmt ui replay cloc clean \
+	frontend-install frontend-gen frontend-dev frontend-build frontend-lint \
+	frontend-typecheck frontend-test
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -29,8 +31,29 @@ demo: ## End-to-end sample (server + frontend; lands in M4, not wired yet)
 fixtures: ## Regenerate the committed sample fixtures (events.jsonl + capability recordings)
 	$(UV) run python scripts/build_sample_fixtures.py
 
-proto: ## Generate Python + TS from proto/ (requires buf + protoc-gen-connect-python/protoc-gen-es; M1b)
+proto: ## Generate Python from proto/ (server; M1c. Requires buf + protoc-gen-connect-python)
 	buf generate proto
+
+frontend-install: ## pnpm install in frontend/
+	pnpm --dir frontend install
+
+frontend-gen: ## Generate TypeScript from proto/ (frontend; requires buf)
+	pnpm --dir frontend gen
+
+frontend-dev: ## Start the frontend dev server
+	pnpm --dir frontend dev
+
+frontend-build: ## Type-check + build the frontend
+	pnpm --dir frontend build
+
+frontend-lint: ## ESLint the frontend
+	pnpm --dir frontend lint
+
+frontend-typecheck: ## tsc -b --noEmit for the frontend
+	pnpm --dir frontend typecheck
+
+frontend-test: ## Vitest for the frontend
+	pnpm --dir frontend test
 
 test: install ## Run the test suite
 	$(UV) run pytest
@@ -59,5 +82,5 @@ cloc: ## Count logical lines under src/originweave (excludes tests/fixtures/gene
 
 clean: ## Remove caches and temporary runs
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov build dist runs
-	rm -rf frontend/dist frontend/node_modules
+	rm -rf frontend/dist frontend/node_modules frontend/src/gen src/originweave/gen
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

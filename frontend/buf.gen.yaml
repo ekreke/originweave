@@ -1,0 +1,17 @@
+# Generate the TypeScript types + Connect service definition for the v1 API.
+#
+# Run from this directory (pnpm puts node_modules/.bin on PATH):
+#   pnpm gen
+#
+# Output is a build artifact (frontend/src/gen), not committed.
+
+version: v2
+
+inputs:
+  - directory: ../proto
+
+plugins:
+  - local: protoc-gen-es
+    out: src/gen
+    opt:
+      - target=ts

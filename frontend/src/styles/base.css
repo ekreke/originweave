@@ -1,0 +1,242 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: rgb(var(--c-ink));
+  background-color: rgb(var(--c-paper));
+  /* blueprint grid paper */
+  background-image:
+    linear-gradient(rgb(var(--c-hairline)) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--c-hairline)) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* ---------------------------------------------------------------- shell */
+
+.shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.appbar {
+  height: var(--appbar-h);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 16px;
+  background: rgb(var(--c-panel));
+  border-bottom: 1px solid rgb(var(--c-hairline));
+}
+
+.brand {
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  font-size: 15px;
+}
+
+.brand em {
+  font-style: normal;
+  color: rgb(var(--c-accent));
+}
+
+.nav {
+  display: flex;
+  gap: 14px;
+  font-size: 12.5px;
+}
+
+.nav a {
+  color: rgb(var(--c-muted));
+  padding: 4px 0;
+}
+
+.nav a.active {
+  color: rgb(var(--c-ink));
+  border-bottom: 2px solid rgb(var(--c-accent));
+}
+
+.tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  color: rgb(var(--c-muted));
+  background: rgb(var(--c-wash));
+}
+
+.btn {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  padding: 5px 10px;
+  color: rgb(var(--c-ink));
+  background: rgb(var(--c-panel));
+  border: 1px solid rgb(var(--c-hairline));
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: rgb(var(--c-accent));
+  color: rgb(var(--c-accent));
+}
+
+/* ---------------------------------------------------------------- panels */
+
+.wrap {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.panel {
+  background: rgb(var(--c-panel));
+  border: 1px solid rgb(var(--c-hairline));
+}
+
+.panel-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgb(var(--c-hairline));
+}
+
+.panel-hd h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgb(var(--c-accent));
+}
+
+.cnt {
+  font-size: 11px;
+  color: rgb(var(--c-muted));
+}
+
+.empty {
+  padding: 28px 16px;
+  color: rgb(var(--c-muted));
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------- console */
+
+.console {
+  display: grid;
+  grid-template-columns: 262px minmax(0, 1fr) 330px;
+  gap: 14px;
+  padding: 14px;
+  height: calc(100vh - var(--appbar-h));
+  min-height: 640px;
+}
+
+.col {
+  background: rgb(var(--c-panel));
+  border: 1px solid rgb(var(--c-hairline));
+  overflow: auto;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgb(var(--c-hairline));
+  background: rgb(var(--c-panel2));
+}
+
+.tab {
+  font-size: 11.5px;
+  letter-spacing: 0.4px;
+  padding: 4px 9px;
+  color: rgb(var(--c-muted));
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.tab.on {
+  color: rgb(var(--c-accent));
+  border-color: rgb(var(--c-hairline));
+  background: rgb(var(--c-panel));
+}
+
+.center-body {
+  height: calc(100% - 41px);
+}
+
+.graph-canvas {
+  height: 100%;
+  min-height: 320px;
+}
+
+.graph-canvas .react-flow {
+  --xy-background-color: rgb(var(--c-panel));
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run-card {
+  padding: 9px 10px;
+  border: 1px solid rgb(var(--c-hairline));
+  background: rgb(var(--c-panel2));
+  font-size: 12px;
+}
+
+.run-card .t {
+  font-weight: 500;
+}
+
+.run-card .m {
+  color: rgb(var(--c-muted));
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  margin-top: 3px;
+}
+
+.inspector {
+  padding: 12px 14px;
+  font-size: 12px;
+}
+
+.inspector h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: rgb(var(--c-accent));
+}

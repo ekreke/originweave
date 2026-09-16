@@ -87,7 +87,7 @@
 
 目标：实现黑板块与 OODA 工作循环，从 A 抽取抽象论点并拆解、回链来源；支持多 Worker
 真线程并发与 HITL Gate A。引擎为**库层**（进程内 Dispatcher），**不经 CLI 暴露**；
-API 与交互由 M1b 落地。
+API 与交互由 M1c 落地。
 
 - [x] 黑板模型：`Board{origin,goal,facts,intents,hints}` 与 `Fact`（kind/role/status/confidence/evidence）、`Intent`、`Hint` — `src/originweave/model.py`（M0c）
 - [x] `origin`/`goal` 特殊 Fact（`kind` 区分、`role=none`）；`Fact.role = main-claim | sub-claim` — `model.py`（M0c）
@@ -100,8 +100,8 @@ API 与交互由 M1b 落地。
 - [ ] 多 Worker 真线程并发认领 Intent + 心跳/超时自动释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按确定性顺序提交，保证 Board 确定
 - [ ] Stigmergy：新 Fact 触发新一轮 Reason（去重）
 - [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回（唯一写入者）
-- [ ] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1b）
-- [ ] 自动路径：`[hitl].auto=true`（或 M1b 的 `CreateRunRequest.auto`）跳过 Gate
+- [ ] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1c）
+- [ ] 自动路径：`[hitl].auto=true`（或 M1c 的 `CreateRunRequest.auto`）跳过 Gate
 - [ ] 单测：给定 fixture 输入，产出确定性 Board/DAG（节点/边/证据断言）
 
 验收：对 `copilot_productivity` 样例，核心抽象论点被拆解为子断言，每条子断言可回溯到
@@ -110,19 +110,37 @@ Gate A 可挂起并可恢复；同一 fixture 两次运行产出同一 Board。
 
 ---
 
-## M1b · proto 契约与 server / 前端骨架
+## M1b · 前端脚手架
 
-目标：把冻结契约落地为 **Connect/buf proto 服务**，起 server 骨架与 React 前端脚手架，
-前后端经 proto 直连（无 mock）；HITL Gate 交互移到前端。server 进程内调用 M1 引擎
-（`agent-design.md` §6 的临时态；容器化归 M3）。
+目标：初始化 `frontend/`（React + Vite + TS + Connect），交付**无数据、无 mock**的界面壳
+（三栏布局 / 路由 / 页签空态 / React Flow 空画布）。仅依赖已就绪的 `proto/`，
+**可与 M1 并行、可先做**；真实数据接线归 M1c。
 
-- [ ] proto 契约 `proto/originweave/v1/*.proto`（消息取自 `product-overview.md` 第 4 节；服务见 `dashboard.md` §4）
-- [ ] `buf generate` 产出 Python（server）与 TS（前端）类型；生成物排除 ruff/mypy
+- [x] proto 契约 `proto/originweave/v1/*.proto`（Phase 0 落地；消息取自 `product-overview.md` 第 4 节）
+- [x] `proto/buf.yaml` + `buf.gen.yaml` 骨架（Phase 0 落地）
+- [x] 前端工程入库：`frontend/`（pnpm + Vite + React + TS strict + lockfile + `.nvmrc`/engines）
+- [x] 主题 tokens：移植 Swiss/Blueprint（浅/深色，`swiss-blueprint.html`）
+- [x] 三栏布局 + 路由（`/`、`/projects/:projectId`、`/projects/:projectId/runs/new`、`/projects/:projectId/runs/:runId`、`/settings`）
+- [x] 页签骨架 GRAPH / FACTS / INTENTS / EVENTS（空态；RELATIONS/ENTITIES 归 M5）
+- [x] React Flow 空画布壳（`@xyflow/react`）
+- [x] Connect TS 生成接入（`frontend/buf.gen.yaml` + `@bufbuild/protoc-gen-es`），typed client 封装（暂无调用）
+- [x] ESLint + Prettier + Vitest（含壳渲染冒烟）；`tsc --noEmit` 门禁
+- [x] `Makefile` 前端 targets + CI 前端 job（含 `buf lint proto`）
+
+验收：`pnpm --dir frontend install && pnpm --dir frontend gen` 后，`typecheck` / `lint` / `test` /
+`build` 全绿；页面为**空壳**、**无 mock 数据**；`buf lint proto` 通过。
+
+---
+
+## M1c · server 骨架与前后端接线
+
+目标：把 proto 契约落地为 **Connect Python server**，接线 M1 引擎（`agent-design.md` §6 的
+进程内临时态；容器化归 M3），前端改为读取真实数据；HITL Gate 交互移到前端。
+
+- [ ] `buf generate` 产出 Python（`protoc-gen-connect-python`；生成物排除 ruff/mypy）
 - [ ] server 骨架：只读 run 视图（projects / runs / run detail）+ `CreateRun` + `AddHint` + `SubmitHumanInput`
 - [ ] server 接线 M1 引擎（进程内 Dispatcher）；调度与持久化归 server（红线 2）
-- [ ] 前端脚手架：React + Vite + `@connectrpc/connect-web`，直连 proto、**不接 mock**
-- [ ] 三栏 Swiss/Blueprint 布局 + PROVENANCE DAG / FACTS / INTENTS / EVENTS 页签
-- [ ] DAG 渲染 Intent 节点（open/claimed/done/dropped/awaiting_human）与 `decomposes/spawns/resolves` 边
+- [ ] DAG 渲染 Intent 节点（open/claimed/done/dropped/awaiting_human）与 `decomposes/spawns/resolves` 边（React Flow）
 - [ ] HITL UI：Gate A/B/C 面板、写 Hint、`awaiting_human` 提示、Replay 步进
 - [ ] `originweave ui` 起只读视图（替换 stub），默认读 run dir / server
 - [ ] 端到端（离线）：起 server → 建 run → 前端看到 DAG → Gate 处人工介入
@@ -174,7 +192,7 @@ Hint 注入、Gate C 行为均可观测。
 
 ## M4 · 端到端、Deployment 与文档回归
 
-目标：端到端闭环、server 容器化部署，以及文档/契约一致性回归（server 与前端已在 M1b 落地）。
+目标：端到端闭环、server 容器化部署，以及文档/契约一致性回归（server 与前端已在 M1c 落地）。
 
 - [ ] 端到端 `make demo`（离线）：资料 A → 抽象论点 → DAG → 记分卡 → 前端可见 → `replay` 可复现
 - [ ] server 运行于 Docker（Deployment 层）

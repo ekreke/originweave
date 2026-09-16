@@ -17,8 +17,9 @@ originweave 的版本与里程碑索引。**当前唯一活跃版本：`1.0`**�
 | M0c | 黑板事件日志与事件溯源：run 目录布局、黑板协议事件、`replay` 只读重放 | 已完成 | M0b |
 | M0d | 构建 `copilot_productivity` 离线样例：资料 A、来源快照、录制的 capability 响应与事件日志（真实 fixtures） | 已完成 | M0c |
 | M1 | 黑板与 Agent 循环（库层）：OODA 三任务、`model` capability、抽象论点拆解与来源回链、真线程多 Worker + Stigmergy、Gate A | 未开始 | M0d |
-| M1b | proto 契约（Connect/buf）+ server 骨架 + React 前端脚手架：前后端直连 proto、HITL Gate UI | 未开始 | M1 |
-| M2 | 偏差记分卡：`Intent(verify)`/`compare(facts × sources × goal)` → deviation 分类与 report、Gate B | 未开始 | M1b |
+| M1b | 前端脚手架：React + Vite + TS + Connect、Swiss/Blueprint 布局与页签空态（无 mock；可与 M1 并行） | 已完成 | M0d |
+| M1c | server 骨架与前后端接线：Connect Python server、接线 M1 引擎、DAG/Gate UI、端到端离线 | 未开始 | M1 / M1b |
+| M2 | 偏差记分卡：`Intent(verify)`/`compare(facts × sources × goal)` → deviation 分类与 report、Gate B | 未开始 | M1c |
 | M3 | agent runtime 与 capabilities：Docker container-per-run（多 Worker）、Dispatcher、MCP、`exa|parallel`、`local|langfuse`、真实 `model`、异步 Hint、Gate C | 未开始 | M2 |
 | M4 | 端到端、Deployment 与文档回归：`make demo` 闭环、server Docker、`overview/`+`proto/` 契约无漂移 | 未开始 | M3 |
 | M5 | 实体/组织关系图：从 A 抽取实体并判别关系，产出独立的关系图（本体 + 证据/推断标注） | 未开始 | M4 |

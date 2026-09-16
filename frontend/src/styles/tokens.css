@@ -1,0 +1,60 @@
+/* Swiss / Blueprint tokens, ported from docs/design/swiss-blueprint.html.
+   Colors are stored as space-separated RGB triplets so they can be used as
+   rgb(var(--token) / <alpha>). */
+:root {
+  --c-paper: 243 246 249;
+  --c-panel: 255 255 255;
+  --c-panel2: 250 251 253;
+  --c-wash: 235 238 242;
+  --c-ink: 15 27 45;
+  --c-muted: 91 107 128;
+  --c-hairline: 219 227 236;
+  --c-accent: 29 78 216;
+  --c-accent-soft: 213 222 244;
+  --c-accent2: 8 145 178;
+  --c-ok: 47 158 104;
+  --c-warn: 194 135 43;
+  --c-danger: 209 73 91;
+
+  --c-k-origin: 15 27 45;
+  --c-k-goal: 15 27 45;
+  --c-k-fact: 29 78 216;
+  --c-k-citation: 194 135 43;
+  --c-k-source: 47 158 104;
+  --c-k-boundary: 91 107 128;
+  --c-k-compare: 8 145 178;
+  --c-k-deviation: 209 73 91;
+  --c-k-intent: 8 145 178;
+
+  --radius: 0px;
+  --radius-sm: 0px;
+  --font-ui: 'Space Grotesk', Inter, 'PingFang SC', sans-serif;
+  --font-mono: 'JetBrains Mono', Menlo, monospace;
+  --appbar-h: 52px;
+}
+
+.dark {
+  --c-paper: 10 18 32;
+  --c-panel: 15 26 46;
+  --c-panel2: 13 23 40;
+  --c-wash: 18 26 40;
+  --c-ink: 226 236 248;
+  --c-muted: 125 143 168;
+  --c-hairline: 30 47 74;
+  --c-accent: 91 140 255;
+  --c-accent-soft: 21 35 63;
+  --c-accent2: 45 212 191;
+  --c-ok: 67 201 138;
+  --c-warn: 224 165 74;
+  --c-danger: 239 107 125;
+
+  --c-k-origin: 226 236 248;
+  --c-k-goal: 226 236 248;
+  --c-k-fact: 91 140 255;
+  --c-k-citation: 224 165 74;
+  --c-k-source: 67 201 138;
+  --c-k-boundary: 125 143 168;
+  --c-k-compare: 45 212 191;
+  --c-k-deviation: 239 107 125;
+  --c-k-intent: 45 212 191;
+}

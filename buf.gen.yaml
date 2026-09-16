@@ -1,9 +1,11 @@
-# Code generation for the v1 API.
+# Python code generation for the v1 API (server; M1c).
 #
-# Toolchain (M1b; install once):
+# TypeScript for the frontend is generated separately by frontend/buf.gen.yaml
+# (`pnpm --dir frontend gen`).
+#
+# Toolchain (M1c; install once):
 #   python                     -> protoc/buf builtin (no extra binary)
 #   protoc-gen-connect-python  -> Connect Python plugin
-#   protoc-gen-es              -> `npm i -g @bufbuild/protoc-gen-es`
 #
 # Run from the repo root:
 #   buf generate proto
@@ -21,7 +23,3 @@ plugins:
     out: src/originweave/gen
   - local: protoc-gen-connect-python
     out: src/originweave/gen
-  - local: protoc-gen-es
-    out: frontend/src/gen
-    opt:
-      - target=ts
