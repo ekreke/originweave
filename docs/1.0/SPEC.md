@@ -87,7 +87,7 @@
 
 目标：实现黑板块与 OODA 工作循环，从 A 抽取抽象论点并拆解、回链来源；支持多 Worker
 真线程并发与 HITL Gate A。引擎为**库层**（进程内 Dispatcher），**不经 CLI 暴露**；
-API 与交互由 M1c 落地。
+API 与交互由 M1c-1 / M1c-2 落地。
 
 - [x] 黑板模型：`Board{origin,goal,facts,intents,hints}` 与 `Fact`（kind/role/status/confidence/evidence）、`Intent`、`Hint` — `src/originweave/model.py`（M0c）
 - [x] `origin`/`goal` 特殊 Fact（`kind` 区分、`role=none`）；`Fact.role = main-claim | sub-claim` — `model.py`（M0c）
@@ -100,8 +100,8 @@ API 与交互由 M1c 落地。
 - [ ] 多 Worker 真线程并发认领 Intent + 心跳/超时自动释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按确定性顺序提交，保证 Board 确定
 - [ ] Stigmergy：新 Fact 触发新一轮 Reason（去重）
 - [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回（唯一写入者）
-- [ ] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1c）
-- [ ] 自动路径：`[hitl].auto=true`（或 M1c 的 `CreateRunRequest.auto`）跳过 Gate
+- [ ] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1c-2）
+- [ ] 自动路径：`[hitl].auto=true`（或 M1c-1 的 `CreateRunRequest.auto`）跳过 Gate
 - [ ] 单测：给定 fixture 输入，产出确定性 Board/DAG（节点/边/证据断言）
 
 验收：对 `copilot_productivity` 样例，核心抽象论点被拆解为子断言，每条子断言可回溯到
@@ -114,7 +114,7 @@ Gate A 可挂起并可恢复；同一 fixture 两次运行产出同一 Board。
 
 目标：初始化 `frontend/`（React + Vite + TS + Connect），交付**无数据、无 mock**的界面壳
 （三栏布局 / 路由 / 页签空态 / React Flow 空画布）。仅依赖已就绪的 `proto/`，
-**可与 M1 并行、可先做**；真实数据接线归 M1c。
+**可与 M1 并行、可先做**；真实数据接线归 M1c-2。
 
 - [x] proto 契约 `proto/originweave/v1/*.proto`（Phase 0 落地；消息取自 `product-overview.md` 第 4 节）
 - [x] `proto/buf.yaml` + `buf.gen.yaml` 骨架（Phase 0 落地）
@@ -132,18 +132,35 @@ Gate A 可挂起并可恢复；同一 fixture 两次运行产出同一 Board。
 
 ---
 
-## M1c · server 骨架与前后端接线
+## M1c-1 · server 骨架
 
-目标：把 proto 契约落地为 **Connect Python server**，接线 M1 引擎（`agent-design.md` §6 的
-进程内临时态；容器化归 M3），前端改为读取真实数据；HITL Gate 交互移到前端。
+目标：把 proto 契约落地为 **Connect Python server**（Starlette + uvicorn + `connect-python`），
+接线 M1 引擎（`agent-design.md` §6 的进程内临时态；容器化归 M3）；`originweave ui` 起服务与静态视图。
 
-- [ ] `buf generate` 产出 Python（`protoc-gen-connect-python`；生成物排除 ruff/mypy）
-- [ ] server 骨架：只读 run 视图（projects / runs / run detail）+ `CreateRun` + `AddHint` + `SubmitHumanInput`
-- [ ] server 接线 M1 引擎（进程内 Dispatcher）；调度与持久化归 server（红线 2）
-- [ ] DAG 渲染 Intent 节点（open/claimed/done/dropped/awaiting_human）与 `decomposes/spawns/resolves` 边（React Flow）
-- [ ] HITL UI：Gate A/B/C 面板、写 Hint、`awaiting_human` 提示、Replay 步进
-- [ ] `originweave ui` 起只读视图（替换 stub），默认读 run dir / server
+- [ ] Python codegen：`protoc-gen-connect-python` + 根 `buf.gen.yaml` → `src/originweave/gen`（生成物排除 ruff/mypy）
+- [ ] 持久化：`runs/<run_id>/run.json`（`Run` 元数据）+ 目录式 `projects/` 注册表；`events.jsonl` 仍为 board 唯一事实来源
+- [ ] server：只读视图（`ListProjects`/`GetProject`/`ListProjectRuns`/`ListRuns`/`GetRun`）+ `CreateRun` + `AddHint` + `SubmitHumanInput`（`RunStore` → `reduce()` → `RunDetail`）
+- [ ] 接线 M1 引擎（进程内 Dispatcher）；`CreateRun` 分配 `run_00N` 并调用引擎；调度与持久化归 server（红线 2）
+- [ ] `originweave ui`（替换 stub）：Starlette 提供 Connect 端点 + `frontend/dist` 静态
+- [ ] 测试：ASGI 客户端对 service 的读写、离线跑样例
+
+验收：离线起 server → `CreateRun` 用 `copilot_productivity` 样例产出 run → `GetRun` 返回
+`RunDetail`（含 events/facts/intents）→ `AddHint`/`SubmitHumanInput` 落为事件。
+
+---
+
+## M1c-2 · 前端接线与 UI
+
+目标：前端改为读取真实数据（**不接 mock**），渲染 DAG 并在 HITL Gate 处提供人工介入。
+
+- [ ] Connect 数据层：React Query hooks（`listProjects`/`listProjectRuns`/`getRun`/`createRun`/`addHint`/`submitHumanInput`）+ 轮询刷新 `awaiting_human`
+- [ ] React Flow 节点/边：Fact 按 `kind`（形状+颜色）、Intent 按 `status`、边按 `relation`；布局用 proto `Fact.position`
+- [ ] INSPECTOR：节点详情 + 证据逐字引用（`quote + sourceTitle + locator`）+ Intent 计数 + Hints 输入
+- [ ] HITL UI：`awaiting_human` → Gate A/B/C 面板（approve/edit/reject）→ `submitHumanInput`；Replay 步进（前端按 `events[]`）
+- [ ] 页签 FACTS / INTENTS / EVENTS 绑定真实数据（RELATIONS/ENTITIES 归 M5）
+- [ ] 顶栏 / RunList：状态徽标、预算、操作、`awaiting_human` 高亮
 - [ ] 端到端（离线）：起 server → 建 run → 前端看到 DAG → Gate 处人工介入
+- [ ] 测试：组件测试（proto 消息 fixture）+ 冒烟
 
 验收：从前端发起一次核验（样例、离线），看到由抽象论点拆解出的 DAG，可在 Gate 处人工介入；
 架构红线未被突破（前端不编排、server 拥有调度）。
@@ -192,7 +209,7 @@ Hint 注入、Gate C 行为均可观测。
 
 ## M4 · 端到端、Deployment 与文档回归
 
-目标：端到端闭环、server 容器化部署，以及文档/契约一致性回归（server 与前端已在 M1c 落地）。
+目标：端到端闭环、server 容器化部署，以及文档/契约一致性回归（server 与前端已在 M1c-1 / M1c-2 落地）。
 
 - [ ] 端到端 `make demo`（离线）：资料 A → 抽象论点 → DAG → 记分卡 → 前端可见 → `replay` 可复现
 - [ ] server 运行于 Docker（Deployment 层）
