@@ -1,6 +1,6 @@
 # copilot_productivity sample
 
-离线样例：核验一份**二手页**对 GitHub Copilot 生产力研究的转述，产出可审计的溯源 DAG
+样例：核验一份**二手页**对 GitHub Copilot 生产力研究的转述，产出可审计的溯源 DAG
 与偏差记分卡。这是 `originweave replay`（以及后续 `make demo`）的端到端 fixture。
 
 样例无既有 spike 可迁，是从零构建的（M0d）。
@@ -37,40 +37,29 @@ examples/copilot_productivity/
 ├── README.md              # 本文件
 ├── input/                 # 资料 A 冻结快照 + source.json
 ├── sources/               # 一手来源快照 + manifest.json
-├── capabilities/          # 录制的 capability 响应（离线重放）
-│   ├── exa/<hash>.json
-│   └── local/<hash>.json
-└── events.jsonl           # append-only 事件日志（该次录制 run）
+└── events.jsonl           # append-only 事件日志（该次 run）
 ```
 
-## 录制的 capability（供 M1 编排对齐）
+## 能力
 
-`capabilities/` 是 `LIVE=0` 离线重放的唯一数据来源，按
-`sha256(canonical(provider+op+params))[:16]` 直查。样例录制的请求：
+能力为**真实调用**（Phase R 起无离线缓存 / 录制回放）：
 
-| provider | op | 请求参数 |
-|---|---|---|
-| `exa` | `search` | `{query: "GitHub Copilot 55% faster developer productivity study", limit: 5}` |
-| `exa` | `search` | `{query: "GitHub Copilot Accenture enterprise study 84% successful builds", limit: 5}` |
-| `local` | `prompt` | `{name: "bootstrap"}` |
-| `local` | `prompt` | `{name: "decompose"}` |
-| `local` | `prompt` | `{name: "verify"}` |
+- `search`（exa / parallel）：检索来源、定位一手材料
+- `model`（OpenAI 兼容）：OODA 的 `Bootstrap` / `Reason` / `Explore`
+- `prompt`（`local`）：模板位于仓库 `prompts/` 目录
 
-未命中即报 `CacheMissError`（不会触网）。清单同时由 `scripts/build_sample_fixtures.py`
-的 `SEARCH_QUERIES` / `PROMPT_NAMES` 暴露，供后续任务的查询与其对齐。
-
-> `model` capability（M1）的录制 `capabilities/model/*.json` **尚未加入**；M1 落地引擎时
-> 需为样例补录并在本节登记（见 `docs/1.0/TODO.md`）。
+凭据只从环境变量读（`EXA_API_KEY` / `PARALLEL_API_KEY` / `OPENAI_API_KEY`）。
+**本样例不再提供录制响应**；`replay` 复现的是 `events.jsonl` 这份事件日志，而非能力调用。
 
 ## 运行
 
 ```bash
 make replay       # = originweave replay examples/copilot_productivity（只读、不触网）
-make fixtures     # 重新生成 events.jsonl + capabilities/**（应逐字节一致）
+make fixtures     # 重新生成 events.jsonl（应逐字节一致）
 ```
 
-`make demo`（server + 前端的端到端）依赖 M1b/M4；真实联网结果具时效性，因此**离线可复现
-的对象是这份录制快照**，而不是“重新联网再跑一遍”。
+`make demo`（server + 前端的端到端）依赖 M1c-1 / M1c-2 / M4；真实 provider 的结果具时效性，
+因此**可复现的对象是这份 `events.jsonl`**，而不是“重新联网再跑一遍”。
 
 ## 事件日志
 

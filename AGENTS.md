@@ -18,18 +18,20 @@
 ## 当前实现状态（别假设业务逻辑已存在）
 
 - 已实现：`originweave init`（写 `originweave.toml`，已存在需 `--force`）、
-  `originweave capabilities list`、配置加载/校验、capability 注册表与录制/回放，
+  `originweave capabilities list`、配置加载/校验、capability 注册表，
   以及事件日志 → 黑板 reducer → `originweave replay <run-dir>`（只读、不触网）。
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
   `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
 - **stub（打印 “not implemented yet”、返回 0）**：`ui` / `mcp` / `capabilities install-obscura`。
   `make demo` / `run` / `ui` 依赖这些实现（`demo` 归 M4，`ui` 归 M1c-1）。
-  `replay` 已接线，`examples/copilot_productivity/` 已含录制好的 `events.jsonl` 与
-  `capabilities/**`（M0d），`make replay` 可离线复现 Board。
+  `replay` 已接线，`examples/copilot_productivity/` 已含 `events.jsonl`（M0d），`make replay`
+  可不触网复现 Board。
 - 样例 fixture 由 `scripts/build_sample_fixtures.py` 确定性生成（`--check` 校验）；
-  改样例事件/录制后要重跑该脚本。资料 A 与来源是**冻结快照**，重新联网结果具时效性。
-- **默认离线**（`LIVE=0`）：capability 走录制回放，不触网。`exa` / `parallel` / `langfuse`
-  以及 `model` 的**真实调用 M3 才落地**，现在调用会抛 `ProviderUnavailableError`。
+  改样例事件后要重跑该脚本。资料 A 与来源是**冻结快照**，重新联网结果具时效性。
+- **能力为真实调用**（Phase R 已移除离线/cache/录制回放）：`search`/`model` 于 **M1** 落地，
+  `langfuse` 于 M3。凭据只从环境变量读：`EXA_API_KEY` / `PARALLEL_API_KEY` /
+  `OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）/ `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
+  单元测试**注入 fake provider**，不打真网。
 - `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出）：前端 TS 由
   `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`），server Python 归 M1c-1（根 `buf.gen.yaml`）。
 - **前端（`frontend/`，M1b 脚手架）**：React + Vite + TS + React Flow + Connect；目前是
@@ -73,13 +75,10 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
 - **配置**：项目内 `originweave.toml`；`tomllib` 读、`tomli-w` 写。未知键直接抛
   `ConfigError`（防 `max_step` 之类拼写错误被静默忽略）。`CONFIG_FILENAME` 是**相对路径**，
   测试靠 `monkeypatch.chdir(tmp_path)`，不要在库代码里假设绝对路径。
-- **离线开关优先级**：`ORIGINWEAVE_LIVE` 环境变量覆盖 `[live].enabled`；HITL 开关
-  （`[hitl].auto` 或 `CreateRunRequest.auto`）只控制 Gate，不改变联网开关（CLI `--auto` 已随 `trace` 移除）。
+- **HITL 开关**：`[hitl].auto` 或 `CreateRunRequest.auto` 只控制 Gate（默认人工介入）。
 - **凭据只从环境变量读**，不写入配置：`EXA_API_KEY` / `PARALLEL_API_KEY` /
-  `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
-- **capability 录制布局**：`<run-dir>/capabilities/<provider>/<request_hash>.json`，
-  `request_hash = sha256(canonical(provider+op+params))[:16]`（与参数书写顺序无关）。
-  `LIVE=1` 边调用边写，`LIVE=0` 只读、未命中报错。
+  `OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）/ `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
+- **能力为真实调用**（Phase R 已移除 `[live]`/cache/录制回放）：测试注入 fake provider，不打真网。
 - **事件字段名是契约**：`Event{id,at,type,message,tone,payload}`；reducer 只消费 `type`+`payload`，
   `message`/`tone` 仅展示。事件类型见 `docs/overview/blackboard-protocol.md` §5。
 - `events.jsonl` 的唯一写入口是 `RunStore.append_event()`（id 单调递增、append-only）；reducer

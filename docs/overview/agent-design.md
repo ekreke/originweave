@@ -17,23 +17,21 @@
 
 ## 2. Capability 抽象
 
-外部能力通过 **capability** 访问，provider 可替换。契约在 `overview` 层冻结，
-具体 provider 在 M0b/M3 落地。
+外部能力通过 **capability** 访问，provider 可替换。契约在 `overview` 层冻结。
+`search` 与 `model` 在 **M1 真实落地**；`langfuse` 于 M3。
 
 | Capability | provider 取值 | 用途 |
 |---|---|---|
 | `search` | `exa` / `parallel` | 检索来源、定位一手材料 |
 | `prompt` | `local` / `langfuse` | 获取 prompt 模板（本地文件或 Langfuse） |
-| `model` | `local`（录制/回放，M1）；真实 provider 于 M3 | 执行 OODA 任务（Bootstrap/Reason/Explore），返回结构化结果（Fact/Intent） |
+| `model` | `openai`（OpenAI 兼容） | 执行 OODA 任务（Bootstrap/Reason/Explore），返回结构化结果（Fact/Intent） |
 
 要求：
 
 - provider/model/runtime 关注点解耦：编排逻辑不感知具体 provider 的 SDK。
-- 离线优先：`LIVE=0`（默认）时走本地 cache / mock，`LIVE=1` 才触网
-  （见 `Makefile` 的 `run` target 与 `ORIGINWEAVE_LIVE`）。
-- 能力调用需可录制（record）与重放（replay），录制产物即 M0d 的 fixtures。`model`
-  与 `search`/`prompt` 同构：`LIVE=0` 读 `capabilities/model/<hash>.json` 回放，
-  `LIVE=1` 调用真实模型并录制（真实调用 M3 落地，当前抛 `ProviderUnavailableError`）。
+- **能力为真实调用**：无离线缓存、无录制回放；网络与凭据是运行前提。
+- 单元测试**注入 fake provider**，不打真网；CI 不依赖网络与凭据。
+- 凭据**只从环境变量读取**（见 §2.1）。
 
 ### 2.1 配置（`originweave.toml`）
 
@@ -43,8 +41,6 @@
 
 ```toml
 # 下方注释仅为说明；`originweave init` 生成的文件是纯净数据，不含注释。
-[live]                 # false = 离线优先（默认）
-enabled = false
 [hitl]                 # false = 三个 Gate 默认人工介入
 auto = false
 [capability.search]
@@ -53,7 +49,9 @@ provider = "exa"       # exa | parallel
 provider = "local"     # local | langfuse
 directory = "prompts"  # local provider 的模板目录
 [capability.model]
-provider = "local"     # local = 录制/回放；真实 provider 于 M3
+provider = "openai"                    # OpenAI 兼容
+model    = "deepseek-v4.1-flash"
+base_url = "http://power.acme.red/v1"  # 备选端点：https://llm.ekreke.cn/v1 + 免费模型
 [budget]
 max_steps = 60
 max_wall = "10m"
@@ -66,37 +64,12 @@ dir = "runs"
 > 仍会以未知键拒绝 `[capability.model]`（见 `SPEC.md` M1）。
 
 - **未知键会报错**（`ConfigError`），避免 `max_step` 之类的拼写错误被静默忽略。
-- **离线/联机开关的三处写法与优先级**（都指同一个 `[live].enabled`）：
-  1. `originweave.toml` 的 `[live].enabled`（默认 `false`）
-  2. 环境变量 `ORIGINWEAVE_LIVE`（`1/true/yes/on` / `0/false/no/off`），**覆盖**配置文件
-  3. `[hitl].auto` / `CreateRunRequest.auto` 只控制 HITL，不改变联网开关
-  行为：`false`（离线）→ capability 走**录制回放**（`Cached*`，不触网）；
-  `true`（联机）→ 走**真实调用并录制**（`Recording*`）。解析入口为
-  `capabilities.build_search()` / `build_prompt()`。
 - **凭据只从环境变量读取**，不写入配置：`EXA_API_KEY` / `PARALLEL_API_KEY` /
-  `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
+  `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`；`model` 用 `OPENAI_API_KEY`
+  （`OPENAI_BASE_URL` 可覆盖配置里的 `base_url`）。
 - `local` prompt provider 从仓库 `prompts/` 目录读取 `*.txt` / `*.md` 模板。
-- 现状：`search`/`prompt` 的 provider 注册表、离线/联机接线与凭据校验就绪（M0b）；
-  `model` capability 于 M1 引入（录制/回放）；三者的**真实联网/模型调用在 M3 落地**，
-  当前 `LIVE=1` 调用会给出明确错误。
-
-### 2.2 录制与重放布局
-
-每次 capability 调用存成**一个 JSON 文件**，按请求哈希直查，保证离线重放确定且不触网：
-
-```text
-<run-dir>/capabilities/<provider>/<request_hash>.json
-{
-  "provider": "exa",
-  "op": "search",
-  "params": { "query": "...", "limit": 10 },
-  "response": [ ... ],
-  "recordedAt": "<ISO-8601 UTC>"
-}
-```
-
-`request_hash = sha256(canonical(provider + op + params))[:16]`（参数排序后哈希，
-与书写顺序无关）。`LIVE=1` 时边调用边写入；`LIVE=0` 时只读该目录，未命中即报错。
+- 现状：`search` / `model` 于 **M1** 真实落地；`prompt` 的 `local` 可用（读文件），
+  `langfuse` 于 M3。**能力不再有离线/录制回放**（Phase R 移除）。
 
 ## 3. 黑板循环
 
@@ -173,7 +146,6 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 ├── events.jsonl        # append-only，每行一个 Event
 ├── input/              # 资料 A 快照（URL 抓取或文本）
 ├── sources/            # 来源快照（可回链的原文/存档）
-├── capabilities/       # 录制的 capability 请求/响应（离线重放用）
 ├── entity-graph.json   # 实体-关系图快照（可重建，非事实来源）
 └── report.md           # 最终产物（可再生成）
 ```

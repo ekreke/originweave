@@ -35,8 +35,8 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 └──────────┴───────────────────────────────────────────────┴──────────────┘
 ```
 
-- 顶栏：面包屑（`Researches / <project> / <run>`）+ 状态徽标（`AWAITING_HUMAN · Gate A`、
-  `LIVE`）+ 预算（`steps` / `tok` / `cost` / `intents`）+ 操作
+- 顶栏：面包屑（`Researches / <project> / <run>`）+ 状态徽标（`AWAITING_HUMAN · Gate A`）
+  + 预算（`steps` / `tok` / `cost` / `intents`）+ 操作
   （Replay 步进 / Human / Continue）。
 - 中栏（图为主体）页签：
   - **PROVENANCE DAG** — 图视图（默认页签）。节点按 `kind` 着色

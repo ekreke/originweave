@@ -282,7 +282,7 @@ body{background-image:linear-gradient(rgb(var(--c-hairline)) 1px,transparent 1px
     <button class="btn sm" onclick="window.__toast&&window.__toast('Replay 步进（只读、不触网）')">&#9198; Replay</button>
     <button class="btn sm" onclick="window.__toast&&window.__toast('Snapshot')">&#10063; Snapshot</button>
   </div>
-  <div class="live" id="livebadge">LIVE</div>
+  <div class="live" id="livebadge">RUNNING</div>
   <button class="btn sm" id="themebtn" title="切换亮/暗">&#9788; Theme</button>
 </header>
 
@@ -407,7 +407,7 @@ body{background-image:linear-gradient(rgb(var(--c-hairline)) 1px,transparent 1px
 <section class="route" data-route-view="settings">
   <div class="wrap" style="max-width:760px">
     <div class="panel">
-      <div class="panel-hd"><h2>设置</h2><span class="cnt">客户端只读 · 离线优先</span></div>
+      <div class="panel-hd"><h2>设置</h2><span class="cnt">客户端只读 · 由事件派生</span></div>
       <div style="padding:16px">
         <div class="field"><label>主题 theme</label>
           <div class="auth_row"><span class="auth_opt on" onclick="window.__toggleTheme&&window.__toggleTheme()">跟随本页 toggle</span><span class="auth_opt">system</span></div>
@@ -418,8 +418,8 @@ body{background-image:linear-gradient(rgb(var(--c-hairline)) 1px,transparent 1px
         <div class="field"><label>prompt provider</label>
           <div class="auth_row"><span class="auth_opt on">local</span><span class="auth_opt">langfuse</span></div>
         </div>
-        <div class="field"><label>LIVE 开关（ORIGINWEAVE_LIVE）</label>
-          <div class="auth_row"><span class="auth_opt on">LIVE=0 · 离线 cache/mock</span><span class="auth_opt">LIVE=1 · 触网</span></div>
+        <div class="field"><label>model provider</label>
+          <div class="auth_row"><span class="auth_opt on">openai</span></div>
         </div>
         <div class="field"><label>run dir</label><input class="input mono" value="examples/obscura_kitesurf"></div>
         <div class="muted" style="font-size:11.5px">契约与信息结构以 <span class="mono">docs/overview/dashboard.md</span> 为准。</div>
@@ -487,7 +487,7 @@ function render(){
   $$("[data-route-view]").forEach(s => s.classList.toggle("on", s.dataset.routeView === r));
   $$("#nav a").forEach(a => a.classList.toggle("on", a.dataset.route === r));
   $("#crumbs").innerHTML = crumbs(r);
-  if (r !== "console") { const lb = $("#livebadge"); lb.className = "live"; lb.textContent = "LIVE"; }
+  if (r !== "console") { const lb = $("#livebadge"); lb.className = "live"; lb.textContent = "RUNNING"; }
   if (r === "console") renderConsole();
   else if (r === "overview") renderOverview();
   else if (r === "project") renderProject();
@@ -595,7 +595,7 @@ function renderConsole(){
   const r = DATA.runs[0];
   const lb = $("#livebadge");
   lb.className = "live warn";
-  lb.textContent = "LIVE · " + DATA.intents.filter(i => i.status !== "done" && i.status !== "dropped").length + " open · awaiting human";
+  lb.textContent = "RUNNING · " + DATA.intents.filter(i => i.status !== "done" && i.status !== "dropped").length + " open · awaiting human";
   initGraph();
 }
 

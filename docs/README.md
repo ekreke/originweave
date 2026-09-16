@@ -51,7 +51,7 @@ docs/
 | **deviation** | A 相对源头的偏差项（篡改、改写、省略、归因错误、时间错置等），带 `severity` 与 `confidence`。 |
 | **run** | 一次端到端核验的执行实例，产出 DAG + 偏差记分卡 + report；`analysis` 含 relation 时另含实体-关系图。 |
 | **run dir** | 一次 run 的持久化目录，含 append-only 事件日志与快照，可 `replay` 重放。 |
-| **capability** | 外部能力抽象（检索 `search`、prompt `prompt`、模型 `model`），provider 可替换。 |
+| **capability** | 外部能力抽象（检索 `search`、prompt `prompt`、模型 `model`），provider 可替换；**真实调用**，无离线缓存。 |
 | **verdict** | report 的整体判定（如"部分偏差"）。 |
 
 ## 更新规则

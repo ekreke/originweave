@@ -33,18 +33,20 @@
 
 ## M0b · 配置与 capability 层骨架
 
-目标：可配置、离线优先，外部能力以可替换 provider 接入。
+目标：可配置，外部能力以可替换 provider 接入。
 
-- [x] `init` 生成默认配置（`originweave init`），含 `LIVE` 与 `auto`（HITL 默认人工介入）开关；落盘位置与格式在实现时确定并回写 `agent-design.md`
-- [x] 配置加载与校验（`LIVE=0` 默认离线）
+- [x] `init` 生成默认配置（`originweave init`），含 `auto`（HITL 默认人工介入）开关；落盘位置与格式在实现时确定并回写 `agent-design.md`
+- [x] 配置加载与校验
 - [x] capability 抽象接口：`search` 与 `prompt` 两个 capability 的最小 Protocol
 - [x] search provider 注册表：`exa` / `parallel`（可 import，未配置时给出清晰报错）
 - [x] prompt provider 注册表：`local` / `langfuse`
-- [x] 本地 cache / mock 后端：离线时返回录制内容（与 M0d 的 fixtures 对接）
-- [x] capability 调用可录制：产出可重放的请求/响应记录
-- [x] 单测：配置加载、provider 选择、离线/联机分支
+- [x] 单测：配置加载、provider 选择
 
-验收：capability 层在 `LIVE=0` 下不触网且有可预期的 mock 行为（引擎循环属 M1，仍为 stub）。
+> **Phase R 撤销**：原条目「`LIVE` 开关」「`LIVE=0` 默认离线」「本地 cache / mock 后端」
+> 「capability 调用可录制」已移除——能力改为**真实调用**（见 `agent-design.md` §2）。
+> 对应代码（`[live]`、`capabilities/cache.py`、`record.py`、样例 `capabilities/**`）待后续代码迭代清理。
+
+验收：配置加载与 provider 解析可用（引擎循环属 M1，仍为 stub）。
 
 ---
 
@@ -52,7 +54,7 @@
 
 目标：一次 run 的全部状态由 append-only 黑板事件派生，且可只读重放。
 
-- [x] run 目录布局落地（`events.jsonl`、`input/`、`sources/`、`capabilities/`、`report.md`；其中 `report.md` 于 M2 生成）
+- [x] run 目录布局落地（`events.jsonl`、`input/`、`sources/`、`report.md`；其中 `report.md` 于 M2 生成）
 - [x] 黑板协议事件 writer：`PROJECT/INTENT/EXECUTE/CONCLUDE/REASON/COMPLETE/HEARTBEAT/RELEASE/HINT/REQUEST_HUMAN/HUMAN_INPUT`（`Event{id,at,type,message,tone,payload}`）
 - [x] 由事件重建黑板状态（`Board{origin,goal,facts,intents,hints}` + `edges/status/decisions/waitingFor/verdict`）的 reducer
 - [x] `originweave replay <run-dir>` 只读、不触网、复现含人工输入在内的结论（替换当前 stub）
@@ -63,23 +65,23 @@
 
 ---
 
-## M0d · 构建 copilot_productivity 离线样例
+## M0d · 构建 copilot_productivity 样例
 
-目标：从零构建一份真实、可离线重放的溯源 fixtures（无既有 spike 可迁），供 `replay`
+目标：从零构建一份真实、可重放的溯源 fixtures（无既有 spike 可迁），供 `replay`
 与后续 `make demo` 使用。
 
 - [x] 资料 A：`examples/copilot_productivity/input/`（真实公开页冻结快照 + `source.json`）
 - [x] 来源快照：`examples/copilot_productivity/sources/`（GitHub 实验室 / Accenture 企业研究 + `manifest.json`）
-- [x] 录制的 capability 响应（检索 + prompt）：`capabilities/exa/*.json` + `capabilities/local/*.json`，`LIVE=0` 命中
-- [x] 录制的 run 事件日志 `events.jsonl`，由 `scripts/build_sample_fixtures.py` 生成且产物入库
+- [x] run 事件日志 `events.jsonl`，由 `scripts/build_sample_fixtures.py` 生成且产物入库
 - [x] `originweave replay examples/copilot_productivity` 只读复现 Board（不触网）
 - [x] `.gitignore` 放行 `examples/**/*.jsonl`
-- [x] 单测：replay 确定性/结构、证据逐字可回链、离线 capability 命中、fixture 可重生成
+- [x] 单测：replay 确定性/结构、证据逐字可回链、fixture 可重生成
 - [x] 文档：样例说明与预期偏差（`examples/copilot_productivity/README.md`）
 
-验收：全新环境 `originweave replay examples/copilot_productivity` 复现同一 Board、不触网；
-离线 capability 全部命中录制。`make demo` 的 DAG + 记分卡端到端（数据具时效性）
-归 M1/M2，端到端 `make demo` 由 M4 收口。
+> **Phase R 撤销**：原条目「录制的 capability 响应（检索 + prompt）→ `capabilities/**`」
+> 已移除；样例仅保留 `input/` + `sources/` + `events.jsonl`。
+
+验收：全新环境 `originweave replay examples/copilot_productivity` 复现同一 Board、不触网。
 
 ---
 
@@ -87,12 +89,13 @@
 
 目标：实现黑板块与 OODA 工作循环，从 A 抽取抽象论点并拆解、回链来源；支持多 Worker
 真线程并发与 HITL Gate A。引擎为**库层**（进程内 Dispatcher），**不经 CLI 暴露**；
-API 与交互由 M1c-1 / M1c-2 落地。
+API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）与 `search`（exa/parallel）。
 
 - [x] 黑板模型：`Board{origin,goal,facts,intents,hints}` 与 `Fact`（kind/role/status/confidence/evidence）、`Intent`、`Hint` — `src/originweave/model.py`（M0c）
 - [x] `origin`/`goal` 特殊 Fact（`kind` 区分、`role=none`）；`Fact.role = main-claim | sub-claim` — `model.py`（M0c）
 - [x] DAG 组装与边 relation：`main-chain/dependency/goal-derived/decomposes/spawns/resolves` — `src/originweave/reduce.py`（M0c）
-- [ ] `model` capability：`ModelProvider` Protocol + 录制/回放（`capabilities/model.py`、`record.py`、`[capability.model]`；真实 provider 归 M3）
+- [ ] `model` capability：`ModelProvider` Protocol + **真实 OpenAI 兼容 provider**（`capabilities/model.py`、`[capability.model]`；凭据 `OPENAI_API_KEY` / `OPENAI_BASE_URL`）
+- [ ] `search` capability 真实接入：`exa` / `parallel`（`capabilities/search.py`；凭据 `EXA_API_KEY` / `PARALLEL_API_KEY`）
 - [ ] 三种任务指令：`Bootstrap` / `Reason` / `Explore`
 - [ ] Intent 三型调度分支：`decompose` / `explore` / `verify`
 - [ ] 抽象论点抽取与拆解（`Bootstrap` → `main-claim`；`Intent(decompose)` → `sub-claim`）
@@ -102,11 +105,12 @@ API 与交互由 M1c-1 / M1c-2 落地。
 - [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回（唯一写入者）
 - [ ] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1c-2）
 - [ ] 自动路径：`[hitl].auto=true`（或 M1c-1 的 `CreateRunRequest.auto`）跳过 Gate
-- [ ] 单测：给定 fixture 输入，产出确定性 Board/DAG（节点/边/证据断言）
+- [ ] 单测：注入 **fake provider**，对 fixture 输入产出确定性 Board/DAG（节点/边/证据断言）
 
 验收：对 `copilot_productivity` 样例，核心抽象论点被拆解为子断言，每条子断言可回溯到
 至少一条带 `quote+url` 的证据或标记为 `open`；≥2 Worker 并发时无 Intent 重复执行；
-Gate A 可挂起并可恢复；同一 fixture 两次运行产出同一 Board。
+Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live run（真实 provider）不保证
+确定，其结构断言由注入 fake provider 的测试覆盖。**
 
 ---
 
@@ -142,10 +146,10 @@ Gate A 可挂起并可恢复；同一 fixture 两次运行产出同一 Board。
 - [ ] server：只读视图（`ListProjects`/`GetProject`/`ListProjectRuns`/`ListRuns`/`GetRun`）+ `CreateRun` + `AddHint` + `SubmitHumanInput`（`RunStore` → `reduce()` → `RunDetail`）
 - [ ] 接线 M1 引擎（进程内 Dispatcher）；`CreateRun` 分配 `run_00N` 并调用引擎；调度与持久化归 server（红线 2）
 - [ ] `originweave ui`（替换 stub）：Starlette 提供 Connect 端点 + `frontend/dist` 静态
-- [ ] 测试：ASGI 客户端对 service 的读写、离线跑样例
+- [ ] 测试：ASGI 客户端对 service 的读写（注入 fake provider）、`replay` 路径
 
-验收：离线起 server → `CreateRun` 用 `copilot_productivity` 样例产出 run → `GetRun` 返回
-`RunDetail`（含 events/facts/intents）→ `AddHint`/`SubmitHumanInput` 落为事件。
+验收：起 server（测试注入 fake provider）→ `CreateRun` 用 `copilot_productivity` 样例产出 run →
+`GetRun` 返回 `RunDetail`（含 events/facts/intents）→ `AddHint`/`SubmitHumanInput` 落为事件。
 
 ---
 
@@ -159,10 +163,10 @@ Gate A 可挂起并可恢复；同一 fixture 两次运行产出同一 Board。
 - [ ] HITL UI：`awaiting_human` → Gate A/B/C 面板（approve/edit/reject）→ `submitHumanInput`；Replay 步进（前端按 `events[]`）
 - [ ] 页签 FACTS / INTENTS / EVENTS 绑定真实数据（RELATIONS/ENTITIES 归 M5）
 - [ ] 顶栏 / RunList：状态徽标、预算、操作、`awaiting_human` 高亮
-- [ ] 端到端（离线）：起 server → 建 run → 前端看到 DAG → Gate 处人工介入
+- [ ] 端到端：起 server → 建 run → 前端看到 DAG → Gate 处人工介入（测试以 fake provider 驱动）
 - [ ] 测试：组件测试（proto 消息 fixture）+ 冒烟
 
-验收：从前端发起一次核验（样例、离线），看到由抽象论点拆解出的 DAG，可在 Gate 处人工介入；
+验收：从前端发起一次核验（样例），看到由抽象论点拆解出的 DAG，可在 Gate 处人工介入；
 架构红线未被突破（前端不编排、server 拥有调度）。
 
 ---
@@ -186,8 +190,8 @@ Gate A 可挂起并可恢复；同一 fixture 两次运行产出同一 Board。
 
 ## M3 · agent runtime 与 capabilities
 
-目标：真实执行走 container-per-run（容器内多 Worker）；能力与 prompt 可切换；
-能力经 MCP 暴露；支持异步 Hint 与停止/恢复。
+目标：真实执行走 container-per-run（容器内多 Worker）；能力经 MCP 暴露；
+支持异步 Hint 与停止/恢复。（`search`/`model`/prompt provider 已提前至 M1。）
 
 - [ ] Docker runtime：每次 run 一个临时容器，内含 N≥1 Worker，挂载 run dir，run 结束销毁
 - [ ] server 侧容器生命周期管理（创建/监控/回收）与 Dispatcher 接入（协议唯一写入者）
@@ -195,12 +199,13 @@ Gate A 可挂起并可恢复；同一 fixture 两次运行产出同一 Board。
 - [ ] 可控性：随时停止/恢复，状态完整保留；Intent 心跳超时释放
 - [ ] 异步 Hint 注入（`author=human|agent`）不阻塞 run
 - [ ] **Gate C（最终审阅）**：记分卡产出前人工确认，可要求重查（新生 Intent）
-- [ ] `search` provider 真实接入：`exa` / `parallel`
-- [ ] `prompt` provider 真实接入：`local` / `langfuse`
-- [ ] `model` provider 真实接入（M1 的录制/回放之后，落地真实调用）
+- [ ] `prompt` provider `langfuse` 真实接入（`local` 已于 M1 可用）
 - [ ] `originweave capabilities list|install-obscura` 实现
 - [ ] `originweave mcp` 暴露 capability / 只读 run 视图（不承担调度）
-- [ ] 集成测试：离线重放路径 + 至少一条真实 provider 冒烟（受凭据约束时可跳过）
+- [ ] 集成测试：`replay` 路径 + 至少一条真实 provider 冒烟（受凭据约束时可跳过）
+
+> **Phase R 调整**：原「`search`/`prompt`/`model` provider 真实接入」条目中的
+> `search` 与 `model` **已提前至 M1**；M3 起不再有离线/录制回放。
 
 验收：一次真实 run 在临时容器内完成；容器随 run 结束被回收；预算触顶、停止/恢复、
 Hint 注入、Gate C 行为均可观测。
@@ -211,7 +216,7 @@ Hint 注入、Gate C 行为均可观测。
 
 目标：端到端闭环、server 容器化部署，以及文档/契约一致性回归（server 与前端已在 M1c-1 / M1c-2 落地）。
 
-- [ ] 端到端 `make demo`（离线）：资料 A → 抽象论点 → DAG → 记分卡 → 前端可见 → `replay` 可复现
+- [ ] 端到端 `make demo`：资料 A → 抽象论点 → DAG → 记分卡 → 前端可见 → `replay` 可复现
 - [ ] server 运行于 Docker（Deployment 层）
 - [ ] 文档一致性回归：`overview/`、`proto/` 与本文件术语/契约无漂移
 
@@ -231,7 +236,7 @@ Hint 注入、Gate C 行为均可观测。
 - [ ] 事件 `ENTITY` / `RELATION` writer + reducer 分支（纯 fold，追加式）
 - [ ] Intent 类型 `extract`（实体抽取）/ `relate`（关系判别），复用 OODA 与 Dispatcher
 - [ ] 实体消歧/合并：按规范化名称归并同名实体，`aliases` 累积（保证重放确定性）
-- [ ] server `CreateRun(analysis=relation|both)` 触发关系图抽取，离线可跑
+- [ ] server `CreateRun(analysis=relation|both)` 触发关系图抽取（测试注入 fake provider）
 - [ ] run dir 产物 `entity-graph.json`（可由事件重建，非事实来源）
 - [ ] 无来源推断标注：`Relation.status=inferred` + 置信度，渲染为虚线
 - [ ] server：`RunDetail.entity_graph` 与 `CreateRunRequest.analysis`（proto）
@@ -239,6 +244,6 @@ Hint 注入、Gate C 行为均可观测。
 - [ ] 单测：给定 fixture 输入产出确定性 `EntityGraph`（实体 / 关系 / 证据或 `inferred` 断言）
 - [ ] 关系样例 fixture（含多个组织，新增于 `examples/`）
 
-验收：`CreateRun(analysis=relation)` 离线产出一张实体-关系图，每条关系或带
+验收：`CreateRun(analysis=relation)` 产出一张实体-关系图，每条关系或带
 `quote+url` 证据、或标记 `inferred`（虚线 + 置信度）；UI 的 `RELATIONS` 页签可查看并
 回链证据；`replay` 复现同一张图；架构红线未被突破。

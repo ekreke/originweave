@@ -5,23 +5,30 @@
 
 ## 下一个任务
 
-- **M1 · 黑板与 Agent 循环**（见 `SPEC.md` 的 M1 小节）。核心新增：`model` capability
-  （录制/回放）、OODA 三任务、真线程多 Worker + Dispatcher 确定性提交、进程内 Dispatcher、
-  Gate A。样例的录制 query/prompt 清单见 `examples/copilot_productivity/README.md`，
-  编排需与其对齐；M1 还需为样例补录 `capabilities/model/**`。
-- 随后：M1c-1（server 骨架）→ M1c-2（前端接线与 UI）。
+- **Phase R · 代码迭代**（文档已于本轮完成，见「已完成」）：移除离线/录制机制——
+  删 `capabilities/cache.py` / `record.py` 与样例 `capabilities/**`；`config.py` 去
+  `[live]`/`ORIGINWEAVE_LIVE`、加 `ModelConfig`；`capabilities/__init__.py` 改
+  `get_search/get_prompt/get_model`；`search.py` 实现真实 `exa`/`parallel`；新增
+  `capabilities/model.py`（OpenAI 兼容）；`cli.py` 去 live；`build_sample_fixtures.py`
+  只出 `events.jsonl`；`Makefile` 去 `LIVE`；重写相关测试（注入 fake provider）。
+- 随后：**M1**（引擎 + 真实 `model`/`search`，见 `SPEC.md`）→ M1c-1（server）→ M1c-2（前端）。
 
 ## 待确认决策
 
 - [x] 配置文件的默认格式与落盘位置（`init` 产物）→ 项目内 `originweave.toml`（M0b 定）
 - [x] `search` / `prompt` 的 provider 凭据管理方式 → 仅环境变量（M0b 定）
-- [x] capability 录制格式 → 每次调用一个 JSON，`<run-dir>/capabilities/<provider>/<request_hash>.json`（M0b 定）
+- [x] ~~capability 录制格式~~ → **已撤销**（Phase R：能力改为真实调用，无 cache/录制）
 - [x] run dir 的默认根目录 → server 写 `runs/`（gitignored，`Makefile` 的 `RUNS_DIR`），
   `replay`/`ui` 读已入库的样例目录（`RUN_DIR`）（M0d 定）
 - [x] 起 run 的入口 → **无 CLI `trace`**，走 server / proto `CreateRun`（契约重排定）
 - [x] proto 方案 → **Connect / buf**，契约 `proto/originweave/v1/*.proto`（契约重排定）
 - [x] 前端 → **React + Vite + `@connectrpc/connect-web`**，直连 proto、无 mock（契约重排定）
-- [x] OODA 的模型抽象 → 新增 **`model` capability**（与 search/prompt 同构），provider 名 `local`（契约重排定）
+- [x] OODA 的模型抽象 → `model` capability，**真实 OpenAI 兼容 provider**（Phase R 定；原「录制/回放」已撤销）
+- [x] 在线/离线 → **移除离线/录制**（`LIVE`/cache/`Recording*`/`Cached*`）；能力永远真实调用；
+  `replay` 只重放事件日志（Phase R 定）
+- [x] `[capability.model]` 默认 → `provider="openai"`、`model="deepseek-v4.1-flash"`、
+  `base_url="http://power.acme.red/v1"`（备选 `https://llm.ekreke.cn/v1` + 免费模型）；
+  凭据 `OPENAI_API_KEY`（`OPENAI_BASE_URL` 覆盖）（Phase R 定）
 - [x] 前端包管理/工具链 → **pnpm + Vite + React + TS**，ESLint + Prettier + Vitest（M1b 定）
 - [x] 图渲染库 → **React Flow**（`@xyflow/react`），provenance DAG 与 RELATIONS 复用（M1b 定）
 - [x] proto → TS 代码生成 → **本地插件 + 产物不入库**（`@bufbuild/protoc-gen-es`）（M1b 定）
@@ -37,21 +44,33 @@
 
 ## 已知风险 / 缺口
 
+- **文档先行漂移（Phase R）**：契约文档已声明移除离线/录制，但 `config.py` 的 `[live]`、
+  `capabilities/cache.py` / `record.py`、样例 `capabilities/**`、`Makefile` 的 `LIVE` **尚未清理**，
+  待「Phase R 代码迭代」。这是有意的契约先行，不是遗漏。
+- 能力调用**不再可复现**：live run（真实 model/search）两次结论可能不同；「可重放」仅靠
+  `events.jsonl` 事件日志成立。
+- 测试/CI 不打真网 → provider 测试**必须注入 fake**；live 冒烟需凭据，CI 跳过。
+- 旧 `originweave.toml`（含 `[live]`）在 Phase R 代码迭代后会因未知键报错（仓库无提交的 toml，影响小）。
 - 前端 `frontend/` 已入库（M1b 脚手架），但**尚无真实数据**（不接 mock）：DAG/Gate UI 与
   server 接线归 M1c-2；在此之前 UI 只是可维护的界面壳。
 - `Makefile` 的 `demo` target 依赖 M4 的 server + 前端，现阶段只打印提示（不执行）。
-- 样例的真实数据具时效性：离线可复现的对象是 `examples/copilot_productivity/` 的**录制快照**，
-  不保证重新联网再跑一遍结果一致。
 - **契约重排**把 server API 与前端从 M4 提前到 **M1b/M1c-1/M1c-2**，M4 收缩为端到端 / Deployment / 文档回归；
   期间 `dashboard.md §4` 已由 REST 改为 proto，`product-overview.md §5` 已移除 `trace`。
 - **契约-代码漂移（M5 范围，未实现）**：`Entity`/`Relation`/`EntityGraph`、`ENTITY`/`RELATION`
   事件、`Intent.extract`/`relate`、`CreateRun.analysis` 已在 `overview/` + `proto/` 冻结契约中，
   但 `model.py` / `events.py` / `reduce.py` / server 尚未实现（归 M5）。
 - M0b 遗留（review 判定非阻塞，可后补）：异常层次未完全收口（`LocalPrompt` 的
-  `FileNotFoundError`、`cache.read` 的坏 JSON）、`capabilities list` 的 `ready` 文案在 M3 前有歧义、
-  cache 写入非原子、`max_wall` 未做 duration 校验、部分 provider 分支测试缺失。
+  `FileNotFoundError`）、`capabilities list` 的 `ready` 文案待重整、`max_wall` 未做 duration 校验、
+  部分 provider 分支测试缺失。（原 cache 相关遗留随 Phase R 撤销。）
 
 ## 已完成（近期）
+
+- **Phase R · 移除离线/录制（文档部分）**：契约改为「能力真实调用」——`agent-design.md`
+  §2/§2.1 去「离线优先」与 `[live]`、删 §2.2「录制与重放布局」、run dir 去 `capabilities/`、
+  加 `[capability.model]`（OpenAI 兼容：`deepseek-v4.1-flash`）；`product-overview.md`（可重放
+  语义 + 非目标）；`SPEC.md`（M0b/M0d 标注撤销、M1 扩为真实 `model`+`search`、M3 瘦身、
+  M1c/M4/M5 去离线、M1 验收改为「`replay` 确定 + live 结构断言」）；`milestones.md`；
+  `AGENTS.md` / `README.md`；样例 README。**代码清理留待「Phase R 代码迭代」。**
 
 - **M1c 拆分**：原 M1c（server + 前后端接线）拆为 **M1c-1（server 骨架，依赖 M1）** 与
   **M1c-2（前端接线与 UI，依赖 M1c-1）**；M2 依赖改 M1c-2。决策：server 栈
@@ -74,7 +93,8 @@
   （起 run 走 server/proto）；`agent-design.md §2` 增 `model` capability；新增
   `proto/originweave/v1/originweave.proto` + `buf.yaml` / `buf.gen.yaml`；`cli.py` 移除 `trace`。
 
-- **M0d 离线样例**：`examples/copilot_productivity/`（资料 A + 两个一手来源冻结快照 +
+- **M0d 离线样例**（**Phase R 撤销**样例的 `capabilities/**` 录制；现仅 `input/`+`sources/`+`events.jsonl`）：
+  `examples/copilot_productivity/`（资料 A + 两个一手来源冻结快照 +
   录制的 `capabilities/**` + `events.jsonl`）；`scripts/build_sample_fixtures.py` 确定性生成
   事件与录制（`--check` 校验产物）；`originweave replay` 离线复现 Board；放宽 `.gitignore`
   放行 `examples/**/*.jsonl`；`Makefile` 区分 `RUN_DIR`（样例）与 `RUNS_DIR`（运行产物）。
@@ -91,7 +111,7 @@
 - **M0b 配置与 capability 层骨架**：`config.py`（`originweave.toml`，`tomllib` 读 / `tomli-w` 写，
   未知键报错，`ORIGINWEAVE_LIVE` 覆盖）、`capabilities/`（Protocol + exa/parallel/local/langfuse
   注册表 + 录制/回放 + `build_search`/`build_prompt` 离线-联机接线）、CLI 接线 `init` 与
-  `capabilities list`。
+  `capabilities list`。（**Phase R 撤销**：`ORIGINWEAVE_LIVE`、cache、录制/回放部分。）
 - 引入**黑板架构**（参考 Cairn）：新增 `docs/overview/blackboard-protocol.md`，
   重写 `agent-design.md` 的循环为 OODA + Bootstrap/Reason/Explore；领域模型新增
   `Fact/Intent/Hint`、`origin/goal` 特殊 Fact、`Fact.role`、`Intent.type`，事件改为
