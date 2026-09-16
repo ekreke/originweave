@@ -63,18 +63,23 @@
 
 ---
 
-## M0d · 迁入 obscura_kitesurf spike
+## M0d · 构建 copilot_productivity 离线样例
 
-目标：把真实样例固化为端到端 fixtures，供 `make demo` / `make run` 使用。
+目标：从零构建一份真实、可离线重放的溯源 fixtures（无既有 spike 可迁），供 `replay`
+与后续 `make demo` 使用。
 
-- [ ] 迁入资料 A（`examples/obscura_kitesurf/`，替换占位 README）
-- [ ] 迁入来源快照（可回链的原文/存档）
-- [ ] 迁入录制的 capability 响应（检索 + prompt），供离线运行
-- [ ] `make demo` 端到端可跑（mock / cache）
-- [ ] `make run` 可起本地环境（`LIVE=0` 默认离线）
-- [ ] 文档：样例说明与预期产物
+- [x] 资料 A：`examples/copilot_productivity/input/`（真实公开页冻结快照 + `source.json`）
+- [x] 来源快照：`examples/copilot_productivity/sources/`（GitHub 实验室 / Accenture 企业研究 + `manifest.json`）
+- [x] 录制的 capability 响应（检索 + prompt）：`capabilities/exa/*.json` + `capabilities/local/*.json`，`LIVE=0` 命中
+- [x] 录制的 run 事件日志 `events.jsonl`，由 `scripts/build_sample_fixtures.py` 生成且产物入库
+- [x] `originweave replay examples/copilot_productivity` 只读复现 Board（不触网）
+- [x] `.gitignore` 放行 `examples/**/*.jsonl`
+- [x] 单测：replay 确定性/结构、证据逐字可回链、离线 capability 命中、fixture 可重生成
+- [x] 文档：样例说明与预期偏差（`examples/copilot_productivity/README.md`）
 
-验收：全新环境 `make demo` 产出 DAG + 记分卡（可先为简化版）且不触网。
+验收：全新环境 `originweave replay examples/copilot_productivity` 复现同一 Board、不触网；
+离线 capability 全部命中录制。`make demo` 的 DAG + 记分卡端到端（`trace`，数据具时效性）
+归 M1/M2，端到端 `make demo` 由 M4 收口。
 
 ---
 
@@ -97,7 +102,7 @@
 - [ ] `--auto` 全自动路径（跳过 Gate）
 - [ ] 单测：给定 fixture 输入，产出确定性 Board/DAG（节点/边/证据断言）
 
-验收：对 `obscura_kitesurf` 样例，核心抽象论点被拆解为子断言，每条子断言可回溯到
+验收：对 `copilot_productivity` 样例，核心抽象论点被拆解为子断言，每条子断言可回溯到
 至少一条带 `quote+url` 的证据或标记为 `open`；≥2 Worker 并发时无 Intent 重复执行；
 Gate A 可挂起并可恢复。
 

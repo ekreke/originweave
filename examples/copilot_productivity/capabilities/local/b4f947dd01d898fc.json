@@ -1,0 +1,13 @@
+{
+  "op": "prompt",
+  "params": {
+    "name": "verify"
+  },
+  "provider": "local",
+  "recordedAt": "2026-09-16T00:00:00+00:00",
+  "response": {
+    "name": "verify",
+    "text": "Compare each sub-claim against its cited primary source. Report deviations with a verbatim quote, URL, and locator.",
+    "version": null
+  }
+}

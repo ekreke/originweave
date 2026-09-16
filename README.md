@@ -2,8 +2,8 @@
 
 给定资料 A，定位其核心说法的真实源头，判定 A 相对源头的偏差，输出**可审计的溯源 DAG + 偏差记分卡**（每项结论带来源 URL + 逐字引用，可回链、可重放）。
 
-> 当前处于 **M0b（配置与 capability 层骨架）**阶段：脚手架已就绪，`originweave init`
-> 与 `originweave capabilities list` 可用；`trace` / `ui` / `replay` / `mcp` 仍为占位。
+> 当前处于 **M0d（离线样例）**之后：脚手架、配置/capability 层、事件日志与 `replay`，
+> 以及 `examples/copilot_productivity/` 离线样例均已就绪；`trace` / `ui` / `mcp` 仍为占位。
 > 版本与里程碑见 `milestones.md`，设计与契约见 `docs/overview/`。
 
 ## 快速开始
@@ -12,6 +12,7 @@
 make install             # uv sync，安装运行 + dev 依赖
 uv run originweave init  # 生成项目内 originweave.toml（已存在需 --force）
 uv run originweave capabilities list   # 查看 provider 与凭据就绪情况
+uv run originweave replay examples/copilot_productivity   # 离线复现样例 Board
 make lint                # ruff check + mypy
 make test                # pytest
 make cloc                # src/originweave 逻辑代码行数
@@ -23,16 +24,18 @@ make cloc                # src/originweave 逻辑代码行数
 |---|---|
 | `install` | `uv sync`，安装运行依赖 + dev 依赖（ruff / mypy / pytest）。 |
 | `run` | 起本地测试环境，离线优先（`LIVE=1` 触网）。**尚未实现（后续 milestone）。** |
-| `demo` | 端到端跑样例（mock / 缓存）。**尚未实现（后续 milestone）。** |
+| `demo` | 端到端跑样例（写入 `runs/`）。**尚未实现（依赖 `trace`，后续 milestone）。** |
+| `fixtures` | 重新生成样例的 `events.jsonl` 与 `capabilities/**`（确定性、产物入库）。 |
 | `test` | `pytest`。 |
 | `lint` | `ruff check` + `mypy`。 |
 | `fmt` | `ruff format`。 |
 | `ui` | 只起只读 UI 服务。**尚未实现（后续 milestone）。** |
-| `replay` | `originweave replay <run-dir>`。**尚未实现（后续 milestone）。** |
+| `replay` | `originweave replay <run-dir>`（离线、不触网）。 |
 | `cloc` | 仅统计 `src/originweave` 逻辑代码行数。 |
 | `clean` | 清缓存与临时 run。 |
 
-> `run` / `demo` / `ui` / `replay` 依赖的业务逻辑由后续 milestone 落地（见 `milestones.md`）。
+> `run` / `demo` / `ui` 依赖的业务逻辑由后续 milestone 落地（见 `milestones.md`）。
+> `RUN_DIR=examples/copilot_productivity` 是入库样例，`RUNS_DIR=runs` 是运行产物（不入库）。
 
 ## 结构
 

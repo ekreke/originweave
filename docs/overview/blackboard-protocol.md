@@ -24,8 +24,8 @@
 ```text
 Board {
   status,               # queued | running | awaiting_human | paused | stopped | completed | failed
-  origin:  Fact,        # 特殊 Fact，role=origin
-  goal:    Fact,        # 特殊 Fact，role=goal
+  origin:  Fact,        # 特殊 Fact，kind=origin（role=none）
+  goal:    Fact,        # 特殊 Fact，kind=goal（role=none）
   facts:   Fact[],      # 已确认的发现
   intents: Intent[],    # 待探索的方向（粉笔问号）
   hints:   Hint[],      # 经验提示（便利贴）

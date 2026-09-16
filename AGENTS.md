@@ -21,8 +21,11 @@
   `originweave capabilities list`、配置加载/校验、capability 注册表与录制/回放，
   以及事件日志 → 黑板 reducer → `originweave replay <run-dir>`（只读、不触网）。
 - **stub（打印 “not implemented yet”、返回 0）**：`trace` / `ui` / `mcp` /
-  `capabilities install-obscura`。`make demo` / `run` / `ui` 依赖这些实现，现在只会命中 stub；
-  `replay` 已接线，但 `examples/obscura_kitesurf/` 还没有 `events.jsonl`（M0d 才迁入 fixtures）。
+  `capabilities install-obscura`。`make demo` / `run` / `ui` 依赖这些实现，现在只会命中 stub。
+  `replay` 已接线，`examples/copilot_productivity/` 已含录制好的 `events.jsonl` 与
+  `capabilities/**`（M0d），`make replay` 可离线复现 Board。
+- 样例 fixture 由 `scripts/build_sample_fixtures.py` 确定性生成（`--check` 校验）；
+  改样例事件/录制后要重跑该脚本。资料 A 与来源是**冻结快照**，重新联网结果具时效性。
 - **默认离线**（`LIVE=0`）：capability 走录制回放，不触网。`exa` / `parallel` / `langfuse`
   的**真实联网调用 M3 才落地**，现在调用会抛 `ProviderUnavailableError`。
 - `prompts/` 目录与前端源码当前都不存在（前端 M4 从零重建）。
@@ -32,8 +35,8 @@
 ```bash
 make install                # uv sync
 make test                   # pytest（addopts=-q）
-make lint                   # ruff check src tests + mypy src（mypy strict，只查 src）
-make fmt                    # ruff format src tests
+make lint                   # ruff check src tests scripts + mypy src（mypy strict，只查 src）
+make fmt                    # ruff format src tests scripts
 make cloc                   # 仅统计 src/originweave 逻辑行数
 uv run pytest tests/test_config.py::test_default_values   # 跑单个测试
 ```

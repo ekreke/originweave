@@ -1,0 +1,22 @@
+{
+  "sources": [
+    {
+      "id": "s1",
+      "title": "Research: quantifying GitHub Copilot's impact on developer productivity and happiness",
+      "url": "https://github.blog/news-insights/research/research-quantifying-github-copilots-impact-on-developer-productivity-and-happiness/",
+      "publisher": "The GitHub Blog",
+      "publishedAt": "2022-09-07",
+      "retrievedAt": "2026-09-16T00:00:00+00:00",
+      "snapshot": "github_copilot_lab_2022.md"
+    },
+    {
+      "id": "s2",
+      "title": "Research: Quantifying GitHub Copilot's impact in the enterprise with Accenture",
+      "url": "https://github.blog/news-insights/research/research-quantifying-github-copilots-impact-in-the-enterprise-with-accenture/",
+      "publisher": "The GitHub Blog",
+      "publishedAt": "2024-05-13",
+      "retrievedAt": "2026-09-16T00:00:00+00:00",
+      "snapshot": "github_copilot_accenture_2024.md"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "op": "search",
+  "params": {
+    "limit": 5,
+    "query": "GitHub Copilot Accenture enterprise study 84% successful builds"
+  },
+  "provider": "exa",
+  "recordedAt": "2026-09-16T00:00:00+00:00",
+  "response": [
+    {
+      "published": "2024-05-13",
+      "snippet": "84% increase in successful builds; 15% increase to the pull request merge rate",
+      "title": "Research: Quantifying GitHub Copilot's impact in the enterprise with Accenture",
+      "url": "https://github.blog/news-insights/research/research-quantifying-github-copilots-impact-in-the-enterprise-with-accenture/"
+    }
+  ]
+}

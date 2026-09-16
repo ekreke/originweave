@@ -13,6 +13,7 @@ node_modules/
 htmlcov/
 runs/
 *.jsonl
+!examples/**/*.jsonl
 .DS_Store
 .idea/
 .vscode/
