@@ -26,6 +26,10 @@
   在此之前 UI 不能视为可维护资产。
 - `Makefile` 的 `demo`/`run`/`ui` target 依赖尚不存在的 `trace`/`ui` 实现，现阶段执行会命中 stub。
 - `examples/obscura_kitesurf/` 仅有占位 README，M0d 才迁入真实 fixtures。
+- **契约-代码漂移（M5 范围，未实现）**：`Entity`/`Relation`/`EntityGraph`、`ENTITY`/`RELATION`
+  事件、`Intent.extract`/`relate`、CLI `--analysis` 已在 `overview/` 冻结契约中，但
+  `model.py` / `events.py` / `reduce.py` / `cli.py` 尚未实现（归 M5）。
+  另：`stopped`/`failed` 已进 `Run.status` 契约，但 `model.RUN_STATUSES` 未同步（M1/M5 落地时一并改）。
 - M0b 遗留（review 判定非阻塞，可后补）：异常层次未完全收口（`LocalPrompt` 的
   `FileNotFoundError`、`cache.read` 的坏 JSON）、`capabilities list` 的 `ready` 文案在 M3 前有歧义、
   cache 写入非原子、`max_wall` 未做 duration 校验、部分 provider 分支测试缺失。
@@ -34,7 +38,7 @@
 
 - **M5 契约入库**（未实现）：`milestones.md` 增 M5；`SPEC.md` 增 M5 小节；`overview/` 新增
   `Entity`/`Relation`/`EntityGraph`、关系本体表、`ENTITY`/`RELATION` 事件、Intent `extract`/`relate`、
-  CLI `trace --mode`、`Run.analysis` 与 `dashboard` 的 `RELATIONS`/`ENTITIES` 页签、`RunDetail.entityGraph`；
+  CLI `trace --analysis`、`Run.analysis` 与 `dashboard` 的 `RELATIONS`/`ENTITIES` 页签、`RunDetail.entityGraph`；
   `dashboard.md` 新建 run body 的 `mode` 改名 `sourceType` 并新增 `analysis`。
 
 - **M0c 黑板事件日志与事件溯源**：`model.py`（Board/Fact/Intent/Hint/Edge/HumanDecision）、

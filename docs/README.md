@@ -27,12 +27,12 @@ docs/
 | 术语 | 含义 |
 |---|---|
 | **资料 A** | 待核验的输入文档（网页 URL 或纯文本）。溯源与偏差判定的对象。 |
-| **黑板（Blackboard）** | 共享的 append-only 全局状态（`Board`），承载 origin/goal/facts/intents/hints，是唯一事实来源。 |
+| **黑板（Blackboard）** | 共享的 append-only 全局状态（`Board`），承载 origin/goal/facts/intents/hints/entities/relations，是唯一事实来源。 |
 | **Origin** | 黑板起点，特殊 Fact，即资料 A 的锚点。 |
 | **Goal** | 黑板终点，特殊 Fact，即溯源停止条件 / 偏差判定标准。 |
 | **Fact** | 已确认的发现（节点）。`kind` ∈ origin/goal/fact/citation/source/boundary/compare/deviation；`role` ∈ main-claim/sub-claim/none。 |
 | **抽象论点** | 资料 A 的核心主张（`Fact.role=main-claim`），须拆解为子断言（`sub-claim`）后逐条验证。 |
-| **Intent** | 待探索的方向（黑板上的问号）。`type` ∈ decompose/explore/verify；`status` ∈ open/claimed/done/dropped/awaiting_human。 |
+| **Intent** | 待探索的方向（黑板上的问号）。`type` ∈ decompose/explore/verify/extract/relate；`status` ∈ open/claimed/done/dropped/awaiting_human。 |
 | **Hint** | 经验提示（便利贴），`author` ∈ human/agent；不参与 DAG 连通性。 |
 | **OODA** | Agent 工作循环：Observe → Orient → Decide → Act → Write Back。 |
 | **Bootstrap / Reason / Explore** | 三种任务指令，每次只给 Worker 其一。 |
@@ -41,9 +41,13 @@ docs/
 | **HITL** | Human-in-the-loop。主动写 Hint，或在关键 Gate 被动确认（run → `awaiting_human`）。 |
 | **Gate** | HITL 阻塞点：A 论点确认 / B 歧义裁决 / C 最终审阅。 |
 | **provenance DAG** | 溯源有向无环图。节点为 Fact/Intent，边表示推导/探索关系。 |
+| **Entity** | 实体-关系图的节点（人/组织/产品/地点等），`type` ∈ person/organization/product/location/event/other；同名按规范化名称归并（`aliases`）。 |
+| **Relation** | 实体-关系图的边（有向）。`type` 取自关系本体；`inferred=true` 表示无来源推断（虚线）。 |
+| **关系本体** | Relation 的预定义类型集合（`subsidiary-of`/`invests-in`/…/`other`），只建正向，反向标签由渲染层派生。 |
+| **EntityGraph** | 与 provenance DAG 并列的第二张图（Entity + Relation），共享同一 run 与事件溯源。 |
 | **evidence** | 节点上的证据：`quote`（逐字引用）+ `sourceTitle` + `url` + `locator`。可回链的依据。 |
 | **deviation** | A 相对源头的偏差项（篡改、改写、省略、归因错误、时间错置等），带 `severity` 与 `confidence`。 |
-| **run** | 一次端到端核验的执行实例，产出 DAG + 偏差记分卡 + report。 |
+| **run** | 一次端到端核验的执行实例，产出 DAG + 偏差记分卡 + report；`analysis` 含 relation 时另含实体-关系图。 |
 | **run dir** | 一次 run 的持久化目录，含 append-only 事件日志与快照，可 `replay` 重放。 |
 | **capability** | 外部能力抽象（检索、prompt 获取等），provider 可替换。 |
 | **verdict** | report 的整体判定（如"部分偏差"）。 |

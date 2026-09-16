@@ -44,6 +44,10 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
     `decomposes` 点线、`spawns`/`resolves` —— 见 `blackboard-protocol.md`）。
   - **FACTS** — 事实表：`ID | Kind | Statement | Conf. | Evidence`。
   - **INTENTS** — Intent 表：`ID | Type | Question | Status | From`，含 `dropped`（死胡同）。
+  - **RELATIONS** — 实体-关系图（`analysis` 含 relation 时）。复用 PROVENANCE DAG 的图
+    组件：`Entity` 按 `type`（person/organization/product/location/event/other）着色，
+    边标 `Relation.type`，`inferred=true` 用虚线（无来源推断）。
+  - **ENTITIES** — 实体表：`ID | Name | Type | Aliases | Conf. | Mentions`。
   - **EVENTS** — 事件时间线，按 `tone` 着色（黑板协议事件）。
 - 右栏 **INSPECTOR**：选中节点详情（`role`/`from`/`spawns`/`resolved-by`）、
   逐字引用（`quote + sourceTitle + locator`）、`Intent open/claimed/done/dropped` 计数、
@@ -90,6 +94,10 @@ RunDetail {
   intents:    Intent[],     # 待探索/进行中/已完成
   hints:      Hint[],
   edges:      Edge[],
+  entityGraph?: {           # analysis 含 relation 时
+    entities:  Entity[],
+    relations: Relation[]
+  },
   deviations: Deviation[],
   events:     Event[],
   waitingFor?: { gate, question },   # 仅当 run.status = awaiting_human
@@ -108,8 +116,9 @@ RunDetail {
 ```text
 {
   projectId: string,
-  title?:    string,        # 缺省时按 mode 生成（"网页资料核验" / "文本主张核验"）
-  mode:      "url" | "text",
+  title?:    string,        # 缺省时按 sourceType 生成（"网页资料核验" / "文本主张核验"）
+  sourceType: "url" | "text",
+  analysis?: "provenance" | "relation" | "both",   # 默认 "provenance"
   goal:      string,
   maxSteps:  number,
   auto?:     boolean        # true = 全自动，跳过 HITL Gate（默认 false）
@@ -140,7 +149,8 @@ POST /api/runs/:runId/human-input
 ### 4.5 领域类型
 
 `Project` / `Run` / `Fact` / `Intent` / `Hint` / `Edge` / `Evidence` /
-`Deviation` / `Event` / `Report` 的定义一律以 `product-overview.md` 第 4 节与
+`Deviation` / `Event` / `Report` / `Entity` / `Relation` / `EntityGraph` 的定义一律以
+`product-overview.md` 第 4 节与
 `blackboard-protocol.md` 为准，此处不重复。
 
 ## 5. 契约原型与样例

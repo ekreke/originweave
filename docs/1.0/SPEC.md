@@ -172,7 +172,7 @@ Hint 注入、Gate C 行为均可观测。
 - [ ] 事件 `ENTITY` / `RELATION` writer + reducer 分支（纯 fold，追加式）
 - [ ] Intent 类型 `extract`（实体抽取）/ `relate`（关系判别），复用 OODA 与 Dispatcher
 - [ ] 实体消歧/合并：按规范化名称归并同名实体，`aliases` 累积（保证重放确定性）
-- [ ] `originweave trace <target> --mode relation|both`（替换 stub），离线可跑
+- [ ] `originweave trace <target> --analysis relation|both`（替换 stub），离线可跑
 - [ ] run dir 产物 `entity-graph.json`（可由事件重建，非事实来源）+ `--json` 输出
 - [ ] 无来源推断标注：`Relation.status=inferred` + 置信度，渲染为虚线
 - [ ] server：`RunDetail.entityGraph` 与 `POST /api/runs` 的 `analysis` 字段
@@ -180,6 +180,6 @@ Hint 注入、Gate C 行为均可观测。
 - [ ] 单测：给定 fixture 输入产出确定性 `EntityGraph`（实体 / 关系 / 证据或 `inferred` 断言）
 - [ ] 关系样例 fixture（含多个组织，新增于 `examples/`）
 
-验收：`trace <target> --mode relation` 离线产出一张实体-关系图，每条关系或带
+验收：`trace <target> --analysis relation` 离线产出一张实体-关系图，每条关系或带
 `quote+url` 证据、或标记 `inferred`（虚线 + 置信度）；UI 的 `RELATIONS` 页签可查看并
 回链证据；`replay` 复现同一张图；架构红线未被突破。

@@ -27,7 +27,7 @@ originweave 的四条硬性原则：
 | | 内容 |
 |---|---|
 | 输入 | 资料 A：网页 URL（`sourceType: url`）或纯文本（`sourceType: text`）；以及可选的 `goal`（停止条件/判定标准） |
-| 产物 | ① 溯源 DAG（Fact/Intent 节点 + 边 + 证据）② 偏差记分卡（deviation 列表）③ report（verdict + summary + findings + sources）④ append-only 事件时间线 |
+| 产物 | ① 溯源 DAG（Fact/Intent 节点 + 边 + 证据）② 偏差记分卡（deviation 列表）③ report（verdict + summary + findings + sources）④ append-only 事件时间线 ⑤ 实体-关系图（可选，`--analysis relation\|both`） |
 
 ## 4. 领域模型（冻结契约）
 
@@ -45,9 +45,11 @@ Run {
   id,                      # "run_009" 形态
   projectId, title,
   sourceType,              # url | text
+  analysis,                # provenance | relation | both（默认 provenance）
   status,                  # queued | running | awaiting_human | paused | stopped | completed | failed
   goal,                    # 停止条件 / 判定标准
   facts, deviations,       # 计数
+  entities, relations,     # 实体-关系图计数（analysis != provenance 时）
   intents: { open, done }, # Intent 计数
   confidence,              # 0..1 整体置信度
   steps:  { current, total },
@@ -74,11 +76,14 @@ Fact {
 }
 
 Intent {
-  id, type, status,        # type: decompose | explore | verify
+  id, type, status,        # type: decompose | explore | verify | extract | relate
   from, question,          # status: open | claimed | done | dropped | awaiting_human
   producedFacts[],
   claimedBy, heartbeatAt, createdAt
 }
+```
+`extract` / `relate` 只在 `analysis` 含 relation 时使用，产出 `Entity` / `Relation`
+（见下方实体-关系图小节），不改动 `facts`。
 
 Hint { id, text, author, createdAt }   # author: human | agent
 
@@ -109,6 +114,62 @@ Evidence { id, quote, sourceTitle, url, locator }
 - `spawns` — Fact → Intent（探索声明）。
 - `resolves` — Intent → Fact（产出结论）。
 
+### 实体-关系图（`analysis` 含 relation 时）
+
+与溯源 DAG **并列的第二张图**，共享同一 run 与事件溯源；节点是实体、边是实体间关系。
+字段名同样是冻结契约。
+
+```text
+Entity {
+  id, name,
+  type,                    # person | organization | product | location | event | other
+  aliases: string[],       # 同名/别名归并结果
+  status,                  # verified | open | flagged
+  confidence,              # 0..1
+  note,
+  position: { x, y },      # 渲染侧可重算
+  evidence: Evidence[]     # 可空（允许无来源推断）
+}
+
+Relation {
+  id,
+  source, target,          # Entity id（有向）
+  type,                    # 关系本体，见下表
+  label,                   # A 中的原文表述（展示用，可为空）
+  status,                  # verified | inferred | open | flagged
+  confidence,              # 0..1
+  inferred,                # true = 无来源推断（渲染为虚线）
+  note,
+  evidence: Evidence[]     # inferred 时可空
+}
+
+EntityGraph { entities: Entity[], relations: Relation[] }
+```
+
+`Entity.type` 语义：`person` / `organization` / `product` / `location` / `event` / `other`。
+
+`Relation.status` 语义：`verified` = 有 `quote+url` 证据；`inferred` = 无来源推断
+（`inferred=true`，渲染为虚线，须带置信度）；`open` = 待核实；`flagged` = 存疑。
+
+**关系本体（预定义类型）**——只建正向，反向标签由渲染层派生（如 `subsidiary-of`
+反读为「母公司」）：
+
+| `type` | 方向 | 含义 |
+|---|---|---|
+| `subsidiary-of` | org → org | 隶属 / 子公司 |
+| `invests-in` | person/org → org | 投资 |
+| `acquires` | org → org | 收购 / 合并 |
+| `partners-with` | org ↔ org | 合作（对称） |
+| `competes-with` | org ↔ org | 竞争（对称） |
+| `supplies` | org → org | 供应 |
+| `employs` | org → person | 雇佣 / 任职 |
+| `founded` | person/org → org | 创始 |
+| `owns` | person/org → org | 拥有 / 控制 |
+| `located-in` | org → location | 位于 |
+| `other` | any | 未归入上述类型的兜底 |
+
+同类实体**按规范化名称归并**（保留 `aliases`），保证 `replay` 产出确定性。
+
 ### Deviation 与 Report
 ```text
 Deviation { id, title, summary, severity, confidence, nodeId }   # severity: high | medium | low
@@ -126,11 +187,12 @@ Report {
 Event {
   id, at, type,           # type: PROJECT | INTENT | EXECUTE | CONCLUDE | REASON |
   message, tone,          #       COMPLETE | HEARTBEAT | RELEASE | HINT |
-  payload                 #       REQUEST_HUMAN | HUMAN_INPUT
+  payload                 #       REQUEST_HUMAN | HUMAN_INPUT | ENTITY | RELATION
 }                          # tone: info | success | warning | danger
 ```
 事件类型（黑板协议）：`PROJECT` / `INTENT` / `EXECUTE` / `CONCLUDE` / `REASON` /
-`COMPLETE` / `HEARTBEAT` / `RELEASE` / `HINT` / `REQUEST_HUMAN` / `HUMAN_INPUT`。
+`COMPLETE` / `HEARTBEAT` / `RELEASE` / `HINT` / `REQUEST_HUMAN` / `HUMAN_INPUT` /
+`ENTITY` / `RELATION`。
 `type` 决定事件种类，`payload` 携带该种类的结构化字段（逐事件字段表见
 [`blackboard-protocol.md`](blackboard-protocol.md) 第 5 节）；`message` / `tone` 仅用于展示。
 
@@ -142,7 +204,7 @@ originweave --version
 originweave trace <target> [--out report.md] [--run <dir>]
                  [--provider exa|parallel] [--prompt-provider local|langfuse]
                  [--max-steps N] [--max-wall <dur>] [--max-cost <usd>]
-                 [--auto] [--json]
+                 [--analysis provenance|relation|both] [--auto] [--json]
 originweave ui   [--run <dir>] [--port 8765]
 originweave replay <run-dir>
 originweave capabilities list|install-obscura
@@ -151,14 +213,16 @@ originweave init
 ```
 
 `--auto`：全自动，跳过 HITL Gate（默认人工介入）。
+`--analysis`：`provenance`（默认）只跑溯源 DAG；`relation` 只跑实体-关系图；`both` 两者都跑。
 
-实现状态：`init`（生成 `originweave.toml`，已存在需 `--force`）与
-`capabilities list` 已实现（M0b）；`trace` / `ui` / `replay` / `mcp` /
+实现状态：`init`（生成 `originweave.toml`，已存在需 `--force`）、`capabilities list`
+（M0b）与 `replay`（M0c，只读重放）已实现；`trace` / `ui` / `mcp` /
 `capabilities install-obscura` 仍为占位，逐个 milestone 落地（`src/originweave/cli.py`）。
 
 ## 6. 非目标（Non-goals）
 
 - 不做"真/假"的终审判定；只给出偏差与证据（verdict 表述为偏差性质）。
+- 关系图中的 `inferred` 边是**显式标注的推断**（虚线 + 置信度），不等同于有证据的结论。
 - 不做通用搜索引擎；检索能力由可替换的 capability provider 提供。
 - 不做多租户 / 权限体系（1.0 范围内）。
 - 不在前端做执行编排或容器生命周期管理（见 `agent-design.md` 第 7 节）。

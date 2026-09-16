@@ -180,7 +180,7 @@ Write Back → 把结论写回黑板（Fact + Evidence）
 
 关键：`extract / fetch / link / compare` **不是写死的阶段**，而是 Intent `type` 按需涌现。
 
-`--mode relation`（或 `both`）时，同一循环改为处理 `extract`（抽实体）与 `relate`
+`--analysis relation`（或 `both`）时，同一循环改为处理 `extract`（抽实体）与 `relate`
 （判关系）两类 Intent，产出写入 `entities` / `relations` 而非 `facts`；事件溯源、
 心跳释放、Stigmergy 与 Gate 机制不变。
 

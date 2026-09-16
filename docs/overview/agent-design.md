@@ -120,7 +120,7 @@ f1..f4 × s* --Intent(verify)--> p1 比对 --> d1/d2 偏差
 全部子断言回链且偏差判定完成 --> COMPLETE(记分卡)
 ```
 
-`--mode relation|both` 时并行产出**实体-关系图**（`blackboard-protocol.md` §2.6）：
+`--analysis relation|both` 时并行产出**实体-关系图**（`blackboard-protocol.md` §2.6）：
 ```text
 origin(资料A) --Intent(extract)--> e1/e2/e3 实体(Entity: name+type+evidence?)
 e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
