@@ -1,12 +1,9 @@
-"""Regenerate the deterministic offline fixtures for the ``copilot_productivity`` sample.
+"""Regenerate the deterministic fixtures for the ``copilot_productivity`` sample.
 
-The sample under ``examples/copilot_productivity/`` is a *recorded* run: an
-append-only event log plus the capability responses that run depended on. This
-script rebuilds both artefacts from a single in-code definition so they stay in
-sync and byte-reproducible:
-
-* ``events.jsonl``            via :meth:`originweave.store.RunStore.append_event`
-* ``capabilities/**/*.json``  via :meth:`originweave.capabilities.cache.ResponseCache.write`
+The sample under ``examples/copilot_productivity/`` is an append-only event log.
+This script rebuilds it from a single in-code definition
+so it stays in sync and byte-reproducible, via
+:meth:`originweave.store.RunStore.append_event`.
 
 Hand-written snapshots (``input/`` and ``sources/``) are *not* regenerated.
 
@@ -25,11 +22,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from originweave.capabilities.cache import ResponseCache
 from originweave.store import RunStore
 
 DEFAULT_ROOT = Path("examples/copilot_productivity")
-RECORDED_AT = "2026-09-16T00:00:00+00:00"
 _BASE_TIME = datetime(2026, 9, 16, 0, 0, 0, tzinfo=UTC)
 
 DOC_URL = (
@@ -48,16 +43,6 @@ S2_URL = (
 DOC_TITLE = "55% Faster Code, 84% Better Builds: GitHub Copilot's Real Enterprise Impact"
 S1_TITLE = "Research: quantifying GitHub Copilot's impact on developer productivity and happiness"
 S2_TITLE = "Research: Quantifying GitHub Copilot's impact in the enterprise with Accenture"
-
-#: ``(query, limit)`` pairs the sample agent is expected to issue; kept here so
-#: M1 orchestration can align its queries with the recorded responses.
-SEARCH_QUERIES: tuple[tuple[str, int], ...] = (
-    ("GitHub Copilot 55% faster developer productivity study", 5),
-    ("GitHub Copilot Accenture enterprise study 84% successful builds", 5),
-)
-
-#: Prompt template names the sample agent is expected to resolve.
-PROMPT_NAMES: tuple[str, ...] = ("bootstrap", "decompose", "verify")
 
 _EVIDENCE: dict[str, dict[str, str]] = {
     "e1": {
@@ -615,114 +600,23 @@ def _events() -> list[tuple[str, dict[str, Any], str, str]]:
     return events
 
 
-def _capability_records() -> list[tuple[str, str, dict[str, Any], Any]]:
-    search_q1, limit1 = SEARCH_QUERIES[0]
-    search_q2, limit2 = SEARCH_QUERIES[1]
-    return [
-        (
-            "exa",
-            "search",
-            {"query": search_q1, "limit": limit1},
-            [
-                {
-                    "title": S1_TITLE,
-                    "url": S1_URL,
-                    "snippet": (
-                        "developers who used GitHub Copilot completed the task significantly "
-                        "faster-55% faster ... 95% confidence interval ... [21%, 89%]"
-                    ),
-                    "published": "2022-09-07",
-                },
-                {
-                    "title": DOC_TITLE,
-                    "url": DOC_URL,
-                    "snippet": (
-                        "in a controlled enterprise study with Accenture, developers using it "
-                        "completed tasks 55% faster"
-                    ),
-                    "published": None,
-                },
-            ],
-        ),
-        (
-            "exa",
-            "search",
-            {"query": search_q2, "limit": limit2},
-            [
-                {
-                    "title": S2_TITLE,
-                    "url": S2_URL,
-                    "snippet": (
-                        "84% increase in successful builds; 15% increase to the pull request "
-                        "merge rate"
-                    ),
-                    "published": "2024-05-13",
-                },
-            ],
-        ),
-        (
-            "local",
-            "prompt",
-            {"name": "bootstrap"},
-            {
-                "name": "bootstrap",
-                "text": (
-                    "Read document A. Identify its single core abstract claim, then list the "
-                    "sub-claims a reader must accept for it to hold."
-                ),
-                "version": None,
-            },
-        ),
-        (
-            "local",
-            "prompt",
-            {"name": "decompose"},
-            {
-                "name": "decompose",
-                "text": (
-                    "Split the core claim into independently verifiable sub-claims. For each, "
-                    "state what evidence would confirm or refute it."
-                ),
-                "version": None,
-            },
-        ),
-        (
-            "local",
-            "prompt",
-            {"name": "verify"},
-            {
-                "name": "verify",
-                "text": (
-                    "Compare each sub-claim against its cited primary source. Report deviations "
-                    "with a verbatim quote, URL, and locator."
-                ),
-                "version": None,
-            },
-        ),
-    ]
-
-
 def _build_events(store: RunStore) -> None:
     for event_type, payload, message, at in _events():
         store.append_event(event_type, payload, message=message, at=at)
 
 
 def build(root: Path) -> None:
-    """(Re)write ``events.jsonl`` and ``capabilities/**`` under ``root``."""
+    """(Re)write ``events.jsonl`` under ``root`` (``capabilities/`` is obsolete)."""
     events_path = root / "events.jsonl"
     if events_path.exists():
         events_path.unlink()
-    capabilities = root / "capabilities"
-    if capabilities.exists():
-        shutil.rmtree(capabilities)
+    obsolete = root / "capabilities"
+    if obsolete.exists():
+        shutil.rmtree(obsolete)
 
     store = RunStore(root)
     store.init_layout()
     _build_events(store)
-
-    cache = ResponseCache(capabilities)
-    for provider, op, params, response in _capability_records():
-        cache.write(provider, op, params, response, recorded_at=RECORDED_AT)
 
 
 def _snapshot(root: Path) -> dict[str, bytes]:
@@ -730,10 +624,6 @@ def _snapshot(root: Path) -> dict[str, bytes]:
     events_path = root / "events.jsonl"
     if events_path.is_file():
         snapshot["events.jsonl"] = events_path.read_bytes()
-    capabilities = root / "capabilities"
-    if capabilities.is_dir():
-        for path in sorted(capabilities.rglob("*.json")):
-            snapshot[str(path.relative_to(root))] = path.read_bytes()
     return snapshot
 
 
@@ -745,6 +635,9 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root)
 
     if args.check:
+        if (root / "capabilities").exists():
+            print(f"{root}/capabilities is obsolete; run scripts/build_sample_fixtures.py")
+            return 1
         with tempfile.TemporaryDirectory() as tmp:
             candidate = Path(tmp) / "root"
             build(candidate)

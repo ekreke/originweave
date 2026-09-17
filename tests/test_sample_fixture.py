@@ -9,15 +9,6 @@ from types import ModuleType
 
 import pytest
 
-from originweave import config
-from originweave.capabilities import (
-    CachedPrompt,
-    CachedSearch,
-    CacheMissError,
-    ResponseCache,
-    build_prompt,
-    build_search,
-)
 from originweave.cli import main
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -41,16 +32,6 @@ def _read_board(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
 
 def _collapse(text: str) -> str:
     return " ".join(text.split())
-
-
-def _offline_config() -> config.Config:
-    return config.Config(
-        live=config.LiveConfig(enabled=False),
-        capability=config.CapabilityConfig(
-            search=config.SearchConfig(provider="exa"),
-            prompt=config.PromptConfig(provider="local", directory="prompts"),
-        ),
-    )
 
 
 def test_replay_reproduces_expected_board(capsys: pytest.CaptureFixture[str]) -> None:
@@ -112,32 +93,3 @@ def test_fixtures_are_up_to_date(tmp_path: Path) -> None:
     assert (tmp_path / "sample" / "events.jsonl").read_bytes() == (
         SAMPLE / "events.jsonl"
     ).read_bytes()
-    for path in sorted((SAMPLE / "capabilities").rglob("*.json")):
-        rel = path.relative_to(SAMPLE)
-        assert (tmp_path / "sample" / rel).read_bytes() == path.read_bytes()
-
-
-def test_recorded_capabilities_replay_offline(monkeypatch: pytest.MonkeyPatch) -> None:
-    builder = _load_builder()
-    cache = ResponseCache(SAMPLE / "capabilities")
-
-    def _no_network(*args: object, **kwargs: object) -> None:
-        raise AssertionError("network access attempted during offline replay")
-
-    monkeypatch.setattr(socket, "socket", _no_network)
-
-    search = build_search(_offline_config(), cache)
-    assert isinstance(search, CachedSearch)
-    for query, limit in builder.SEARCH_QUERIES:
-        assert search.search(query, limit=limit)
-
-    prompt = build_prompt(_offline_config(), cache)
-    assert isinstance(prompt, CachedPrompt)
-    for name in builder.PROMPT_NAMES:
-        assert prompt.get(name).text
-
-
-def test_unrecorded_query_is_a_cache_miss() -> None:
-    cache = ResponseCache(SAMPLE / "capabilities")
-    with pytest.raises(CacheMissError):
-        build_search(_offline_config(), cache).search("an unrecorded query", limit=5)

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -26,7 +27,11 @@ class LocalPrompt:
     def directory(self) -> Path:
         return self._directory
 
-    def get(self, name: str) -> PromptTemplate:
+    async def get(self, name: str) -> PromptTemplate:
+        # Keep the blocking file read off the event loop.
+        return await asyncio.to_thread(self._read, name)
+
+    def _read(self, name: str) -> PromptTemplate:
         for suffix in _SUFFIXES:
             candidate = self._directory / f"{name}{suffix}"
             if candidate.is_file():
@@ -41,7 +46,7 @@ class LangfusePrompt:
     def __init__(self) -> None:
         self._missing = [var for var in LANGFUSE_ENV_VARS if not os.environ.get(var)]
 
-    def get(self, name: str) -> PromptTemplate:
+    async def get(self, name: str) -> PromptTemplate:
         if self._missing:
             raise MissingCredentialError(f"missing env vars: {', '.join(self._missing)}")
         raise ProviderUnavailableError(

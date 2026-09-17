@@ -44,11 +44,12 @@ examples/copilot_productivity/
 
 能力为**真实调用**（Phase R 起无离线缓存 / 录制回放）：
 
-- `search`（exa / parallel）：检索来源、定位一手材料
+- `search`（exa / parallel，免费 MCP 端点）：检索来源、定位一手材料，返回文本上下文
 - `model`（OpenAI 兼容）：OODA 的 `Bootstrap` / `Reason` / `Explore`
 - `prompt`（`local`）：模板位于仓库 `prompts/` 目录
 
-凭据只从环境变量读（`EXA_API_KEY` / `PARALLEL_API_KEY` / `OPENAI_API_KEY`）。
+凭据只从环境变量读、**多为可选**：`EXA_API_KEY` / `PARALLEL_API_KEY`（search 免费端点默认免 key）、
+`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）。
 **本样例不再提供录制响应**；`replay` 复现的是 `events.jsonl` 这份事件日志，而非能力调用。
 
 ## 运行

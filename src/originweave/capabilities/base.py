@@ -1,9 +1,12 @@
 """Capability abstractions: stable interfaces for external services.
 
-A *capability* is an externally-backed operation (search, prompt retrieval).
-Concrete *providers* implement these protocols and are interchangeable. Keeping
-the interfaces provider-agnostic lets orchestration stay decoupled from any
-specific SDK (see ``docs/overview/agent-design.md``).
+A *capability* is an externally-backed operation (search, prompt retrieval,
+model completion). Concrete *providers* implement these protocols and are
+interchangeable. Keeping the interfaces provider-agnostic lets orchestration stay
+decoupled from any specific SDK (see ``docs/overview/agent-design.md``).
+
+All capability calls are asynchronous and hit real services; credentials (when
+needed) are read from environment variables only. Tests inject fakes.
 """
 
 from __future__ import annotations
@@ -21,19 +24,11 @@ class MissingCredentialError(CapabilityError):
 
 
 class ProviderUnavailableError(CapabilityError):
-    """Raised when a provider exists but its live implementation is not ready."""
+    """Raised when a provider exists but is not implemented yet."""
 
 
-class CacheMissError(CapabilityError):
-    """Raised when an offline replay finds no recorded response."""
-
-
-@dataclass(frozen=True)
-class SearchResult:
-    title: str
-    url: str
-    snippet: str = ""
-    published: str | None = None
+class ProviderError(CapabilityError):
+    """Raised when a provider call fails (transport, status, or malformed body)."""
 
 
 @dataclass(frozen=True)
@@ -47,8 +42,8 @@ class PromptTemplate:
 class SearchProvider(Protocol):
     name: str
 
-    def search(self, query: str, *, limit: int = 10) -> list[SearchResult]:
-        """Return up to ``limit`` results for ``query``."""
+    async def search(self, query: str, *, num_results: int = 8) -> str:
+        """Return a text context for ``query`` (results formatted for a model)."""
         ...
 
 
@@ -56,6 +51,17 @@ class SearchProvider(Protocol):
 class PromptProvider(Protocol):
     name: str
 
-    def get(self, name: str) -> PromptTemplate:
+    async def get(self, name: str) -> PromptTemplate:
         """Return the named prompt template."""
         ...
+
+
+__all__ = [
+    "CapabilityError",
+    "MissingCredentialError",
+    "PromptProvider",
+    "PromptTemplate",
+    "ProviderError",
+    "ProviderUnavailableError",
+    "SearchProvider",
+]

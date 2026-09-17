@@ -44,7 +44,7 @@
 
 > **Phase R 撤销**：原条目「`LIVE` 开关」「`LIVE=0` 默认离线」「本地 cache / mock 后端」
 > 「capability 调用可录制」已移除——能力改为**真实调用**（见 `agent-design.md` §2）。
-> 对应代码（`[live]`、`capabilities/cache.py`、`record.py`、样例 `capabilities/**`）待后续代码迭代清理。
+> 对应代码（`[live]`、`capabilities/cache.py`、`record.py`、样例 `capabilities/**`）已于 Phase R 代码迭代清理。
 
 验收：配置加载与 provider 解析可用（引擎循环属 M1，仍为 stub）。
 
@@ -88,19 +88,19 @@
 ## M1 · 黑板与 Agent 循环
 
 目标：实现黑板块与 OODA 工作循环，从 A 抽取抽象论点并拆解、回链来源；支持多 Worker
-真线程并发与 HITL Gate A。引擎为**库层**（进程内 Dispatcher），**不经 CLI 暴露**；
+asyncio 任务并发与 HITL Gate A。引擎为**库层**（进程内 Dispatcher），**不经 CLI 暴露**；
 API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）与 `search`（exa/parallel）。
 
 - [x] 黑板模型：`Board{origin,goal,facts,intents,hints}` 与 `Fact`（kind/role/status/confidence/evidence）、`Intent`、`Hint` — `src/originweave/blackboard.py`（M0c）
 - [x] `origin`/`goal` 特殊 Fact（`kind` 区分、`role=none`）；`Fact.role = main-claim | sub-claim` — `blackboard.py`（M0c）
 - [x] DAG 组装与边 relation：`main-chain/dependency/goal-derived/decomposes/spawns/resolves` — `src/originweave/reduce.py`（M0c）
-- [ ] `model` capability：`ModelProvider` Protocol + **真实 OpenAI 兼容 provider**（`capabilities/model.py`、`[capability.model]`；凭据 `OPENAI_API_KEY` / `OPENAI_BASE_URL`）
-- [ ] `search` capability 真实接入：`exa` / `parallel`（`capabilities/search.py`；凭据 `EXA_API_KEY` / `PARALLEL_API_KEY`）
+- [x] `model` capability：`ModelProvider` Protocol + **真实 OpenAI 兼容 provider**（`capabilities/model.py`、`[capability.model]`；`OPENAI_API_KEY` + `OPENAI_BASE_URL`（端点经环境变量提供））（Phase R）
+- [x] `search` capability 真实接入：`exa` / `parallel`（`capabilities/search.py`；免费 MCP 端点，`EXA_API_KEY` / `PARALLEL_API_KEY` 可选）（Phase R）
 - [ ] 三种任务指令：`Bootstrap` / `Reason` / `Explore`
 - [ ] Intent 三型调度分支：`decompose` / `explore` / `verify`
 - [ ] 抽象论点抽取与拆解（`Bootstrap` → `main-claim`；`Intent(decompose)` → `sub-claim`）
 - [ ] 来源回链：`citation` / `source` 节点与 `Evidence{quote,sourceTitle,url,locator}` 登记
-- [ ] 多 Worker 真线程并发认领 Intent + 心跳/超时自动释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按确定性顺序提交，保证 Board 确定
+- [ ] 多 Worker asyncio 任务并发认领 Intent + 心跳/超时自动释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按确定性顺序提交，保证 Board 确定
 - [ ] Stigmergy：新 Fact 触发新一轮 Reason（去重）
 - [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回（唯一写入者）
 - [ ] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1c-2）

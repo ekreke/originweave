@@ -1,38 +1,60 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
+import httpx
 import pytest
 
 from originweave import config
 from originweave.capabilities import (
-    CachedPrompt,
-    CachedSearch,
-    CacheMissError,
     CapabilityError,
+    ChatMessage,
+    ExaSearch,
     MissingCredentialError,
-    ProviderUnavailableError,
-    RecordingPrompt,
-    RecordingSearch,
-    ResponseCache,
-    SearchResult,
+    OpenAIModel,
+    ParallelSearch,
+    ProviderError,
+    build_model,
     build_prompt,
     build_search,
+    get_model,
     get_prompt,
     get_search,
-    request_key,
 )
+from originweave.capabilities.search import EXA_URL, PARALLEL_URL, parse_response
 
 
-class _FakeSearch:
-    name = "fake"
-
-    def search(self, query: str, *, limit: int = 10) -> list[SearchResult]:
-        return [SearchResult(title="t", url="https://example.org", snippet="s")]
+def _mcp_payload(text: str) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": text}]}}
 
 
-class _FakeExa(_FakeSearch):
-    name = "exa"
+def _mcp_handler(
+    text: str, *, capture: dict[str, Any], status: int = 200
+) -> Any:
+    def handler(request: httpx.Request) -> httpx.Response:
+        capture["url"] = str(request.url)
+        capture["headers"] = dict(request.headers)
+        capture["body"] = json.loads(request.content)
+        return httpx.Response(status, json=_mcp_payload(text))
+
+    return handler
+
+
+def _chat_handler(content: str, *, capture: dict[str, Any], status: int = 200) -> Any:
+    def handler(request: httpx.Request) -> httpx.Response:
+        capture["url"] = str(request.url)
+        capture["headers"] = dict(request.headers)
+        capture["body"] = json.loads(request.content)
+        return httpx.Response(
+            status, json={"choices": [{"message": {"role": "assistant", "content": content}}]}
+        )
+
+    return handler
+
+
+# --------------------------------------------------------------------- registry
 
 
 def test_get_search_returns_provider() -> None:
@@ -45,29 +67,17 @@ def test_get_search_rejects_unknown() -> None:
         get_search("google")
 
 
-def test_exa_requires_credential(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("EXA_API_KEY", raising=False)
-    with pytest.raises(MissingCredentialError):
-        get_search("exa").search("q")
+def test_get_model_returns_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    provider = get_model("openai", model="m", base_url="https://api.example/v1")
+    assert isinstance(provider, OpenAIModel)
+    assert provider.model == "m"
+    assert provider.base_url == "https://api.example/v1"
 
 
-def test_exa_with_credential_is_not_live_yet(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("EXA_API_KEY", "secret")
-    with pytest.raises(ProviderUnavailableError):
-        get_search("exa").search("q")
-
-
-def test_local_prompt_reads_directory(tmp_path: Path) -> None:
-    prompts = tmp_path / "prompts"
-    prompts.mkdir()
-    (prompts / "claim.txt").write_text("extract claims\n", encoding="utf-8")
-    provider = get_prompt("local", directory=prompts)
-    assert provider.get("claim").text == "extract claims"
-
-
-def test_local_prompt_missing_raises(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError):
-        get_prompt("local", directory=tmp_path).get("absent")
+def test_get_model_rejects_unknown() -> None:
+    with pytest.raises(CapabilityError):
+        get_model("anthropic", model="m", base_url="https://api.example/v1")
 
 
 def test_get_prompt_rejects_unknown() -> None:
@@ -75,72 +85,237 @@ def test_get_prompt_rejects_unknown() -> None:
         get_prompt("openai")
 
 
-def test_request_key_is_order_insensitive_but_param_sensitive() -> None:
-    a = request_key("exa", "search", {"query": "q", "limit": 10})
-    b = request_key("exa", "search", {"limit": 10, "query": "q"})
-    c = request_key("exa", "search", {"query": "q", "limit": 5})
-    assert a == b
-    assert a != c
+async def test_local_prompt_reads_directory(tmp_path: Path) -> None:
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "claim.txt").write_text("extract claims\n", encoding="utf-8")
+    provider = get_prompt("local", directory=prompts)
+    template = await provider.get("claim")
+    assert template.text == "extract claims"
 
 
-def test_recording_then_replay_roundtrip(tmp_path: Path) -> None:
-    cache = ResponseCache(tmp_path / "capabilities")
-    live = RecordingSearch(_FakeSearch(), cache).search("hello", limit=3)
-    replayed = CachedSearch("fake", cache).search("hello", limit=3)
-    assert replayed == live
-    assert cache.path_for("fake", "search", {"query": "hello", "limit": 3}).is_file()
+async def test_local_prompt_missing_raises(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        await get_prompt("local", directory=tmp_path).get("absent")
 
 
-def test_cached_search_miss_raises(tmp_path: Path) -> None:
-    cache = ResponseCache(tmp_path / "capabilities")
-    with pytest.raises(CacheMissError):
-        CachedSearch("fake", cache).search("absent")
+def _cfg() -> config.Config:
+    return config.Config()
 
 
-def test_cache_write_records_metadata(tmp_path: Path) -> None:
-    cache = ResponseCache(tmp_path / "capabilities")
-    params = {"query": "q", "limit": 1}
-    path = cache.write("exa", "search", params, [{"title": "t", "url": "u"}])
-    record = cache.read("exa", "search", params)
-    assert record is not None
-    assert record["provider"] == "exa"
-    assert record["op"] == "search"
-    assert record["params"] == params
-    assert record["response"] == [{"title": "t", "url": "u"}]
-    assert "recordedAt" in record
-    assert path.parent.name == "exa"
+def test_build_helpers_select_configured_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    cfg = _cfg()
+    assert isinstance(build_search(cfg), ExaSearch)
+    assert build_prompt(cfg).name == "local"
+    assert isinstance(build_model(cfg), OpenAIModel)
 
 
-def _cfg(*, live: bool) -> config.Config:
-    return config.Config(live=config.LiveConfig(enabled=live))
+# ------------------------------------------------------------------- exa search
 
 
-def test_build_search_offline_replays_without_network(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_exa_search_calls_free_mcp_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    captured: dict[str, Any] = {}
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_mcp_handler("ctx", capture=captured)))
+    try:
+        provider = ExaSearch(client=client)
+        text = await provider.search("who is x", num_results=3)
+    finally:
+        await client.aclose()
+
+    assert text == "ctx"
+    assert captured["url"] == EXA_URL
+    assert captured["headers"]["accept"] == "application/json, text/event-stream"
+    assert captured["headers"]["user-agent"].startswith("originweave/")
+    body = captured["body"]
+    assert body["jsonrpc"] == "2.0"
+    assert body["id"] == 1
+    assert body["method"] == "tools/call"
+    assert body["params"]["name"] == "web_search_exa"
+    args = body["params"]["arguments"]
+    assert args["query"] == "who is x"
+    assert args["numResults"] == 3
+    assert args["type"] == "auto"
+    assert args["livecrawl"] == "fallback"
+
+
+async def test_exa_search_appends_api_key_when_present() -> None:
+    captured: dict[str, Any] = {}
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_mcp_handler("ctx", capture=captured)))
+    try:
+        provider = ExaSearch(api_key="secret", client=client)
+        await provider.search("q")
+    finally:
+        await client.aclose()
+    assert captured["url"] == f"{EXA_URL}?exaApiKey=secret"
+
+
+# -------------------------------------------------------------- parallel search
+
+
+async def test_parallel_search_uses_bearer_and_user_agent(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = ResponseCache(tmp_path / "capabilities")
-    RecordingSearch(_FakeExa(), cache).search("hello", limit=2)
+    monkeypatch.setenv("PARALLEL_API_KEY", "ptoken")
+    captured: dict[str, Any] = {}
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_mcp_handler("ctx", capture=captured)))
+    try:
+        provider = ParallelSearch(client=client)
+        await provider.search("q")
+    finally:
+        await client.aclose()
 
-    import socket
-
-    def _no_network(*args: object, **kwargs: object) -> None:
-        raise AssertionError("network access attempted during offline replay")
-
-    monkeypatch.setattr(socket, "socket", _no_network)
-
-    provider = build_search(_cfg(live=False), cache)
-    assert isinstance(provider, CachedSearch)
-    assert provider.search("hello", limit=2) == [
-        SearchResult(title="t", url="https://example.org", snippet="s")
-    ]
-
-
-def test_build_search_live_records(tmp_path: Path) -> None:
-    cache = ResponseCache(tmp_path / "capabilities")
-    assert isinstance(build_search(_cfg(live=True), cache), RecordingSearch)
+    assert captured["url"] == PARALLEL_URL
+    assert captured["headers"]["authorization"] == "Bearer ptoken"
+    assert captured["headers"]["user-agent"].startswith("originweave/")
+    body = captured["body"]
+    assert body["method"] == "tools/call"
+    assert body["params"]["name"] == "web_search"
+    assert body["params"]["arguments"]["objective"] == "q"
+    assert body["params"]["arguments"]["search_queries"] == ["q"]
 
 
-def test_build_prompt_selects_replay_or_record(tmp_path: Path) -> None:
-    cache = ResponseCache(tmp_path / "capabilities")
-    assert isinstance(build_prompt(_cfg(live=False), cache), CachedPrompt)
-    assert isinstance(build_prompt(_cfg(live=True), cache), RecordingPrompt)
+async def test_parallel_search_without_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PARALLEL_API_KEY", raising=False)
+    captured: dict[str, Any] = {}
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_mcp_handler("ctx", capture=captured)))
+    try:
+        await ParallelSearch(client=client).search("q")
+    finally:
+        await client.aclose()
+    assert "authorization" not in captured["headers"]
+
+
+# ---------------------------------------------------------------- search errors
+
+
+def test_parse_response_plain_json() -> None:
+    body = json.dumps(_mcp_payload("results"))
+    assert parse_response(body) == "results"
+
+
+def test_parse_response_sse_frames() -> None:
+    body = f"event: message\ndata: {json.dumps(_mcp_payload('results'))}\n\n"
+    assert parse_response(body) == "results"
+
+
+def test_parse_response_ignores_garbage() -> None:
+    assert parse_response("data: [DONE]\n\n") is None
+    assert parse_response("not json") is None
+
+
+async def test_search_http_error_raises_provider_error() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(500, text="boom"))
+    )
+    try:
+        with pytest.raises(ProviderError):
+            await ExaSearch(client=client).search("q")
+    finally:
+        await client.aclose()
+
+
+async def test_search_without_text_raises_provider_error() -> None:
+    payload = {"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": ""}]}}
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    )
+    try:
+        with pytest.raises(ProviderError):
+            await ExaSearch(client=client).search("q")
+    finally:
+        await client.aclose()
+
+
+async def test_search_connect_error_raises_provider_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(ProviderError):
+            await ExaSearch(client=client).search("q")
+    finally:
+        await client.aclose()
+
+
+# ---------------------------------------------------------------------- model
+
+
+async def test_openai_model_completes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    captured: dict[str, Any] = {}
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_chat_handler("hi", capture=captured)))
+    try:
+        provider = OpenAIModel(model="m", base_url="https://api.example/v1", client=client)
+        text = await provider.complete([ChatMessage(role="user", content="ping")])
+    finally:
+        await client.aclose()
+
+    assert text == "hi"
+    assert captured["url"] == "https://api.example/v1/chat/completions"
+    assert captured["headers"]["authorization"] == "Bearer k"
+    assert captured["body"]["model"] == "m"
+    assert captured["body"]["messages"] == [{"role": "user", "content": "ping"}]
+
+
+async def test_openai_model_base_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://override.example/v1/")
+    captured: dict[str, Any] = {}
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_chat_handler("hi", capture=captured)))
+    try:
+        provider = OpenAIModel(model="m", base_url="https://api.example/v1", client=client)
+        await provider.complete([ChatMessage(role="user", content="ping")])
+    finally:
+        await client.aclose()
+    assert provider.base_url == "https://override.example/v1"
+    assert captured["url"] == "https://override.example/v1/chat/completions"
+
+
+async def test_openai_model_requires_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    provider = OpenAIModel(model="m", base_url="https://api.example/v1")
+    with pytest.raises(MissingCredentialError):
+        await provider.complete([ChatMessage(role="user", content="ping")])
+
+
+async def test_openai_model_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(429, text="slow down"))
+    )
+    try:
+        provider = OpenAIModel(model="m", base_url="https://api.example/v1", client=client)
+        with pytest.raises(ProviderError):
+            await provider.complete([ChatMessage(role="user", content="ping")])
+    finally:
+        await client.aclose()
+
+
+async def test_openai_model_connect_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        provider = OpenAIModel(model="m", base_url="https://api.example/v1", client=client)
+        with pytest.raises(ProviderError):
+            await provider.complete([ChatMessage(role="user", content="ping")])
+    finally:
+        await client.aclose()
+
+
+async def test_openai_model_requires_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    provider = OpenAIModel(model="m", base_url="")
+    with pytest.raises(MissingCredentialError):
+        await provider.complete([ChatMessage(role="user", content="ping")])

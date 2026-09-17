@@ -13,7 +13,6 @@ def test_init_layout_creates_directories(tmp_path: Path) -> None:
     store.init_layout()
     assert store.input_dir.is_dir()
     assert store.sources_dir.is_dir()
-    assert store.capabilities_dir.is_dir()
     assert store.root.is_dir()
 
 

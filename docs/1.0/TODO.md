@@ -5,13 +5,11 @@
 
 ## 下一个任务
 
-- **Phase R · 代码迭代**（文档已于本轮完成，见「已完成」）：移除离线/录制机制——
-  删 `capabilities/cache.py` / `record.py` 与样例 `capabilities/**`；`config.py` 去
-  `[live]`/`ORIGINWEAVE_LIVE`、加 `ModelConfig`；`capabilities/__init__.py` 改
-  `get_search/get_prompt/get_model`；`search.py` 实现真实 `exa`/`parallel`；新增
-  `capabilities/model.py`（OpenAI 兼容）；`cli.py` 去 live；`build_sample_fixtures.py`
-  只出 `events.jsonl`；`Makefile` 去 `LIVE`；重写相关测试（注入 fake provider）。
-- 随后：**M1**（引擎 + 真实 `model`/`search`，见 `SPEC.md`）→ M1c-1（server）→ M1c-2（前端）。
+- **M1 · 黑板与 Agent 循环**（见 `SPEC.md` 的 M1 小节）：`model`/`search` provider 已在 Phase R
+  落地，M1 实现 OODA 循环（`Bootstrap`/`Reason`/`Explore`）、进程内 Dispatcher（唯一写入者、
+  认领去重、`HEARTBEAT`/`RELEASE`、**asyncio 任务并发、按 intent id 排序提交**）、Stigmergy、
+  Gate A，以及确定性 Board 单测；并为样例 `prompts/` 建模板。
+- 随后：M1c-1（server）→ M1c-2（前端接线与 UI）。
 
 ## 待确认决策
 
@@ -27,15 +25,14 @@
 - [x] 在线/离线 → **移除离线/录制**（`LIVE`/cache/`Recording*`/`Cached*`）；能力永远真实调用；
   `replay` 只重放事件日志（Phase R 定）
 - [x] `[capability.model]` 默认 → `provider="openai"`、`model="deepseek-v4.1-flash"`、
-  `base_url="http://power.acme.red/v1"`（备选 `https://llm.ekreke.cn/v1` + 免费模型）；
-  凭据 `OPENAI_API_KEY`（`OPENAI_BASE_URL` 覆盖）（Phase R 定）
+  `base_url=""`（**端点由 `OPENAI_BASE_URL` 提供，内网地址不入库**）；凭据 `OPENAI_API_KEY`（Phase R 定）
 - [x] 前端包管理/工具链 → **pnpm + Vite + React + TS**，ESLint + Prettier + Vitest（M1b 定）
 - [x] 图渲染库 → **React Flow**（`@xyflow/react`），provenance DAG 与 RELATIONS 复用（M1b 定）
 - [x] proto → TS 代码生成 → **本地插件 + 产物不入库**（`@bufbuild/protoc-gen-es`）（M1b 定）
 - [ ] server 监听端口（前端 `transport` 暂用 8787；与 CLI `ui` 的 8765 区分）→ M1c-1 定
 - [ ] Docker runtime 的镜像来源与构建归属（server 仓内构建 vs 独立镜像）
 - [ ] HITL Gate 的默认范围与配置粒度（三个 Gate 是否可逐项开关；`auto` 是否支持 per-gate）
-- [ ] Worker 并发数 N 的默认值与上限（真线程并发，Dispatcher 确定性提交；受预算约束）
+- [ ] Worker 并发数 N 的默认值与上限（asyncio 任务并发，Dispatcher 确定性提交；受预算约束）
 - [ ] 关系样例 fixture 来源（新增含多个组织的样例 vs 复用 `copilot_productivity`）
 - [ ] 实体消歧粒度：同名/别名归一的规范化规则（大小写、全称/简称、去空白）
 - [ ] CLI `capabilities install-obscura` 命名：旧 `obscura_kitesurf` 占位样例已被从零构建的
@@ -44,13 +41,12 @@
 
 ## 已知风险 / 缺口
 
-- **文档先行漂移（Phase R）**：契约文档已声明移除离线/录制，但 `config.py` 的 `[live]`、
-  `capabilities/cache.py` / `record.py`、样例 `capabilities/**`、`Makefile` 的 `LIVE` **尚未清理**，
-  待「Phase R 代码迭代」。这是有意的契约先行，不是遗漏。
 - 能力调用**不再可复现**：live run（真实 model/search）两次结论可能不同；「可重放」仅靠
   `events.jsonl` 事件日志成立。
-- 测试/CI 不打真网 → provider 测试**必须注入 fake**；live 冒烟需凭据，CI 跳过。
-- 旧 `originweave.toml`（含 `[live]`）在 Phase R 代码迭代后会因未知键报错（仓库无提交的 toml，影响小）。
+- 测试/CI 不打真网 → provider 测试**必须注入 fake**（`httpx.MockTransport`）；live 冒烟需凭据，CI 跳过。
+- 免费搜索走第三方公开 MCP 端点（`mcp.exa.ai` / `search.parallel.ai`），可能限流或变更；
+  已兼容普通 JSON 与 SSE 两种响应。
+- 旧 `originweave.toml`（含 `[live]`）会因未知键报错（仓库无提交的 toml，影响小）。
 - 前端 `frontend/` 已入库（M1b 脚手架），但**尚无真实数据**（不接 mock）：DAG/Gate UI 与
   server 接线归 M1c-2；在此之前 UI 只是可维护的界面壳。
 - `Makefile` 的 `demo` target 依赖 M4 的 server + 前端，现阶段只打印提示（不执行）。
@@ -59,18 +55,28 @@
 - **契约-代码漂移（M5 范围，未实现）**：`Entity`/`Relation`/`EntityGraph`、`ENTITY`/`RELATION`
   事件、`Intent.extract`/`relate`、`CreateRun.analysis` 已在 `overview/` + `proto/` 冻结契约中，
   但 `blackboard.py` / `events.py` / `reduce.py` / server 尚未实现（归 M5）。
+- **枚举定义双份**（`blackboard.py`）：`Literal` 别名（`FactKind` 等）与 `frozenset` 校验集
+  （`FACT_KINDS` 等）各写一遍、靠人工同步；且 dataclass 字段仍是 `str`、未用 `Literal` 标注，
+  mypy 静态检查未生效。可选收口：字段改用别名标注，或从 `Literal` 派生集合（`typing.get_args`）。
 - M0b 遗留（review 判定非阻塞，可后补）：异常层次未完全收口（`LocalPrompt` 的
-  `FileNotFoundError`）、`capabilities list` 的 `ready` 文案待重整、`max_wall` 未做 duration 校验、
-  部分 provider 分支测试缺失。（原 cache 相关遗留随 Phase R 撤销。）
+  `FileNotFoundError`）、`max_wall` 未做 duration 校验。（原 cache 相关遗留随 Phase R 撤销。）
 
 ## 已完成（近期）
+
+- **Phase R · 移除离线/录制（代码部分）**：删 `capabilities/cache.py` / `record.py` 与样例
+  `capabilities/**`；`config.py` 去 `[live]`/`ORIGINWEAVE_LIVE`、加 `ModelConfig`
+  （`openai` / `deepseek-v4.1-flash` / `base_url`）；`capabilities/` 改 `get_*`/`build_*`
+  + `MODEL_PROVIDERS`；`search.py` 改为**免费 MCP 端点**（`mcp.exa.ai` / `search.parallel.ai`，
+  免 key、可选 key；普通 JSON + SSE 解析，返回文本）；新增 `capabilities/model.py`（OpenAI 兼容，async）；
+  `cli.capabilities list` 去 live、加 model；`build_sample_fixtures.py` 只出 `events.jsonl`；
+  `Makefile` 去 `LIVE`；依赖加 `httpx`、dev 加 `pytest-asyncio`；测试重写（`httpx.MockTransport`，75 passed）。
 
 - **Phase R · 移除离线/录制（文档部分）**：契约改为「能力真实调用」——`agent-design.md`
   §2/§2.1 去「离线优先」与 `[live]`、删 §2.2「录制与重放布局」、run dir 去 `capabilities/`、
   加 `[capability.model]`（OpenAI 兼容：`deepseek-v4.1-flash`）；`product-overview.md`（可重放
   语义 + 非目标）；`SPEC.md`（M0b/M0d 标注撤销、M1 扩为真实 `model`+`search`、M3 瘦身、
   M1c/M4/M5 去离线、M1 验收改为「`replay` 确定 + live 结构断言」）；`milestones.md`；
-  `AGENTS.md` / `README.md`；样例 README。**代码清理留待「Phase R 代码迭代」。**
+  `AGENTS.md` / `README.md`；样例 README。（代码清理见上条「Phase R · 代码部分」。）
 
 - **M1c 拆分**：原 M1c（server + 前后端接线）拆为 **M1c-1（server 骨架，依赖 M1）** 与
   **M1c-2（前端接线与 UI，依赖 M1c-1）**；M2 依赖改 M1c-2。决策：server 栈

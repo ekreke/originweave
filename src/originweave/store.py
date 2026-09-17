@@ -4,9 +4,8 @@ A run directory looks like::
 
     <run-dir>/
     ├── events.jsonl        # append-only, one Event per line
-    ├── input/              # document A snapshot        (populated in M1)
-    ├── sources/            # source snapshots           (populated in M1)
-    ├── capabilities/       # recorded capability calls  (M0b writer, M0d fixtures)
+    ├── input/              # document A snapshot
+    ├── sources/            # source snapshots
     └── report.md           # final artefact             (populated in M2)
 """
 
@@ -17,8 +16,8 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
-from .events import DEFAULT_TONE, Event, format_event_id, now_iso
 from .blackboard import BlackboardError
+from .events import DEFAULT_TONE, Event, format_event_id, now_iso
 
 
 class RunStore:
@@ -44,17 +43,13 @@ class RunStore:
         return self._root / "sources"
 
     @property
-    def capabilities_dir(self) -> Path:
-        return self._root / "capabilities"
-
-    @property
     def report_path(self) -> Path:
         return self._root / "report.md"
 
     def init_layout(self) -> None:
         """Create the run directory and its sub-directories."""
         self._root.mkdir(parents=True, exist_ok=True)
-        for directory in (self.input_dir, self.sources_dir, self.capabilities_dir):
+        for directory in (self.input_dir, self.sources_dir):
             directory.mkdir(parents=True, exist_ok=True)
 
     def event_count(self) -> int:
@@ -73,9 +68,13 @@ class RunStore:
                 try:
                     data = json.loads(line)
                 except json.JSONDecodeError as exc:
-                    raise BlackboardError(f"{self.events_path}:{lineno}: invalid JSON: {exc}") from exc
+                    raise BlackboardError(
+                        f"{self.events_path}:{lineno}: invalid JSON: {exc}"
+                    ) from exc
                 if not isinstance(data, dict):
-                    raise BlackboardError(f"{self.events_path}:{lineno}: event must be a JSON object")
+                    raise BlackboardError(
+                        f"{self.events_path}:{lineno}: event must be a JSON object"
+                    )
                 yield Event.from_dict(data)
 
     def read_events(self) -> list[Event]:

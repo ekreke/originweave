@@ -28,10 +28,11 @@
   可不触网复现 Board。
 - 样例 fixture 由 `scripts/build_sample_fixtures.py` 确定性生成（`--check` 校验）；
   改样例事件后要重跑该脚本。资料 A 与来源是**冻结快照**，重新联网结果具时效性。
-- **能力为真实调用**（Phase R 已移除离线/cache/录制回放）：`search`/`model` 于 **M1** 落地，
-  `langfuse` 于 M3。凭据只从环境变量读：`EXA_API_KEY` / `PARALLEL_API_KEY` /
-  `OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）/ `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
-  单元测试**注入 fake provider**，不打真网。
+- **能力为真实调用**（Phase R 已移除离线/cache/录制回放）：`search`（免费 MCP 端点，
+  `exa`/`parallel`，**免 key**）与 `model`（OpenAI 兼容）已落地；`langfuse` 于 M3。
+  凭据只从环境变量读、**多为可选**：`EXA_API_KEY` / `PARALLEL_API_KEY`（可选，换配额）、
+  `OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、`LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
+  单元测试**注入 fake provider**（`httpx.MockTransport`），不打真网。
 - `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出）：前端 TS 由
   `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`），server Python 归 M1c-1（根 `buf.gen.yaml`）。
 - **前端（`frontend/`，M1b 脚手架）**：React + Vite + TS + React Flow + Connect；目前是
@@ -76,8 +77,9 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   `ConfigError`（防 `max_step` 之类拼写错误被静默忽略）。`CONFIG_FILENAME` 是**相对路径**，
   测试靠 `monkeypatch.chdir(tmp_path)`，不要在库代码里假设绝对路径。
 - **HITL 开关**：`[hitl].auto` 或 `CreateRunRequest.auto` 只控制 Gate（默认人工介入）。
-- **凭据只从环境变量读**，不写入配置：`EXA_API_KEY` / `PARALLEL_API_KEY` /
-  `OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）/ `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
+- **凭据只从环境变量读**，不写入配置，且**多为可选**：`EXA_API_KEY` / `PARALLEL_API_KEY`
+  （search 免费端点默认免 key）、`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、
+  `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
 - **能力为真实调用**（Phase R 已移除 `[live]`/cache/录制回放）：测试注入 fake provider，不打真网。
 - **事件字段名是契约**：`Event{id,at,type,message,tone,payload}`；reducer 只消费 `type`+`payload`，
   `message`/`tone` 仅展示。事件类型见 `docs/overview/blackboard-protocol.md` §5。

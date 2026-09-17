@@ -15,8 +15,16 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from . import config
-from .capabilities import ENV_VARS, LANGFUSE_ENV_VARS, PROMPT_PROVIDERS, SEARCH_PROVIDERS
 from .blackboard import BlackboardError
+from .capabilities import (
+    ENV_VARS,
+    LANGFUSE_ENV_VARS,
+    MODEL_PROVIDERS,
+    PROMPT_PROVIDERS,
+    SEARCH_PROVIDERS,
+)
+from .capabilities.model import BASE_URL_ENV_VAR as OPENAI_BASE_URL_ENV
+from .capabilities.model import ENV_VAR as OPENAI_ENV_VAR
 from .reduce import ReduceError, reduce, render_canonical, render_summary
 from .store import RunStore
 
@@ -84,7 +92,7 @@ def _cmd_capabilities(args: argparse.Namespace) -> int:
     print("search:")
     for name in sorted(SEARCH_PROVIDERS):
         env = ENV_VARS[name]
-        state = "ready" if os.environ.get(env) else f"missing {env}"
+        state = "free endpoint" + (f" · {env} set" if os.environ.get(env) else f" · {env} optional")
         mark = "*" if name == cfg.capability.search.provider else " "
         print(f" {mark} {name:<9} {state}")
 
@@ -97,6 +105,17 @@ def _cmd_capabilities(args: argparse.Namespace) -> int:
             state = "ready" if not missing else "missing " + ", ".join(missing)
         mark = "*" if name == cfg.capability.prompt.provider else " "
         print(f" {mark} {name:<9} {state}")
+
+    model_cfg = cfg.capability.model
+    print("model:")
+    for name in sorted(MODEL_PROVIDERS):
+        key = "set" if os.environ.get(OPENAI_ENV_VAR) else "not set"
+        base = "set" if os.environ.get(OPENAI_BASE_URL_ENV) else "unset"
+        mark = "*" if name == model_cfg.provider else " "
+        print(
+            f" {mark} {name:<9} model={model_cfg.model}"
+            f" · {OPENAI_BASE_URL_ENV} {base} · {OPENAI_ENV_VAR} {key}"
+        )
 
     return 0
 

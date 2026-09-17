@@ -2,7 +2,7 @@
 
 Provider names are validated against the allowed sets from
 :mod:`originweave.config`. Unknown names raise :class:`CapabilityError` with the
-list of valid options.
+list of valid options. Providers call real services; tests inject fakes.
 """
 
 from __future__ import annotations
@@ -11,20 +11,23 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from ..config import ALLOWED_PROMPT_PROVIDERS, ALLOWED_SEARCH_PROVIDERS, Config
+from ..config import (
+    ALLOWED_MODEL_PROVIDERS,
+    ALLOWED_PROMPT_PROVIDERS,
+    ALLOWED_SEARCH_PROVIDERS,
+    Config,
+)
 from .base import (
-    CacheMissError,
     CapabilityError,
     MissingCredentialError,
     PromptProvider,
     PromptTemplate,
+    ProviderError,
     ProviderUnavailableError,
     SearchProvider,
-    SearchResult,
 )
-from .cache import ResponseCache, request_key
+from .model import ChatMessage, ModelProvider, OpenAIModel
 from .prompt import LANGFUSE_ENV_VARS, LangfusePrompt, LocalPrompt
-from .record import CachedPrompt, CachedSearch, RecordingPrompt, RecordingSearch
 from .search import ENV_VARS, ExaSearch, ParallelSearch, credential_env
 
 SEARCH_PROVIDERS: dict[str, Callable[[], SearchProvider]] = {
@@ -35,6 +38,10 @@ SEARCH_PROVIDERS: dict[str, Callable[[], SearchProvider]] = {
 PROMPT_PROVIDERS: dict[str, Callable[[Path], PromptProvider]] = {
     "local": lambda directory: LocalPrompt(directory),
     "langfuse": lambda directory: LangfusePrompt(),
+}
+
+MODEL_PROVIDERS: dict[str, Callable[[str, str], ModelProvider]] = {
+    "openai": lambda model, base_url: OpenAIModel(model=model, base_url=base_url),
 }
 
 
@@ -56,52 +63,58 @@ def get_prompt(name: str, *, directory: str | os.PathLike[str] = "prompts") -> P
     return PROMPT_PROVIDERS[name](Path(directory))
 
 
-def build_search(config: Config, cache: ResponseCache) -> SearchProvider:
-    """Resolve the configured search provider, wired for live calls or replay.
-
-    When ``config.live.enabled`` is true the provider is called live and every
-    response is recorded; otherwise responses are replayed from ``cache`` and no
-    network access happens.
-    """
-    provider = get_search(config.capability.search.provider)
-    if config.live.enabled:
-        return RecordingSearch(provider, cache)
-    return CachedSearch(provider.name, cache)
+def get_model(name: str, *, model: str, base_url: str) -> ModelProvider:
+    """Instantiate the model provider ``name``."""
+    if name not in ALLOWED_MODEL_PROVIDERS:
+        raise CapabilityError(
+            f"unknown model provider {name!r}; expected one of {sorted(MODEL_PROVIDERS)}"
+        )
+    return MODEL_PROVIDERS[name](model, base_url)
 
 
-def build_prompt(config: Config, cache: ResponseCache) -> PromptProvider:
-    """Resolve the configured prompt provider, wired for live calls or replay."""
-    provider = get_prompt(
+def build_search(config: Config) -> SearchProvider:
+    """Resolve the configured search provider."""
+    return get_search(config.capability.search.provider)
+
+
+def build_prompt(config: Config) -> PromptProvider:
+    """Resolve the configured prompt provider."""
+    return get_prompt(
         config.capability.prompt.provider,
         directory=config.capability.prompt.directory,
     )
-    if config.live.enabled:
-        return RecordingPrompt(provider, cache)
-    return CachedPrompt(provider.name, cache)
+
+
+def build_model(config: Config) -> ModelProvider:
+    """Resolve the configured model provider."""
+    return get_model(
+        config.capability.model.provider,
+        model=config.capability.model.model,
+        base_url=config.capability.model.base_url,
+    )
 
 
 __all__ = [
     "ENV_VARS",
     "LANGFUSE_ENV_VARS",
+    "MODEL_PROVIDERS",
     "PROMPT_PROVIDERS",
     "SEARCH_PROVIDERS",
-    "CacheMissError",
-    "CachedPrompt",
-    "CachedSearch",
     "CapabilityError",
+    "ChatMessage",
     "MissingCredentialError",
+    "ModelProvider",
+    "OpenAIModel",
     "PromptProvider",
     "PromptTemplate",
+    "ProviderError",
     "ProviderUnavailableError",
-    "RecordingPrompt",
-    "RecordingSearch",
-    "ResponseCache",
     "SearchProvider",
-    "SearchResult",
+    "build_model",
     "build_prompt",
     "build_search",
     "credential_env",
+    "get_model",
     "get_prompt",
     "get_search",
-    "request_key",
 ]

@@ -18,7 +18,7 @@
 ## 2. Capability 抽象
 
 外部能力通过 **capability** 访问，provider 可替换。契约在 `overview` 层冻结。
-`search` 与 `model` 在 **M1 真实落地**；`langfuse` 于 M3。
+`search` 与 `model` 已在 **Phase R** 真实落地（M1 接入编排）；`langfuse` 于 M3。
 
 | Capability | provider 取值 | 用途 |
 |---|---|---|
@@ -49,9 +49,9 @@ provider = "exa"       # exa | parallel
 provider = "local"     # local | langfuse
 directory = "prompts"  # local provider 的模板目录
 [capability.model]
-provider = "openai"                    # OpenAI 兼容
+provider = "openai"     # OpenAI 兼容
 model    = "deepseek-v4.1-flash"
-base_url = "http://power.acme.red/v1"  # 备选端点：https://llm.ekreke.cn/v1 + 免费模型
+base_url = ""           # 端点由 OPENAI_BASE_URL 提供（内网地址不入库）
 [budget]
 max_steps = 60
 max_wall = "10m"
@@ -60,16 +60,15 @@ max_cost = 2.0
 dir = "runs"
 ```
 
-> `[capability.model]` 与 `[budget]` 的其他字段是 M1 的契约；在 M1 落地前，config loader
-> 仍会以未知键拒绝 `[capability.model]`（见 `SPEC.md` M1）。
-
 - **未知键会报错**（`ConfigError`），避免 `max_step` 之类的拼写错误被静默忽略。
-- **凭据只从环境变量读取**，不写入配置：`EXA_API_KEY` / `PARALLEL_API_KEY` /
-  `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`；`model` 用 `OPENAI_API_KEY`
-  （`OPENAI_BASE_URL` 可覆盖配置里的 `base_url`）。
+- **凭据只从环境变量读取**，不写入配置，且**多为可选**：
+  - `search` 走公开的免费 MCP 端点（`https://mcp.exa.ai/mcp` / `https://search.parallel.ai/mcp`），
+    **无需 key**；`EXA_API_KEY` / `PARALLEL_API_KEY` 存在时会被附带（换更高配额）。
+  - `model` 用 `OPENAI_API_KEY`（`OPENAI_BASE_URL` 可覆盖配置里的 `base_url`）。
+  - `prompt` 的 `langfuse` 用 `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
 - `local` prompt provider 从仓库 `prompts/` 目录读取 `*.txt` / `*.md` 模板。
-- 现状：`search` / `model` 于 **M1** 真实落地；`prompt` 的 `local` 可用（读文件），
-  `langfuse` 于 M3。**能力不再有离线/录制回放**（Phase R 移除）。
+- 现状：`search`（exa/parallel 免费 MCP）与 `model`（OpenAI 兼容）已**真实落地**；
+  `prompt` 的 `local` 可用（读文件），`langfuse` 于 M3。**能力无离线/录制回放**（Phase R 移除）。
 
 ## 3. 黑板循环
 
