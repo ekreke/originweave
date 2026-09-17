@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from originweave.model import ModelError
+from originweave.blackboard import BlackboardError
 from originweave.store import RunStore
 
 
@@ -54,7 +54,7 @@ def test_read_events_rejects_malformed_line(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     store.init_layout()
     store.events_path.write_text("not json\n", encoding="utf-8")
-    with pytest.raises(ModelError):
+    with pytest.raises(BlackboardError):
         store.read_events()
 
 

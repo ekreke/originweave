@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .events import DEFAULT_TONE, Event, format_event_id, now_iso
-from .model import ModelError
+from .blackboard import BlackboardError
 
 
 class RunStore:
@@ -73,9 +73,9 @@ class RunStore:
                 try:
                     data = json.loads(line)
                 except json.JSONDecodeError as exc:
-                    raise ModelError(f"{self.events_path}:{lineno}: invalid JSON: {exc}") from exc
+                    raise BlackboardError(f"{self.events_path}:{lineno}: invalid JSON: {exc}") from exc
                 if not isinstance(data, dict):
-                    raise ModelError(f"{self.events_path}:{lineno}: event must be a JSON object")
+                    raise BlackboardError(f"{self.events_path}:{lineno}: event must be a JSON object")
                 yield Event.from_dict(data)
 
     def read_events(self) -> list[Event]:

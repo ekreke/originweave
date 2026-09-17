@@ -91,8 +91,8 @@
 真线程并发与 HITL Gate A。引擎为**库层**（进程内 Dispatcher），**不经 CLI 暴露**；
 API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）与 `search`（exa/parallel）。
 
-- [x] 黑板模型：`Board{origin,goal,facts,intents,hints}` 与 `Fact`（kind/role/status/confidence/evidence）、`Intent`、`Hint` — `src/originweave/model.py`（M0c）
-- [x] `origin`/`goal` 特殊 Fact（`kind` 区分、`role=none`）；`Fact.role = main-claim | sub-claim` — `model.py`（M0c）
+- [x] 黑板模型：`Board{origin,goal,facts,intents,hints}` 与 `Fact`（kind/role/status/confidence/evidence）、`Intent`、`Hint` — `src/originweave/blackboard.py`（M0c）
+- [x] `origin`/`goal` 特殊 Fact（`kind` 区分、`role=none`）；`Fact.role = main-claim | sub-claim` — `blackboard.py`（M0c）
 - [x] DAG 组装与边 relation：`main-chain/dependency/goal-derived/decomposes/spawns/resolves` — `src/originweave/reduce.py`（M0c）
 - [ ] `model` capability：`ModelProvider` Protocol + **真实 OpenAI 兼容 provider**（`capabilities/model.py`、`[capability.model]`；凭据 `OPENAI_API_KEY` / `OPENAI_BASE_URL`）
 - [ ] `search` capability 真实接入：`exa` / `parallel`（`capabilities/search.py`；凭据 `EXA_API_KEY` / `PARALLEL_API_KEY`）
@@ -231,7 +231,7 @@ Hint 注入、Gate C 行为均可观测。
 **实体-关系图**（与溯源 DAG 并列、共享同一 run 与事件溯源）；关系用「预定义本体 +
 `other`」，允许无来源推断但必须显式标注。
 
-- [ ] 领域模型：`Entity` / `Relation` / `EntityGraph`（`src/originweave/model.py`），字段与 `product-overview.md` 第 4 节一致
+- [ ] 领域模型：`Entity` / `Relation` / `EntityGraph`（`src/originweave/blackboard.py`），字段与 `product-overview.md` 第 4 节一致
 - [ ] 关系本体：预定义正向类型 + `other`（反向标签由渲染层派生，不建反向型）
 - [ ] 事件 `ENTITY` / `RELATION` writer + reducer 分支（纯 fold，追加式）
 - [ ] Intent 类型 `extract`（实体抽取）/ `relate`（关系判别），复用 OODA 与 Dispatcher

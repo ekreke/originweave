@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import config
 from .capabilities import ENV_VARS, LANGFUSE_ENV_VARS, PROMPT_PROVIDERS, SEARCH_PROVIDERS
-from .model import ModelError
+from .blackboard import BlackboardError
 from .reduce import ReduceError, reduce, render_canonical, render_summary
 from .store import RunStore
 
@@ -108,7 +108,7 @@ def _cmd_replay(args: argparse.Namespace) -> int:
         return 1
     try:
         board = reduce(store.read_events())
-    except (ModelError, ReduceError) as exc:
+    except (BlackboardError, ReduceError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     sys.stdout.write(render_canonical(board) if args.json else render_summary(board))

@@ -58,7 +58,7 @@
   期间 `dashboard.md §4` 已由 REST 改为 proto，`product-overview.md §5` 已移除 `trace`。
 - **契约-代码漂移（M5 范围，未实现）**：`Entity`/`Relation`/`EntityGraph`、`ENTITY`/`RELATION`
   事件、`Intent.extract`/`relate`、`CreateRun.analysis` 已在 `overview/` + `proto/` 冻结契约中，
-  但 `model.py` / `events.py` / `reduce.py` / server 尚未实现（归 M5）。
+  但 `blackboard.py` / `events.py` / `reduce.py` / server 尚未实现（归 M5）。
 - M0b 遗留（review 判定非阻塞，可后补）：异常层次未完全收口（`LocalPrompt` 的
   `FileNotFoundError`）、`capabilities list` 的 `ready` 文案待重整、`max_wall` 未做 duration 校验、
   部分 provider 分支测试缺失。（原 cache 相关遗留随 Phase R 撤销。）
@@ -104,7 +104,7 @@
   `CreateRun.analysis`、`Run.analysis` 与 `dashboard` 的 `RELATIONS`/`ENTITIES` 页签、`RunDetail.entity_graph`；
   `dashboard.md` 新建 run body 的 `mode` 改名 `sourceType` 并新增 `analysis`。
 
-- **M0c 黑板事件日志与事件溯源**：`model.py`（Board/Fact/Intent/Hint/Edge/HumanDecision）、
+- **M0c 黑板事件日志与事件溯源**：`blackboard.py`（Board/Fact/Intent/Hint/Edge/HumanDecision）、
   `events.py`（`Event` + 11 种 type）、`store.py`（run 目录 + append-only `events.jsonl`）、
   `reduce.py`（纯函数 fold，自动推导 `spawns`/`resolves`/`decomposes`，语义边来自 payload）、
   CLI 接线 `replay`（只读 stdout，`--json`）。63 测试通过，ruff + mypy strict 全绿。

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from originweave.blackboard import BlackboardError
 from originweave.events import (
     DEFAULT_TONE,
     EVENT_TYPES,
@@ -9,7 +10,6 @@ from originweave.events import (
     format_event_id,
     now_iso,
 )
-from originweave.model import ModelError
 
 
 def test_event_roundtrip() -> None:
@@ -33,17 +33,17 @@ def test_event_from_dict_defaults_message_and_tone() -> None:
 
 
 def test_event_rejects_unknown_type() -> None:
-    with pytest.raises(ModelError):
+    with pytest.raises(BlackboardError):
         Event.from_dict({"id": "e1", "at": "t", "type": "NOPE", "payload": {}})
 
 
 def test_event_rejects_bad_tone() -> None:
-    with pytest.raises(ModelError):
+    with pytest.raises(BlackboardError):
         Event.from_dict({"id": "e1", "at": "t", "type": "PROJECT", "tone": "loud", "payload": {}})
 
 
 def test_event_rejects_non_table_payload() -> None:
-    with pytest.raises(ModelError):
+    with pytest.raises(BlackboardError):
         Event.from_dict({"id": "e1", "at": "t", "type": "PROJECT", "payload": 3})
 
 

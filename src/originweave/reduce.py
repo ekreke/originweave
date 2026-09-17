@@ -12,8 +12,8 @@ import json
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from .blackboard import Board, Edge, Fact, Hint, HumanDecision, Intent, WaitingFor
 from .events import Event
-from .model import Board, Edge, Fact, Hint, HumanDecision, Intent, WaitingFor
 
 STRUCTURAL_RELATIONS = ("spawns", "resolves", "decomposes")
 

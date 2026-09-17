@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from .model import ModelError
+from .blackboard import BlackboardError
 
 EVENT_TYPES: tuple[str, ...] = (
     "PROJECT",
@@ -78,24 +78,24 @@ class Event:
     def from_dict(cls, data: Mapping[str, Any]) -> Event:
         event_id = data.get("id")
         if not isinstance(event_id, str):
-            raise ModelError("event.id must be a string")
+            raise BlackboardError("event.id must be a string")
         at = data.get("at")
         if not isinstance(at, str):
-            raise ModelError("event.at must be a string")
+            raise BlackboardError("event.at must be a string")
         event_type = data.get("type")
         if not isinstance(event_type, str) or event_type not in EVENT_TYPE_SET:
-            raise ModelError(
+            raise BlackboardError(
                 f"event.type must be one of {sorted(EVENT_TYPE_SET)}; got {event_type!r}"
             )
         payload = data.get("payload", {})
         if not isinstance(payload, dict):
-            raise ModelError("event.payload must be a table")
+            raise BlackboardError("event.payload must be a table")
         tone = data.get("tone", DEFAULT_TONE[event_type])
         if not isinstance(tone, str) or tone not in TONES:
-            raise ModelError(f"event.tone must be one of {sorted(TONES)}; got {tone!r}")
+            raise BlackboardError(f"event.tone must be one of {sorted(TONES)}; got {tone!r}")
         message = data.get("message", "")
         if not isinstance(message, str):
-            raise ModelError("event.message must be a string")
+            raise BlackboardError("event.message must be a string")
         return cls(id=event_id, at=at, type=event_type, payload=payload, message=message, tone=tone)
 
 

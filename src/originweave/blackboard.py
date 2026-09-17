@@ -11,47 +11,62 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+# Value domains for blackboard fields; frozen in docs/overview/blackboard-protocol.md.
+# Static layer only: mypy enforces these where a field is annotated with an alias, while
+# runtime validation uses the matching frozensets below. The two are kept in sync by hand.
+
+# Node kind. origin/goal are the two board anchors; the rest are derived findings.
 FactKind = Literal[
     "origin", "goal", "fact", "citation", "source", "boundary", "compare", "deviation"
 ]
+# Provenance role: the single core claim, its sub-claims, or none.
 FactRole = Literal["main-claim", "sub-claim", "none"]
+# Verification state of a fact.
 FactStatus = Literal["verified", "open", "flagged", "review"]
+# What an Intent asks a worker to do (the three OODA task directives).
 IntentType = Literal["decompose", "explore", "verify"]
+# Intent lifecycle; claimed/awaiting_human are transient coordination states.
 IntentStatus = Literal["open", "claimed", "done", "dropped", "awaiting_human"]
+# DAG edge semantics. Structural edges (decomposes/spawns/resolves) are derived by the
+# reducer; semantic edges (main-chain/dependency/goal-derived) must be in the payload.
 EdgeRelation = Literal[
     "main-chain", "dependency", "goal-derived", "decomposes", "spawns", "resolves"
 ]
+# Whole-run lifecycle.
 RunStatus = Literal[
     "queued", "running", "awaiting_human", "paused", "stopped", "completed", "failed"
 ]
+# Author of a Hint or a human decision.
 Author = Literal["human", "agent"]
 
-FACT_KINDS: frozenset[str] = frozenset(
+# Runtime validation sets: from_dict() checks values against these via _choice().
+# They are the enforced counterpart of the Literal aliases above; keep members in sync.
+FACT_KINDS: frozenset[str] = frozenset(  # FactKind
     {"origin", "goal", "fact", "citation", "source", "boundary", "compare", "deviation"}
 )
-FACT_ROLES: frozenset[str] = frozenset({"main-claim", "sub-claim", "none"})
-FACT_STATUSES: frozenset[str] = frozenset({"verified", "open", "flagged", "review"})
-INTENT_TYPES: frozenset[str] = frozenset({"decompose", "explore", "verify"})
-INTENT_STATUSES: frozenset[str] = frozenset(
+FACT_ROLES: frozenset[str] = frozenset({"main-claim", "sub-claim", "none"})  # FactRole
+FACT_STATUSES: frozenset[str] = frozenset({"verified", "open", "flagged", "review"})  # FactStatus
+INTENT_TYPES: frozenset[str] = frozenset({"decompose", "explore", "verify"})  # IntentType
+INTENT_STATUSES: frozenset[str] = frozenset(  # IntentStatus
     {"open", "claimed", "done", "dropped", "awaiting_human"}
 )
-EDGE_RELATIONS: frozenset[str] = frozenset(
+EDGE_RELATIONS: frozenset[str] = frozenset(  # EdgeRelation
     {"main-chain", "dependency", "goal-derived", "decomposes", "spawns", "resolves"}
 )
-RUN_STATUSES: frozenset[str] = frozenset(
+RUN_STATUSES: frozenset[str] = frozenset(  # RunStatus
     {"queued", "running", "awaiting_human", "paused", "stopped", "completed", "failed"}
 )
-AUTHORS: frozenset[str] = frozenset({"human", "agent"})
+AUTHORS: frozenset[str] = frozenset({"human", "agent"})  # Author
 
 
-class ModelError(ValueError):
+class BlackboardError(ValueError):
     """Raised when blackboard data is malformed."""
 
 
 def _require_str(data: Mapping[str, Any], key: str, where: str) -> str:
     value = data.get(key)
     if not isinstance(value, str):
-        raise ModelError(f"{where}.{key} must be a string")
+        raise BlackboardError(f"{where}.{key} must be a string")
     return value
 
 
@@ -60,41 +75,41 @@ def _opt_str(data: Mapping[str, Any], key: str, where: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str):
-        raise ModelError(f"{where}.{key} must be a string or null")
+        raise BlackboardError(f"{where}.{key} must be a string or null")
     return value
 
 
 def _str(data: Mapping[str, Any], key: str, default: str = "") -> str:
     value = data.get(key, default)
     if not isinstance(value, str):
-        raise ModelError(f"{key} must be a string")
+        raise BlackboardError(f"{key} must be a string")
     return value
 
 
 def _float(data: Mapping[str, Any], key: str, default: float = 0.0) -> float:
     value = data.get(key, default)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ModelError(f"{key} must be a number")
+        raise BlackboardError(f"{key} must be a number")
     return float(value)
 
 
 def _list(data: Mapping[str, Any], key: str) -> list[Any]:
     value = data.get(key, [])
     if not isinstance(value, list):
-        raise ModelError(f"{key} must be a list")
+        raise BlackboardError(f"{key} must be a list")
     return value
 
 
 def _dict(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     value = data.get(key, {})
     if not isinstance(value, dict):
-        raise ModelError(f"{key} must be a table")
+        raise BlackboardError(f"{key} must be a table")
     return value
 
 
 def _choice(value: str, allowed: frozenset[str], where: str) -> str:
     if value not in allowed:
-        raise ModelError(f"{where} must be one of {sorted(allowed)}; got {value!r}")
+        raise BlackboardError(f"{where} must be one of {sorted(allowed)}; got {value!r}")
     return value
 
 
@@ -400,7 +415,7 @@ __all__ = [
     "Intent",
     "IntentStatus",
     "IntentType",
-    "ModelError",
+    "BlackboardError",
     "RunStatus",
     "WaitingFor",
 ]
