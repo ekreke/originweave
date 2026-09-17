@@ -158,12 +158,45 @@ Act      → 执行探索（Explore：经 capability 检索、比对等）
 Write Back → 把结论写回黑板（Fact + Evidence）
 ```
 
-### 4.2 三种任务指令（每次只给其一）
+### 4.2 任务指令（每次只给其一）
 | 任务 | 做什么 | 产出 |
 |---|---|---|
 | `Bootstrap` | 初始阶段直接尝试解决整个问题：**抽取核心抽象论点 + 直接尝试判定** | Fact + 可能的 Complete |
 | `Reason` | 读图判断：完成了吗？下一步往哪走？ | Complete / 新 Intent(s) / 无操作 |
 | `Explore` | 认领一条 Intent，执行探索，产出结论 | 一个 Fact（`extract`/`relate` 时产出 Entity/Relation） |
+| `Validate` | 对 `Reason` 产出的候选 Intent 判重/取舍（独立 pass） | 每个候选的 keep / drop（drop → `dropped` Intent） |
+
+Worker 的结构化输出（**冻结**）：Worker 只返回**一个 JSON 对象**——不含 id、不含边；id 与结构性
+边由 Dispatcher / reducer 分配与推导（§2.4）。`kind`/`role`/`status`/`type` 取值域见 §2，
+非法即视为解析失败。
+
+```json
+{
+  "facts": [
+    { "label": "...", "subtitle": "...", "kind": "fact", "role": "main-claim",
+      "status": "open", "confidence": 0.8, "note": "...",
+      "evidence": [ { "quote": "...", "sourceTitle": "...", "url": "...", "locator": "..." } ] }
+  ],
+  "intents": [ { "type": "decompose", "from": "f1", "question": "..." } ],
+  "complete": { "verdict": "..." }
+}
+```
+
+- `complete` 为 `null` 表示未判定完成。
+- 一次 `Bootstrap` 的 `facts` 为 **0..N 个 `role=main-claim`**——资料 A 可能含**多个**核心抽象
+  论点（`kind=fact`）；`Explore` 通常产出 1 个 Fact（`extract`/`relate` 时产 Entity/Relation，归 M5）。
+
+`Validate` 指令的输出是**另一套 schema**（对候选 Intent 的取舍，而非新事实）：
+
+```json
+{ "keep": [0, 2],
+  "drop": [ { "index": 1, "duplicateOf": "i3", "reason": "..." } ] }
+```
+
+- `index` 是候选 Intent 在本次 `Reason` 输出里的下标；`duplicateOf` 指向黑板上的既有 Intent id。
+- 被判重的候选仍以 `INTENT` 事件写入，但 `status=dropped`（保留"考虑过但未采纳"的因果链）；
+  keep 的写为 `status=open` 待派发。去重是**产出期**行为，发生在 Dispatcher 写入 `INTENT` 之前。
+- 结构预筛（同一 `(type, from)` 已有 Intent）先于语义判重，减少模型调用。
 
 ### 4.3 一道题的完整生命周期
 ```text
@@ -184,6 +217,52 @@ Write Back → 把结论写回黑板（Fact + Evidence）
 （判关系）两类 Intent，产出写入 `entities` / `relations` 而非 `facts`；事件溯源、
 心跳释放、Stigmergy 与 Gate 机制不变。
 
+### 4.4 走查示例：一次 Bootstrap（M1 起实现）
+
+用样例 `examples/copilot_productivity`（资料 A 是宣传文，含多个论点）走一遍。调用方构造
+`origin`（资料 A，`kind=origin`）与 `goal`（停止条件，`kind=goal`），调 `Engine.run(origin, goal)`。
+
+Worker 返回（严格 JSON，无 id、无边）：
+
+```json
+{ "facts": [
+    { "label": "Copilot 让 Accenture 开发者快 55%", "kind": "fact", "role": "main-claim",
+      "status": "open", "confidence": 0.6 },
+    { "label": "Copilot 让成功构建率 +84%", "kind": "fact", "role": "main-claim",
+      "status": "open", "confidence": 0.55 },
+    { "label": "Copilot 让工作满意度 +90%", "kind": "fact", "role": "main-claim",
+      "status": "open", "confidence": 0.5 }
+  ],
+  "intents": [], "complete": null }
+```
+
+引擎把这次 Bootstrap 记为一条 `explore` Intent（Bootstrap 在协议里没有自己的 Intent，这样
+建模才能像其他任务一样被审计与派发），并按 kind 前缀发放确定性 id（`fact → f1/f2/f3`，
+`intent → i1`）。`events.jsonl`：
+
+| id | type | payload |
+|---|---|---|
+| `e0001` | `PROJECT` | `origin`, `goal` |
+| `e0002` | `REASON` | `phase=start` |
+| `e0003` | `INTENT` | `intent=i1`（`type=explore`, `from=origin`） |
+| `e0004` | `EXECUTE` | `intentId=i1`, `worker=worker-1`, `model=...` |
+| `e0005` | `CONCLUDE` | `intentId=i1`, `facts=[f1,f2,f3]` |
+| `e0006` | `REASON` | `phase=end` |
+
+`reduce(events)` 折出的 `Board`（结构性边由 reducer 派生，§2.4）：
+
+```text
+status   running
+facts    f1/f2/f3（均 role=main-claim）
+intents  i1（status=done, producedFacts=[f1,f2,f3], claimedBy=worker-1）
+edges    origin → i1 (spawns)
+         i1 → f1 / f2 / f3 (resolves)
+```
+
+要点：**Worker 不写协议、不起 id**；**引擎是唯一写入者**且只负责「取指令 → 读图 → 调能力 →
+解析 → 发 id → 写事件」这条流水线；**所有"事实"都在 append-only 事件日志里**，Board 永远由
+`reduce` 折出，故可重放。
+
 ## 5. 事件协议（冻结）
 
 run 的全部状态由 append-only 事件派生。事件取代此前的领域事件命名；领域含义
@@ -202,6 +281,8 @@ run 的全部状态由 append-only 事件派生。事件取代此前的领域事
 | `HINT` | 注入 Hint | `hint: Hint`（含 `text`） |
 | `REQUEST_HUMAN` | 关键节点请求人工介入，run → `awaiting_human` | `gate`, `question` |
 | `HUMAN_INPUT` | 人类输入 | `gate`, `decision`, `text?`, `targets?`, `author=human` |
+| `FAILED` | 执行异常终止，run → `failed` | `reason` |
+| `STOPPED` | 预算触顶或人工终止，run → `stopped` | `reason`, `budget?` |
 | `ENTITY` | 抽取/归并到实体 | `entity: Entity` |
 | `RELATION` | 判别出实体间关系 | `relation: Relation` |
 
@@ -215,7 +296,7 @@ Event {
   at,
   type,      # PROJECT | INTENT | EXECUTE | CONCLUDE | REASON | COMPLETE |
              # HEARTBEAT | RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT |
-             # ENTITY | RELATION
+             # FAILED | STOPPED | ENTITY | RELATION
   message,   # 人类可读摘要（UI 时间线）
   tone,      # info | success | warning | danger
   payload    # 与 type 对应的结构化字段，见上表
@@ -256,6 +337,9 @@ Worker A 写入新 Fact  →  图变化（环境更新）  →  Worker B 下一�
 ## 8. 可控性（内嵌协议）
 
 - **随时停止/恢复**：run 状态完整保留，可从任意事件点恢复。
+- **终止态落盘**：异常终止写 `FAILED`（→ `status=failed`），预算触顶/人工终止写 `STOPPED`
+  （→ `status=stopped`）；两者都是事件，`replay` 可复现到终止点。`paused`（可恢复）尚无事件，
+  随 M3 可控性引入。
 - **Intent 心跳超时自动释放**：Worker 崩溃不会永久占住 Intent。
 - **完整因果链永久保留**：包含所有死胡同（`dropped` Intent）。
 - **可重放**：`replay` 只读、不触网、复现含人工输入在内的全部结论。

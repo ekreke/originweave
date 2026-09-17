@@ -61,6 +61,9 @@
 - [x] 保留策略：`runs/` 与 `*.jsonl` 不入库（`.gitignore` 已就绪，需确认新布局覆盖）
 - [x] 单测：写入 → 重放一致性（byte-level 或结构级）
 
+> **M1 扩展**：事件集在 M1 增补 `FAILED` / `STOPPED`（终止态，见 §5）；
+> `ENTITY` / `RELATION` 归 M5。本节的 11 种为 M0c 交付范围。
+
 验收：同一 run dir 连续两次 `replay` 结果一致；replay 过程无网络访问。
 
 ---
@@ -96,15 +99,17 @@ API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）�
 - [x] DAG 组装与边 relation：`main-chain/dependency/goal-derived/decomposes/spawns/resolves` — `src/originweave/reduce.py`（M0c）
 - [x] `model` capability：`ModelProvider` Protocol + **真实 OpenAI 兼容 provider**（`capabilities/model.py`、`[capability.model]`；`OPENAI_API_KEY` + `OPENAI_BASE_URL`（端点经环境变量提供））（Phase R）
 - [x] `search` capability 真实接入：`exa` / `parallel`（`capabilities/search.py`；免费 MCP 端点，`EXA_API_KEY` / `PARALLEL_API_KEY` 可选）（Phase R）
-- [ ] 三种任务指令：`Bootstrap` / `Reason` / `Explore`
+- [ ] 任务指令：`Bootstrap` / `Reason` / `Explore` / `Validate`（`Validate` 为独立判重 pass）
 - [ ] Intent 三型调度分支：`decompose` / `explore` / `verify`
 - [ ] 抽象论点抽取与拆解（`Bootstrap` → `main-claim`；`Intent(decompose)` → `sub-claim`）
 - [ ] 来源回链：`citation` / `source` 节点与 `Evidence{quote,sourceTitle,url,locator}` 登记
 - [ ] 多 Worker asyncio 任务并发认领 Intent + 心跳/超时自动释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按确定性顺序提交，保证 Board 确定
 - [ ] Stigmergy：新 Fact 触发新一轮 Reason（去重）
+- [ ] Reason 产出 Intent 的去重：L1 `(type, from)` 预筛 + `Validate` pass（复用 `model` 的 LLM 语义判重，比对含 `done`/`dropped`）→ 重复项写 `status=dropped` 留痕（`duplicateOf`）
 - [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回（唯一写入者）
 - [ ] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1c-2）
 - [ ] 自动路径：`[hitl].auto=true`（或 M1c-1 的 `CreateRunRequest.auto`）跳过 Gate
+- [ ] 失败/停止事件：`FAILED` / `STOPPED` → `status=failed|stopped`（`events.py`/`reduce.py`；`paused` 随 M3）
 - [ ] 单测：注入 **fake provider**，对 fixture 输入产出确定性 Board/DAG（节点/边/证据断言）
 
 验收：对 `copilot_productivity` 样例，核心抽象论点被拆解为子断言，每条子断言可回溯到

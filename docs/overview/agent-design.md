@@ -24,7 +24,7 @@
 |---|---|---|
 | `search` | `exa` / `parallel` | 检索来源、定位一手材料 |
 | `prompt` | `local` / `langfuse` | 获取 prompt 模板（本地文件或 Langfuse） |
-| `model` | `openai`（OpenAI 兼容） | 执行 OODA 任务（Bootstrap/Reason/Explore），返回结构化结果（Fact/Intent） |
+| `model` | `openai`（OpenAI 兼容） | 执行 OODA 任务（Bootstrap/Reason/Explore/Validate），返回结构化结果（Fact/Intent） |
 
 要求：
 
@@ -80,12 +80,13 @@ Worker 平等、无固定角色，路径从黑板上涌现。取代早期设计�
 Observe → Orient → Decide → Act → Write Back → (回 Observe)
 ```
 
-### 3.2 三种任务指令（每次只给其一）
+### 3.2 任务指令（每次只给其一）
 | 任务 | 做什么 | 产出 |
 |---|---|---|
 | `Bootstrap` | 直接尝试解决整个问题：抽取核心抽象论点 + 直接尝试判定 | Fact + 可能的 Complete |
 | `Reason` | 读图判断：完成了吗？下一步往哪走？ | Complete / 新 Intent / 无操作 |
 | `Explore` | 认领一条 Intent，执行探索 | 一个 Fact |
+| `Validate` | 对 `Reason` 的候选 Intent 判重/取舍（独立 pass，复用 `model`） | 候选的 keep / drop（drop → `dropped` Intent） |
 
 ### 3.3 Intent 三型（抽象论点适配）
 `decompose`（拆解抽象论点）/ `explore`（找来源）/ `verify`（比对判偏差），外加

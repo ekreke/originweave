@@ -37,7 +37,7 @@ docs/
 | **Intent** | 待探索的方向（黑板上的问号）。`type` ∈ decompose/explore/verify/extract/relate；`status` ∈ open/claimed/done/dropped/awaiting_human。 |
 | **Hint** | 经验提示（便利贴），`author` ∈ human/agent；不参与 DAG 连通性。 |
 | **OODA** | Agent 工作循环：Observe → Orient → Decide → Act → Write Back。 |
-| **Bootstrap / Reason / Explore** | 三种任务指令，每次只给 Worker 其一。 |
+| **Bootstrap / Reason / Explore / Validate** | 任务指令，每次只给 Worker 其一；`Validate` 是对候选 Intent 的独立判重 pass。 |
 | **Stigmergy** | 间接协调：Worker 不互相通信，只通过往黑板写 Fact 改变环境来协调。 |
 | **Dispatcher** | 调度与容器生命周期管理，协议的唯一写入者；Worker 不直接调用协议接口。 |
 | **HITL** | Human-in-the-loop。主动写 Hint，或在关键 Gate 被动确认（run → `awaiting_human`）。 |
