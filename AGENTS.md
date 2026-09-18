@@ -19,7 +19,12 @@
 
 - 已实现：`originweave init`（写 `originweave.toml`，已存在需 `--force`）、
   `originweave capabilities list`、配置加载/校验、capability 注册表，
-  以及事件日志 → 黑板 reducer → `originweave replay <run-dir>`（只读、不触网）。
+  事件日志 → 黑板 reducer → `originweave replay <run-dir>`（只读、不触网），
+  以及 **M1 库层 OODA 引擎的 Bootstrap pass**（`src/originweave/engine.py`）。
+- **引擎是库层**：`Engine` 是黑板的**唯一写入者**（事件经 `RunStore.append_event`），
+  进程内 Dispatcher 是 M3 容器化前的临时态。**不经 CLI / server 暴露**（server 归 M1c-1）；
+  `Reason` / `Explore` / `Validate` / 并发 / Gate A 为后续 M1 切片（见 `docs/1.0/TODO.md`
+  「下一个任务」）。
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
   `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
 - **stub（打印 “not implemented yet”、返回 0）**：`ui` / `mcp` / `capabilities install-obscura`。
@@ -29,14 +34,18 @@
 - 样例 fixture 由 `scripts/build_sample_fixtures.py` 确定性生成（`--check` 校验）；
   改样例事件后要重跑该脚本。资料 A 与来源是**冻结快照**，重新联网结果具时效性。
 - **能力为真实调用**（Phase R 已移除离线/cache/录制回放）：`search`（免费 MCP 端点，
-  `exa`/`parallel`，**免 key**）与 `model`（OpenAI 兼容）已落地；`langfuse` 于 M3。
-  凭据只从环境变量读、**多为可选**：`EXA_API_KEY` / `PARALLEL_API_KEY`（可选，换配额）、
-  `OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、`LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
+  `exa`/`parallel`，**免 key**）、`model`（OpenAI 兼容）与 prompt `local` 已落地；
+  prompt `langfuse` 为 M3 前 stub。凭据只从环境变量读、**多为可选**：`EXA_API_KEY` /
+  `PARALLEL_API_KEY`（可选，换配额）、`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、
+  `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
   单元测试**注入 fake provider**（`httpx.MockTransport`），不打真网。
-- `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出）：前端 TS 由
-  `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`），server Python 归 M1c-1（根 `buf.gen.yaml`）。
+- **prompt 模板在 `prompts/`**（已存在，如 `prompts/bootstrap.txt`）：`local` provider 按
+  `[capability.prompt].directory` 读 `<name>.txt|.md`；新增任务指令要同时加模板文件。
+- `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出、**勿手改**）：前端 TS 由
+  `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，落到 `frontend/src/gen/`），
+  server Python 归 M1c-1（根 `buf.gen.yaml`）。
 - **前端（`frontend/`，M1b 脚手架）**：React + Vite + TS + React Flow + Connect；目前是
-  **无数据空壳**（不接 mock），真实数据接线与 DAG/Gate UI 归 **M1c-2**。`prompts/` 目录仍不存在。
+  **无数据空壳**（不接 mock），真实数据接线与 DAG/Gate UI 归 **M1c-2**。
 
 ## 常用命令
 
@@ -76,13 +85,16 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
 - **配置**：项目内 `originweave.toml`；`tomllib` 读、`tomli-w` 写。未知键直接抛
   `ConfigError`（防 `max_step` 之类拼写错误被静默忽略）。`CONFIG_FILENAME` 是**相对路径**，
   测试靠 `monkeypatch.chdir(tmp_path)`，不要在库代码里假设绝对路径。
+  `[capability.model]` 默认 `openai` / `deepseek-v4.1-flash`，端点由 `OPENAI_BASE_URL` 提供
+  （内网地址不入库）。
 - **HITL 开关**：`[hitl].auto` 或 `CreateRunRequest.auto` 只控制 Gate（默认人工介入）。
 - **凭据只从环境变量读**，不写入配置，且**多为可选**：`EXA_API_KEY` / `PARALLEL_API_KEY`
   （search 免费端点默认免 key）、`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、
   `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
 - **能力为真实调用**（Phase R 已移除 `[live]`/cache/录制回放）：测试注入 fake provider，不打真网。
 - **事件字段名是契约**：`Event{id,at,type,message,tone,payload}`；reducer 只消费 `type`+`payload`，
-  `message`/`tone` 仅展示。事件类型见 `docs/overview/blackboard-protocol.md` §5。
+  `message`/`tone` 仅展示。现有 13 种类型（M1 增 `FAILED`/`STOPPED` → `status=failed|stopped`），
+  见 `docs/overview/blackboard-protocol.md` §5。
 - `events.jsonl` 的唯一写入口是 `RunStore.append_event()`（id 单调递增、append-only）；reducer
   是纯 fold（`reduce(events) -> Board`，`src/originweave/reduce.py`），同事件必得同 `Board`。
   语义边（`main-chain`/`dependency`/`goal-derived`）必须显式写进事件 payload，结构边由 reducer 派生。
@@ -91,5 +103,7 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
 - `runs/` 与 `*.jsonl` 不入库（`.gitignore` 已就绪）；运行产物不要提交。
 - 布局：src layout，包在 `src/originweave/`；测试 `tests/`；样例 `examples/`；proto 契约
   `proto/`（M1b）；前端 `frontend/`（M1b 脚手架、M1c-2 接线）；CI 在 `.github/workflows/ci.yml`
-  （ruff → mypy → pytest 顺序）。
+  （3 个 job：`python` ruff → mypy → pytest；`proto` `buf lint`；`frontend` gen → typecheck →
+  lint → format:check → test → build）。前端 `format:check` 无 `make` target，用
+  `pnpm --dir frontend format`。
 - 当前 git 分支为 `develop`（`main` 为发布分支）；仓库无 CONTRIBUTING/PR 模板，未约定合并流程。
