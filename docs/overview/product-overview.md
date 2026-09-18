@@ -212,8 +212,10 @@ Session {
 ```
 一次 Worker 调用 = 一个**隔离会话**（上下文不跨调用共享），是一个"节点"任务的完整历史。
 原始输入/输出全文落 run dir `sessions/<id>.json`；`SESSION` / `WORKER_STEP` 事件只作索引，
-不参与 DAG 状态派生。Worker 执行体可插拔（`[worker].provider = local | pi`；`local` 已实现，
-`pi` 归 **M6 P2**），项目级可设 `maxConcurrency`（并发上限）与 `tools`（工具白名单）。
+不参与 DAG 状态派生。Worker 执行体可插拔（`[worker].provider = local | pi`；默认 `pi`，
+其实现归 **M6 P2**，运行时缺失会明确报错），项目级可设 `maxConcurrency`（并发上限）、
+`tools`（工具白名单）与 `budget`（`maxSteps` / `maxWall` / `maxCost`）。Worker 的 LLM 仅复用
+`[capability.model]`，凭据仍只从环境变量读取。
 
 ## 5. CLI 面（冻结）
 

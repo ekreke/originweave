@@ -91,8 +91,9 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   `ConfigError`（防 `max_step` 之类拼写错误被静默忽略）。`CONFIG_FILENAME` 是**相对路径**，
   测试靠 `monkeypatch.chdir(tmp_path)`，不要在库代码里假设绝对路径。
   `[capability.model]` 默认 `openai` / `deepseek-v4.1-flash`，端点由 `OPENAI_BASE_URL` 提供
-  （内网地址不入库）。**M6** 新增顶层 `[worker]`：`provider`(local\|pi)、`max_concurrency`(>0)、
-  `tools`(Pi 工具白名单)；Pi 的 model/base_url 复用 `[capability.model]`。
+  （内网地址不入库）。**M6** 顶层 `[worker]`：`provider`(local\|pi，默认 `pi`)、`max_concurrency`(>0)、
+  `tools`(Pi 工具白名单)、`budget`（`max_steps` / `max_wall` / `max_cost`）；`max_wall` 为正整数加
+  `ms|s|m|h|d`。Pi 的 model/base_url 复用 `[capability.model]`。顶层 `[budget]` 已退役，旧配置会报错。
 - **HITL 开关**：`[hitl].auto` 或 `CreateRunRequest.auto` 只控制 Gate（默认人工介入）。
 - **凭据只从环境变量读**，不写入配置，且**多为可选**：`EXA_API_KEY` / `PARALLEL_API_KEY`
   （search 免费端点默认免 key）、`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、

@@ -61,12 +61,12 @@ provider = "openai"     # OpenAI 兼容
 model    = "deepseek-v4.1-flash"
 base_url = ""           # 端点由 OPENAI_BASE_URL 提供（内网地址不入库）
 [worker]                # Worker 执行体（M6）
-provider = "local"      # local | pi
+provider = "pi"         # local | pi；Pi 运行时缺失会明确报错
 max_concurrency = 1     # 本项目每次 run 的 worker 并发上限（server 调度处强制）
 tools = []              # Pi 工具白名单：search|read|grep|find|ls|bash|edit|write；空 = 不启用
-[budget]
+[worker.budget]         # 每次 Worker 会话的预算默认值
 max_steps = 60
-max_wall = "10m"
+max_wall = "10m"        # 正整数 + ms|s|m|h|d
 max_cost = 2.0
 [run]
 dir = "runs"
@@ -133,13 +133,16 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 
 ## 4. 预算与停止条件
 
-`CreateRun` / 配置支持三重预算，任一触顶即停止并落盘当前中间态：
+`CreateRun` / `[worker].budget` 配置支持三重预算，任一触顶即停止并落盘当前中间态：
 
 | 参数 | 含义 |
 |---|---|
 | `max_steps` | 最大步数（对应 Run.steps.total） |
 | `max_wall` | 最大墙钟时间 |
 | `max_cost` | 最大花费（对应 Run.budget.cost） |
+
+`max_wall` 采用无空白的正整数加单位：`ms`、`s`、`m`、`h` 或 `d`，例如 `500ms`、`10m`、`2h`。
+`CreateRun` 的预算字段是覆盖值；未给出时回落项目的 `[worker].budget`。预算强制执行仍归 M3。
 
 停止条件（`goal`）由第一性原理定义：日期边界、原始 benchmark、适用范围等。
 **注意**：originweave 的 goal 不是"到达某节点即结束"，而是"停止条件 + 偏差判定

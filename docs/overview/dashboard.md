@@ -114,7 +114,7 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 project_id, title?, source_type(url|text), analysis?(provenance|relation|both),
 goal, max_steps?, max_wall?, max_cost?, auto?
 ```
-预算三项为**覆盖**，未给出时回落 `[budget]` 配置；`auto=true` 跳过 HITL Gate（默认 false）。
+预算三项为**覆盖**，未给出时回落 `[worker].budget` 配置；`auto=true` 跳过 HITL Gate（默认 false）。
 新建 run 初始化为 `status: "queued"`、计数为 0、`budget` 归零。
 
 ### 4.4 HITL 方法
@@ -140,6 +140,7 @@ Settings {
     provider,                         # local | pi
     maxConcurrency,                   # 本项目每次 run 的 worker 上限
     tools: string[]                   # 启用的工具名单（扁平白名单，与 [worker].tools 一致）
+    budget: { maxSteps, maxWall, maxCost }
   }
 }
 

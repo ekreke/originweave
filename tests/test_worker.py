@@ -4,6 +4,8 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
+import pytest
+
 from originweave import config
 from originweave.blackboard import Fact
 from originweave.capabilities import ProviderUnavailableError, build_worker
@@ -130,8 +132,14 @@ async def test_engine_persists_session_snapshot(tmp_path: Path) -> None:
     assert not any(event.type == "WORKER_STEP" for event in events)
 
 
-def test_build_worker_defaults_to_local() -> None:
-    assert isinstance(build_worker(config.Config()), LocalWorker)
+def test_build_worker_defaults_to_unavailable_pi() -> None:
+    with pytest.raises(ProviderUnavailableError, match="pi worker provider is not implemented"):
+        build_worker(config.Config())
+
+
+def test_build_worker_explicit_local() -> None:
+    cfg = config.Config(worker=config.WorkerConfig(provider="local"))
+    assert isinstance(build_worker(cfg), LocalWorker)
 
 
 def test_build_worker_pi_is_unavailable() -> None:
@@ -280,4 +288,3 @@ def test_build_worker_rejects_unknown_provider() -> None:
 
 def test_worker_protocol_is_runtime_checkable() -> None:
     assert isinstance(_SteppingWorker(), Worker)
-

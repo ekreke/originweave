@@ -10,6 +10,7 @@ defaults defined here. Credentials are never stored in config (env only).
 
 from __future__ import annotations
 
+import re
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -29,15 +30,15 @@ ALLOWED_WORKER_TOOLS: frozenset[str] = frozenset(
     {"search", "read", "grep", "find", "ls", "bash", "edit", "write"}
 )
 
-_TOP_LEVEL_KEYS: frozenset[str] = frozenset({"hitl", "capability", "worker", "budget", "run"})
+_TOP_LEVEL_KEYS: frozenset[str] = frozenset({"hitl", "capability", "worker", "run"})
 _TABLE_KEYS: dict[str, frozenset[str]] = {
     "hitl": frozenset({"auto"}),
     "capability": frozenset({"search", "prompt", "model"}),
     "capability.search": frozenset({"provider"}),
     "capability.prompt": frozenset({"provider", "directory"}),
     "capability.model": frozenset({"provider", "model", "base_url"}),
-    "worker": frozenset({"provider", "max_concurrency", "tools"}),
-    "budget": frozenset({"max_steps", "max_wall", "max_cost"}),
+    "worker": frozenset({"provider", "max_concurrency", "tools", "budget"}),
+    "worker.budget": frozenset({"max_steps", "max_wall", "max_cost"}),
     "run": frozenset({"dir"}),
 }
 
@@ -79,19 +80,20 @@ class CapabilityConfig:
 
 
 @dataclass(frozen=True)
-class WorkerConfig:
-    provider: str = "local"  # local | pi
-    # Per-run cap on concurrent workers (enforced by the dispatcher, M6).
-    max_concurrency: int = 1
-    # Pi tool allowlist; empty means "no tools" (M6).
-    tools: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
 class BudgetConfig:
     max_steps: int = 60
     max_wall: str = "10m"
     max_cost: float = 2.0
+
+
+@dataclass(frozen=True)
+class WorkerConfig:
+    provider: str = "pi"  # local | pi
+    # Per-run cap on concurrent workers (enforced by the dispatcher, M6).
+    max_concurrency: int = 1
+    # Pi tool allowlist; empty means "no tools" (M6).
+    tools: tuple[str, ...] = ()
+    budget: BudgetConfig = field(default_factory=BudgetConfig)
 
 
 @dataclass(frozen=True)
@@ -104,7 +106,6 @@ class Config:
     hitl: HitlConfig = field(default_factory=HitlConfig)
     capability: CapabilityConfig = field(default_factory=CapabilityConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)
-    budget: BudgetConfig = field(default_factory=BudgetConfig)
     run: RunConfig = field(default_factory=RunConfig)
 
     def to_dict(self) -> dict[str, Any]:
@@ -127,11 +128,11 @@ class Config:
                 "provider": self.worker.provider,
                 "max_concurrency": self.worker.max_concurrency,
                 "tools": list(self.worker.tools),
-            },
-            "budget": {
-                "max_steps": self.budget.max_steps,
-                "max_wall": self.budget.max_wall,
-                "max_cost": self.budget.max_cost,
+                "budget": {
+                    "max_steps": self.worker.budget.max_steps,
+                    "max_wall": self.worker.budget.max_wall,
+                    "max_cost": self.worker.budget.max_cost,
+                },
             },
             "run": {"dir": self.run.dir},
         }
@@ -172,10 +173,15 @@ class Config:
                 f"worker.tools: unknown tool(s) {unknown_tools}; "
                 f"allowed: {sorted(ALLOWED_WORKER_TOOLS)}"
             )
-        if self.budget.max_steps <= 0:
-            raise ConfigError(f"budget.max_steps must be > 0, got {self.budget.max_steps}")
-        if self.budget.max_cost < 0:
-            raise ConfigError(f"budget.max_cost must be >= 0, got {self.budget.max_cost}")
+        budget = self.worker.budget
+        if budget.max_steps <= 0:
+            raise ConfigError(f"worker.budget.max_steps must be > 0, got {budget.max_steps}")
+        if budget.max_cost < 0:
+            raise ConfigError(f"worker.budget.max_cost must be >= 0, got {budget.max_cost}")
+        if not re.fullmatch(r"[1-9][0-9]*(?:ms|s|m|h|d)", budget.max_wall):
+            raise ConfigError(
+                "worker.budget.max_wall must be a positive integer followed by ms, s, m, h, or d"
+            )
 
 
 def _as_mapping(value: Any, where: str) -> Mapping[str, Any]:
@@ -243,7 +249,7 @@ def from_dict(data: Mapping[str, Any]) -> Config:
     prompt = _as_mapping(capability.get("prompt"), "capability.prompt")
     model = _as_mapping(capability.get("model"), "capability.model")
     worker = _as_mapping(data.get("worker"), "worker")
-    budget = _as_mapping(data.get("budget"), "budget")
+    worker_budget = _as_mapping(worker.get("budget"), "worker.budget")
     run = _as_mapping(data.get("run"), "run")
 
     _check_keys(hitl, "hitl", _TABLE_KEYS["hitl"])
@@ -252,7 +258,7 @@ def from_dict(data: Mapping[str, Any]) -> Config:
     _check_keys(prompt, "capability.prompt", _TABLE_KEYS["capability.prompt"])
     _check_keys(model, "capability.model", _TABLE_KEYS["capability.model"])
     _check_keys(worker, "worker", _TABLE_KEYS["worker"])
-    _check_keys(budget, "budget", _TABLE_KEYS["budget"])
+    _check_keys(worker_budget, "worker.budget", _TABLE_KEYS["worker.budget"])
     _check_keys(run, "run", _TABLE_KEYS["run"])
 
     return Config(
@@ -311,13 +317,23 @@ def from_dict(data: Mapping[str, Any]) -> Config:
                 "worker.tools",
                 defaults.worker.tools,
             ),
-        ),
-        budget=BudgetConfig(
-            max_steps=_as_int(
-                budget.get("max_steps"), "budget.max_steps", defaults.budget.max_steps
+            budget=BudgetConfig(
+                max_steps=_as_int(
+                    worker_budget.get("max_steps"),
+                    "worker.budget.max_steps",
+                    defaults.worker.budget.max_steps,
+                ),
+                max_wall=_as_str(
+                    worker_budget.get("max_wall"),
+                    "worker.budget.max_wall",
+                    defaults.worker.budget.max_wall,
+                ),
+                max_cost=_as_float(
+                    worker_budget.get("max_cost"),
+                    "worker.budget.max_cost",
+                    defaults.worker.budget.max_cost,
+                ),
             ),
-            max_wall=_as_str(budget.get("max_wall"), "budget.max_wall", defaults.budget.max_wall),
-            max_cost=_as_float(budget.get("max_cost"), "budget.max_cost", defaults.budget.max_cost),
         ),
         run=RunConfig(dir=_as_str(run.get("dir"), "run.dir", defaults.run.dir)),
     )

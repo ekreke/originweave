@@ -280,7 +280,7 @@ message CreateRunRequest {
   string source_type = 3; // url | text
   optional string analysis = 4; // provenance | relation | both (default provenance)
   string goal = 5;
-  // Budget overrides; unset fields fall back to the [budget] config.
+  // Budget overrides; unset fields fall back to the [worker.budget] config.
   optional int32 max_steps = 6;
   optional string max_wall = 7; // duration string, e.g. "10m"
   optional double max_cost = 8; // USD

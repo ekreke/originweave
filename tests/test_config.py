@@ -16,12 +16,12 @@ def test_default_values() -> None:
     assert cfg.capability.model.provider == "openai"
     assert cfg.capability.model.model == "deepseek-v4.1-flash"
     assert cfg.capability.model.base_url == ""
-    assert cfg.worker.provider == "local"
+    assert cfg.worker.provider == "pi"
     assert cfg.worker.max_concurrency == 1
     assert cfg.worker.tools == ()
-    assert cfg.budget.max_steps == 60
-    assert cfg.budget.max_wall == "10m"
-    assert cfg.budget.max_cost == 2.0
+    assert cfg.worker.budget.max_steps == 60
+    assert cfg.worker.budget.max_wall == "10m"
+    assert cfg.worker.budget.max_cost == 2.0
     assert cfg.run.dir == "runs"
 
 
@@ -59,7 +59,7 @@ directory = "p"
 provider = "openai"
 model = "some-model"
 base_url = "https://example.test/v1"
-[budget]
+[worker.budget]
 max_steps = 5
 max_wall = "1m"
 max_cost = 0.5
@@ -75,8 +75,8 @@ dir = "out"
     assert cfg.capability.prompt.directory == "p"
     assert cfg.capability.model.model == "some-model"
     assert cfg.capability.model.base_url == "https://example.test/v1"
-    assert cfg.budget.max_steps == 5
-    assert cfg.budget.max_cost == 0.5
+    assert cfg.worker.budget.max_steps == 5
+    assert cfg.worker.budget.max_cost == 0.5
     assert cfg.run.dir == "out"
 
 
@@ -123,6 +123,10 @@ def test_load_reads_worker_overrides(tmp_path: Path) -> None:
 provider = "pi"
 max_concurrency = 4
 tools = ["search", "read"]
+[worker.budget]
+max_steps = 12
+max_wall = "2h"
+max_cost = 1.5
 """.lstrip(),
         encoding="utf-8",
     )
@@ -130,6 +134,7 @@ tools = ["search", "read"]
     assert cfg.worker.provider == "pi"
     assert cfg.worker.max_concurrency == 4
     assert cfg.worker.tools == ("search", "read")
+    assert cfg.worker.budget == config.BudgetConfig(max_steps=12, max_wall="2h", max_cost=1.5)
 
 
 def test_load_rejects_bad_worker_tools_type(tmp_path: Path) -> None:
@@ -155,14 +160,28 @@ def test_load_rejects_bool_worker_concurrency(tmp_path: Path) -> None:
 
 
 def test_validate_rejects_bad_budget() -> None:
-    cfg = config.Config(budget=config.BudgetConfig(max_steps=0))
+    cfg = config.Config(worker=config.WorkerConfig(budget=config.BudgetConfig(max_steps=0)))
     with pytest.raises(config.ConfigError):
         cfg.validate()
 
 
-def test_load_rejects_wrong_type(tmp_path: Path) -> None:
+@pytest.mark.parametrize("max_wall", ["0m", "-1m", "1", "1w", "1 m", "1M", "1.5m"])
+def test_validate_rejects_invalid_max_wall(max_wall: str) -> None:
+    cfg = config.Config(worker=config.WorkerConfig(budget=config.BudgetConfig(max_wall=max_wall)))
+    with pytest.raises(config.ConfigError, match="worker.budget.max_wall"):
+        cfg.validate()
+
+
+@pytest.mark.parametrize("max_wall", ["500ms", "30s", "10m", "2h", "1d"])
+def test_validate_accepts_valid_max_wall(max_wall: str) -> None:
+    config.Config(
+        worker=config.WorkerConfig(budget=config.BudgetConfig(max_wall=max_wall))
+    ).validate()
+
+
+def test_load_rejects_wrong_worker_budget_type(tmp_path: Path) -> None:
     path = tmp_path / "originweave.toml"
-    path.write_text('[budget]\nmax_steps = "many"\n', encoding="utf-8")
+    path.write_text('[worker.budget]\nmax_steps = "many"\n', encoding="utf-8")
     with pytest.raises(config.ConfigError):
         config.load(path)
 
@@ -181,12 +200,19 @@ def test_load_rejects_bad_toml(tmp_path: Path) -> None:
         config.load(path)
 
 
-def test_load_rejects_unknown_key(tmp_path: Path) -> None:
+def test_load_rejects_unknown_worker_budget_key(tmp_path: Path) -> None:
     path = tmp_path / "originweave.toml"
-    path.write_text("[budget]\nmax_step = 3\n", encoding="utf-8")
+    path.write_text("[worker.budget]\nmax_step = 3\n", encoding="utf-8")
     with pytest.raises(config.ConfigError) as excinfo:
         config.load(path)
     assert "max_step" in str(excinfo.value)
+
+
+def test_load_rejects_retired_top_level_budget(tmp_path: Path) -> None:
+    path = tmp_path / "originweave.toml"
+    path.write_text("[budget]\nmax_steps = 3\n", encoding="utf-8")
+    with pytest.raises(config.ConfigError, match="unknown key"):
+        config.load(path)
 
 
 def test_load_rejects_removed_live_table(tmp_path: Path) -> None:

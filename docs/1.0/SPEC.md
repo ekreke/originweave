@@ -100,17 +100,21 @@ API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）�
 - [x] DAG 组装与边 relation：`main-chain/dependency/goal-derived/decomposes/spawns/resolves` — `src/originweave/reduce.py`（M0c）
 - [x] `model` capability：`ModelProvider` Protocol + **真实 OpenAI 兼容 provider**（`capabilities/model.py`、`[capability.model]`；`OPENAI_API_KEY` + `OPENAI_BASE_URL`（端点经环境变量提供））（Phase R）
 - [x] `search` capability 真实接入：`exa` / `parallel`（`capabilities/search.py`；免费 MCP 端点，`EXA_API_KEY` / `PARALLEL_API_KEY` 可选）（Phase R）
-- [ ] 任务指令：`Bootstrap` / `Reason` / `Explore` / `Validate`（`Validate` 为独立判重 pass）
+- [x] 任务指令：`Bootstrap`（抽取核心抽象论点）— `engine.py` + `prompts/bootstrap.txt`
+- [x] 任务指令：`Reason`（产出候选 Intent）— `engine.py` + `prompts/reason.txt`
+- [ ] 任务指令：`Explore`（认领 Intent 并执行探索）
+- [x] 任务指令：`Validate`（独立判重 pass）— `engine.py` + `prompts/validate.txt`
 - [ ] Intent 三型调度分支：`decompose` / `explore` / `verify`
-- [ ] 抽象论点抽取与拆解（`Bootstrap` → `main-claim`；`Intent(decompose)` → `sub-claim`）
+- [x] 抽象论点抽取：`Bootstrap` → `main-claim` — `engine.py` + `prompts/bootstrap.txt`
+- [ ] 抽象论点拆解：`Intent(decompose)` → `sub-claim`
 - [ ] 来源回链：`citation` / `source` 节点与 `Evidence{quote,sourceTitle,url,locator}` 登记
 - [ ] 多 Worker asyncio 任务并发认领 Intent + 心跳/超时自动释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按确定性顺序提交，保证 Board 确定
 - [ ] Stigmergy：新 Fact 触发新一轮 Reason（去重）
-- [ ] Reason 产出 Intent 的去重：`Validate` pass（复用 `model`，纯 LLM 语义判重、无 L1 预筛，比对含 `done`/`dropped` 及批内候选）→ 重复项写 `status=dropped` 留痕（`Intent.duplicateOf`）
+- [x] Reason 产出 Intent 的去重：`Validate` pass（复用 `model`，纯 LLM 语义判重、无 L1 预筛，比对含 `done`/`dropped` 及批内候选）→ 重复项写 `status=dropped` 留痕（`Intent.duplicateOf`）— `engine.py` + `prompts/validate.txt`
 - [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回（唯一写入者）
 - [ ] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1c-2）
 - [ ] 自动路径：`[hitl].auto=true`（或 M1c-1 的 `CreateRunRequest.auto`）跳过 Gate
-- [ ] 失败/停止事件：`FAILED` / `STOPPED` → `status=failed|stopped`（`events.py`/`reduce.py`；`paused` 随 M3）
+- [x] 失败/停止事件：`FAILED` / `STOPPED` → `status=failed|stopped`（`events.py`/`reduce.py`；`paused` 随 M3）
 - [ ] 单测：注入 **fake provider**，对 fixture 输入产出确定性 Board/DAG（节点/边/证据断言）
 
 验收：对 `copilot_productivity` 样例，核心抽象论点被拆解为子断言，每条子断言可回溯到
@@ -275,7 +279,7 @@ Worker 调用 = 一个**隔离会话**，历史以会话为单位保留**原始�
       `WorkerStep` / `LocalWorker`）；`Engine` 改接 `worker`，发 `SESSION`/`WORKER_STEP`、落会话文件
 - [x] P1 配置 `[worker]`（`provider` / `max_concurrency` / `tools`）+ `config.py` 校验
 - [x] P1 事件 `SESSION`/`WORKER_STEP`（reducer 忽略，Board 不变、`replay` 确定）+ run dir `sessions/`
-- [ ] P1b 配置迁移（项目级完整化）：**退役顶层 `[budget]`，迁至 `[worker].budget`**
+- [x] P1b 配置迁移（项目级完整化）：**退役顶层 `[budget]`，迁至 `[worker].budget`**
       （`max_steps` / `max_wall` / `max_cost`；补 `max_wall` 时长校验）；`[worker].provider` **默认 `pi`**；
       worker 的 LLM **复用 `[capability.model]`**（仅 openai 兼容：`model` + `base_url` + `OPENAI_API_KEY` env，
       设置页不落密钥）。同步 `agent-design.md §2.1/§4`、`dashboard.md §4.3`（`CreateRun` 预算 override 回落
