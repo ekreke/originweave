@@ -217,12 +217,13 @@ Worker 的结构化输出（**冻结**）：Worker 只返回**一个 JSON 对象
 （判关系）两类 Intent，产出写入 `entities` / `relations` 而非 `facts`；事件溯源、
 心跳释放、Stigmergy 与 Gate 机制不变。
 
-### 4.4 走查示例：一次 Bootstrap（M1 起实现）
+### 4.4 走查示例：一次 Bootstrap + 一次 Reason（M1 起实现）
 
 用样例 `examples/copilot_productivity`（资料 A 是宣传文，含多个论点）走一遍。调用方构造
-`origin`（资料 A，`kind=origin`）与 `goal`（停止条件，`kind=goal`），调 `Engine.run(origin, goal)`。
+`origin`（资料 A，`kind=origin`）与 `goal`（停止条件，`kind=goal`），调 `Engine.run(origin, goal)`：
+先跑一次 Bootstrap，再跑一次 Reason。
 
-Worker 返回（严格 JSON，无 id、无边）：
+**Bootstrap** Worker 返回（严格 JSON，无 id、无边）核心抽象论点：
 
 ```json
 { "facts": [
@@ -236,18 +237,28 @@ Worker 返回（严格 JSON，无 id、无边）：
   "intents": [], "complete": null }
 ```
 
-引擎把这次 Bootstrap 记为一条 `explore` Intent（Bootstrap 在协议里没有自己的 Intent，这样
-建模才能像其他任务一样被审计与派发），并按 kind 前缀发放确定性 id（`fact → f1/f2/f3`，
-`intent → i1`）。`events.jsonl`：
+**Reason** Worker 读图后只返回候选 Intent（不产 facts）：
+
+```json
+{ "facts": [], "intents": [
+    { "type": "decompose", "from": "f1", "question": "Split this claim into sub-claims." }
+  ], "complete": null }
+```
+
+引擎把 Bootstrap 记为一条 `explore` Intent（Bootstrap 在协议里没有自己的 Intent，这样建模
+才能像其他任务一样被审计与派发），把 Reason 记为一次 `REASON` 任务（**只有真正的 Reason
+pass 才写 `REASON start/end`，Bootstrap 不被包裹**），并按 kind 前缀发放确定性 id
+（`fact → f1/f2/f3`，`intent → i1/i2`）。`events.jsonl`：
 
 | id | type | payload |
 |---|---|---|
 | `e0001` | `PROJECT` | `origin`, `goal` |
-| `e0002` | `REASON` | `phase=start` |
-| `e0003` | `INTENT` | `intent=i1`（`type=explore`, `from=origin`） |
-| `e0004` | `EXECUTE` | `intentId=i1`, `worker=worker-1`, `model=...` |
-| `e0005` | `CONCLUDE` | `intentId=i1`, `facts=[f1,f2,f3]` |
-| `e0006` | `REASON` | `phase=end` |
+| `e0002` | `INTENT` | `intent=i1`（`type=explore`, `from=origin`） |
+| `e0003` | `EXECUTE` | `intentId=i1`, `worker=worker-1`, `model=...` |
+| `e0004` | `CONCLUDE` | `intentId=i1`, `facts=[f1,f2,f3]` |
+| `e0005` | `REASON` | `phase=start` |
+| `e0006` | `INTENT` | `intent=i2`（`type=decompose`, `from=f1`, `status=open`） |
+| `e0007` | `REASON` | `phase=end` |
 
 `reduce(events)` 折出的 `Board`（结构性边由 reducer 派生，§2.4）：
 
@@ -255,12 +266,15 @@ Worker 返回（严格 JSON，无 id、无边）：
 status   running
 facts    f1/f2/f3（均 role=main-claim）
 intents  i1（status=done, producedFacts=[f1,f2,f3], claimedBy=worker-1）
+         i2（status=open, type=decompose, from=f1）   ← 待 Explore（I3）认领
 edges    origin → i1 (spawns)
          i1 → f1 / f2 / f3 (resolves)
+         f1 → i2 (spawns)
 ```
 
 要点：**Worker 不写协议、不起 id**；**引擎是唯一写入者**且只负责「取指令 → 读图 → 调能力 →
-解析 → 发 id → 写事件」这条流水线；**所有"事实"都在 append-only 事件日志里**，Board 永远由
+解析 → 发 id → 写事件」这条流水线；Reason 只能产 `open` 候选 Intent（生命周期字段由引擎重建），
+且 `complete` 与 `intents` 互斥；**所有"事实"都在 append-only 事件日志里**，Board 永远由
 `reduce` 折出，故可重放。
 
 ## 5. 事件协议（冻结）

@@ -50,8 +50,8 @@ class EngineError(ValueError):
 class WorkerResult:
     """Parsed worker reply; ids are placeholders until the engine assigns them.
 
-    A Bootstrap reply is expected to leave ``intents`` empty; Reason produces intents
-    and is a later concern.
+    Bootstrap writes ``facts``; Reason writes ``intents`` (and may set ``complete``);
+    a later Explore writes the facts behind one Intent.
     """
 
     facts: list[Fact] = field(default_factory=list)
@@ -194,13 +194,12 @@ class Engine:
         self._intent_seq = 0
 
     async def run(self, *, origin: Fact, goal: Fact) -> Board:
-        """Start a run: ``PROJECT``, one Bootstrap pass, ``REASON``, then reduce."""
+        """Start a run: ``PROJECT``, one Bootstrap pass, one Reason pass, then reduce."""
         self._fact_seq = {}
         self._intent_seq = 0
         self._store.append_event("PROJECT", {"origin": origin.to_dict(), "goal": goal.to_dict()})
-        self._store.append_event("REASON", {"phase": "start"}, message="Reason: start")
         await self._bootstrap()
-        self._store.append_event("REASON", {"phase": "end"}, message="Reason: end")
+        await self._reason()
         # The board is always folded from the event log, never mutated in place.
         return reduce(self._store.read_events())
 
@@ -231,6 +230,44 @@ class Engine:
             "CONCLUDE",
             {"intentId": intent.id, "facts": [fact.to_dict() for fact in result.facts]},
         )
+
+    async def _reason(self) -> None:
+        """Run one Reason pass: write candidate Intents, or ``COMPLETE`` if judged done.
+
+        Reason never produces facts (that is Explore's job), and every proposed Intent
+        must point at an existing fact id or ``origin``. Multi-round Stigmergy
+        convergence is a later concern; this is a single pass.
+        """
+        template = await self._prompt.get("reason")
+        board = reduce(self._store.read_events())  # Observe: the current graph
+        self._store.append_event("REASON", {"phase": "start"}, message="Reason: start")
+        reply = await self._model.complete(render_messages("Reason", template, board))
+        result = parse_result(reply)
+        if result.facts:
+            raise EngineError("Reason must not produce facts; that is Explore's job")
+        if result.complete is not None:
+            if result.intents:
+                raise EngineError("Reason reply must not carry both intents and complete")
+            self._store.append_event("REASON", {"phase": "end"}, message="Reason: end")
+            self._store.append_event("COMPLETE", {"verdict": result.complete})
+            return
+        # Validate the whole reply before writing anything, so a bad Intent leaves no
+        # half-written intents behind. An Intent may only hang off a finding or origin.
+        known = {"origin"} | {fact.id for fact in board.facts}
+        for intent in result.intents:
+            if intent.from_ not in known:
+                raise EngineError(f"intent.from {intent.from_!r} is not a known fact id")
+        # The model's lifecycle fields are untrusted: rebuild each Intent as a fresh
+        # ``open`` candidate so only the engine controls status/claim/heartbeat.
+        for intent in result.intents:
+            candidate = Intent(
+                id=self._next_intent_id(),
+                type=intent.type,
+                from_=intent.from_,
+                question=intent.question,
+            )
+            self._store.append_event("INTENT", {"intent": candidate.to_dict()})
+        self._store.append_event("REASON", {"phase": "end"}, message="Reason: end")
 
     def _next_intent_id(self) -> str:
         self._intent_seq += 1

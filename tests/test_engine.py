@@ -16,17 +16,25 @@ from originweave.store import RunStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# A Reason reply that proposes nothing, so a test can focus on the Bootstrap pass.
+NO_REASON = json.dumps({"facts": [], "intents": [], "complete": None})
+
 
 class _FakeModel:
     name = "fake"
 
-    def __init__(self, reply: str) -> None:
-        self._reply = reply
+    def __init__(self, *replies: str) -> None:
+        if not replies:
+            raise ValueError("at least one reply is required")
+        self._replies = list(replies)
         self.calls: list[list[ChatMessage]] = []
 
     async def complete(self, messages: Sequence[ChatMessage]) -> str:
         self.calls.append(list(messages))
-        return self._reply
+        # Consume queued replies in order, then keep returning the last one.
+        if len(self._replies) > 1:
+            return self._replies.pop(0)
+        return self._replies[0]
 
 
 class _FakeSearch:
@@ -40,7 +48,7 @@ class _FakePrompt:
     name = "fake"
 
     async def get(self, name: str) -> PromptTemplate:
-        return PromptTemplate(name=name, text="BOOTSTRAP")
+        return PromptTemplate(name=name, text=name.upper())
 
 
 def _origin() -> Fact:
@@ -51,39 +59,36 @@ def _goal() -> Fact:
     return Fact.from_dict({"id": "goal", "kind": "goal", "label": "Every sub-claim is sourced"})
 
 
-def _engine(store: RunStore, reply: str) -> Engine:
+def _engine(store: RunStore, *replies: str) -> Engine:
     return Engine(
-        model=_FakeModel(reply),
+        model=_FakeModel(*replies),
         search=_FakeSearch(),
         prompt=_FakePrompt(),
         store=store,
     )
 
 
-async def test_bootstrap_produces_a_main_claim(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "run_001")
-    reply = json.dumps(
+def _bootstrap(*labels: str) -> str:
+    return json.dumps(
         {
             "facts": [
-                {
-                    "label": "Copilot cut task time by 55%.",
-                    "kind": "fact",
-                    "role": "main-claim",
-                    "status": "open",
-                    "confidence": 0.7,
-                }
+                {"label": label, "kind": "fact", "role": "main-claim", "status": "open"}
+                for label in labels
             ],
             "intents": [],
             "complete": None,
         }
     )
-    model = _FakeModel(reply)
-    engine = Engine(
-        model=model,
-        search=_FakeSearch(),
-        prompt=_FakePrompt(),
-        store=store,
-    )
+
+
+def _reason(*intents: dict[str, object]) -> str:
+    return json.dumps({"facts": [], "intents": list(intents), "complete": None})
+
+
+async def test_bootstrap_produces_a_main_claim(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    model = _FakeModel(_bootstrap("Copilot cut task time by 55%."), NO_REASON)
+    engine = Engine(model=model, search=_FakeSearch(), prompt=_FakePrompt(), store=store)
     board = await engine.run(origin=_origin(), goal=_goal())
 
     assert board.origin.kind == "origin"
@@ -91,7 +96,6 @@ async def test_bootstrap_produces_a_main_claim(tmp_path: Path) -> None:
     main = [fact for fact in board.facts if fact.role == "main-claim"]
     assert [fact.id for fact in main] == ["f1"]
     assert main[0].kind == "fact"
-    assert main[0].confidence == 0.7
 
     assert [intent.id for intent in board.intents] == ["i1"]
     assert board.intents[0].status == "done"
@@ -106,48 +110,153 @@ async def test_bootstrap_produces_a_main_claim(tmp_path: Path) -> None:
     assert [event.id for event in events] == [f"e{i:04d}" for i in range(1, len(events) + 1)]
     assert [event.type for event in events] == [
         "PROJECT",
-        "REASON",
         "INTENT",
         "EXECUTE",
         "CONCLUDE",
         "REASON",
+        "REASON",
     ]
 
-    assert len(model.calls) == 1
+    assert len(model.calls) == 2
     assert model.calls[0][0].role == "system"
 
 
 async def test_bootstrap_allows_multiple_main_claims(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
-    reply = json.dumps(
-        {
-            "facts": [
-                {"label": "Claim one", "kind": "fact", "role": "main-claim"},
-                {"label": "Claim two", "kind": "fact", "role": "main-claim"},
-            ],
-            "intents": [],
-            "complete": None,
-        }
+    board = await _engine(store, _bootstrap("Claim one", "Claim two"), NO_REASON).run(
+        origin=_origin(), goal=_goal()
     )
-    board = await _engine(store, reply).run(origin=_origin(), goal=_goal())
     assert [fact.id for fact in board.facts] == ["f1", "f2"]
     assert all(fact.role == "main-claim" for fact in board.facts)
 
 
-async def test_board_is_deterministic(tmp_path: Path) -> None:
-    reply = json.dumps(
+async def test_reason_writes_candidate_intents(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("A claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split into sub-claims."}),
+    ).run(origin=_origin(), goal=_goal())
+
+    assert [intent.id for intent in board.intents] == ["i1", "i2"]
+    proposed = board.intents[1]
+    assert proposed.type == "decompose"
+    assert proposed.from_ == "f1"
+    assert proposed.status == "open"
+    relations = {(edge.source, edge.target, edge.relation) for edge in board.edges}
+    assert ("f1", "i2", "spawns") in relations
+
+
+async def test_reason_rejects_facts(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    bad_reason = json.dumps(
+        {"facts": [{"label": "x", "kind": "fact", "role": "none"}], "intents": [], "complete": None}
+    )
+    with pytest.raises(EngineError):
+        await _engine(store, _bootstrap("A claim"), bad_reason).run(origin=_origin(), goal=_goal())
+
+
+async def test_reason_rejects_unknown_from(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    with pytest.raises(EngineError):
+        await _engine(
+            store,
+            _bootstrap("A claim"),
+            _reason({"type": "decompose", "from": "f9", "question": "?"}),
+        ).run(origin=_origin(), goal=_goal())
+
+
+async def test_reason_assigns_sequential_ids(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("Claim one", "Claim two"),
+        _reason(
+            {"type": "decompose", "from": "f1", "question": "Split f1."},
+            {"type": "explore", "from": "f2", "question": "Source f2."},
+        ),
+    ).run(origin=_origin(), goal=_goal())
+
+    assert [intent.id for intent in board.intents] == ["i1", "i2", "i3"]
+    assert [intent.type for intent in board.intents[1:]] == ["decompose", "explore"]
+    assert all(intent.status == "open" for intent in board.intents[1:])
+
+
+async def test_reason_rejects_goal_as_from(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    with pytest.raises(EngineError):
+        await _engine(
+            store,
+            _bootstrap("A claim"),
+            _reason({"type": "explore", "from": "goal", "question": "?"}),
+        ).run(origin=_origin(), goal=_goal())
+
+
+async def test_reason_bad_from_writes_nothing(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    reason = _reason(
+        {"type": "decompose", "from": "f1", "question": "ok"},
+        {"type": "explore", "from": "f9", "question": "bad"},
+    )
+    with pytest.raises(EngineError):
+        await _engine(store, _bootstrap("A claim"), reason).run(origin=_origin(), goal=_goal())
+    # The good candidate must not be half-written when a later one is rejected.
+    assert sum(event.type == "INTENT" for event in store.read_events()) == 1
+
+
+async def test_reason_intents_are_deterministic(tmp_path: Path) -> None:
+    bootstrap = _bootstrap("A claim")
+    reason = _reason({"type": "decompose", "from": "f1", "question": "Split it."})
+    first = await _engine(RunStore(tmp_path / "a"), bootstrap, reason).run(
+        origin=_origin(), goal=_goal()
+    )
+    second = await _engine(RunStore(tmp_path / "b"), bootstrap, reason).run(
+        origin=_origin(), goal=_goal()
+    )
+    assert [(i.id, i.type, i.from_, i.status) for i in first.intents] == [
+        (i.id, i.type, i.from_, i.status) for i in second.intents
+    ]
+    assert [(e.source, e.target, e.relation) for e in first.edges] == [
+        (e.source, e.target, e.relation) for e in second.edges
+    ]
+
+
+async def test_reason_complete_writes_complete(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    reason = json.dumps({"facts": [], "intents": [], "complete": {"verdict": "部分偏差"}})
+    board = await _engine(store, _bootstrap("A claim"), reason).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "completed"
+    assert board.verdict == "部分偏差"
+    events = store.read_events()
+    assert events[-1].type == "COMPLETE"
+    assert events[-2].type == "REASON"
+    assert events[-2].payload == {"phase": "end"}
+
+
+async def test_reason_rejects_intents_and_complete_together(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    reason = json.dumps(
         {
-            "facts": [{"label": "A claim", "kind": "fact", "role": "main-claim"}],
-            "intents": [],
-            "complete": None,
+            "facts": [],
+            "intents": [{"type": "decompose", "from": "f1", "question": "?"}],
+            "complete": {"verdict": "done"},
         }
     )
+    with pytest.raises(EngineError):
+        await _engine(store, _bootstrap("A claim"), reason).run(origin=_origin(), goal=_goal())
+
+
+async def test_board_is_deterministic(tmp_path: Path) -> None:
+    bootstrap = _bootstrap("A claim")
     store = RunStore(tmp_path / "a")
-    first = await _engine(store, reply).run(origin=_origin(), goal=_goal())
+    first = await _engine(store, bootstrap, NO_REASON).run(origin=_origin(), goal=_goal())
     # The reducer is a pure fold: the same events always yield the same board.
     assert render_canonical(first) == render_canonical(reduce(store.read_events()))
 
-    second = await _engine(RunStore(tmp_path / "b"), reply).run(origin=_origin(), goal=_goal())
+    second = await _engine(RunStore(tmp_path / "b"), bootstrap, NO_REASON).run(
+        origin=_origin(), goal=_goal()
+    )
     # Across two runs only volatile timestamps differ; the structure is identical.
     assert [(f.id, f.kind, f.role) for f in first.facts] == [
         (f.id, f.kind, f.role) for f in second.facts
