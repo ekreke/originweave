@@ -10,6 +10,7 @@ import pytest
 from originweave.blackboard import Fact
 from originweave.capabilities.base import PromptTemplate, ProviderError
 from originweave.capabilities.model import ChatMessage
+from originweave.capabilities.worker import LocalWorker
 from originweave.engine import Engine, EngineError, parse_result, parse_validation
 from originweave.reduce import reduce, render_canonical
 from originweave.store import RunStore
@@ -61,7 +62,7 @@ def _goal() -> Fact:
 
 def _engine(store: RunStore, *replies: str) -> Engine:
     return Engine(
-        model=_FakeModel(*replies),
+        worker=LocalWorker(model=_FakeModel(*replies)),
         search=_FakeSearch(),
         prompt=_FakePrompt(),
         store=store,
@@ -92,7 +93,9 @@ def _validate(*keep: int, drop: list[dict[str, object]] | None = None) -> str:
 async def test_bootstrap_produces_a_main_claim(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     model = _FakeModel(_bootstrap("Copilot cut task time by 55%."), NO_REASON)
-    engine = Engine(model=model, search=_FakeSearch(), prompt=_FakePrompt(), store=store)
+    engine = Engine(
+        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+    )
     board = await engine.run(origin=_origin(), goal=_goal())
 
     assert board.origin.kind == "origin"
@@ -117,9 +120,15 @@ async def test_bootstrap_produces_a_main_claim(tmp_path: Path) -> None:
         "INTENT",
         "EXECUTE",
         "CONCLUDE",
+        "SESSION",
         "REASON",
         "REASON",
+        "SESSION",
     ]
+    bootstrap_session = events[4]
+    assert bootstrap_session.payload["task"] == "Bootstrap"
+    assert bootstrap_session.payload["intentId"] == "i1"
+    assert bootstrap_session.payload["ref"] == "sessions/sess_001.json"
 
     assert len(model.calls) == 2
     assert model.calls[0][0].role == "system"
@@ -253,7 +262,9 @@ async def test_validate_drops_duplicate_candidates(tmp_path: Path) -> None:
 async def test_validate_skips_when_no_candidates(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     model = _FakeModel(_bootstrap("A claim"), NO_REASON)
-    engine = Engine(model=model, search=_FakeSearch(), prompt=_FakePrompt(), store=store)
+    engine = Engine(
+        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+    )
     await engine.run(origin=_origin(), goal=_goal())
 
     assert len(model.calls) == 2  # bootstrap + reason only; nothing to validate
@@ -284,7 +295,9 @@ async def test_validate_passes_candidates_to_worker(tmp_path: Path) -> None:
         _reason({"type": "decompose", "from": "f1", "question": "Split it."}),
         _validate(0),
     )
-    engine = Engine(model=model, search=_FakeSearch(), prompt=_FakePrompt(), store=store)
+    engine = Engine(
+        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+    )
     await engine.run(origin=_origin(), goal=_goal())
 
     validate_call = model.calls[2]
@@ -398,7 +411,9 @@ async def test_validate_provider_error_fails_run(tmp_path: Path) -> None:
                 return _reason({"type": "decompose", "from": "f1", "question": "Split it."})
             raise ProviderError("validate model exploded")
 
-    engine = Engine(model=_Boom(), search=_FakeSearch(), prompt=_FakePrompt(), store=store)
+    engine = Engine(
+        worker=LocalWorker(model=_Boom()), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+    )
     board = await engine.run(origin=_origin(), goal=_goal())
     assert board.status == "failed"
     assert store.read_events()[-1].type == "FAILED"
@@ -419,7 +434,12 @@ async def test_missing_validate_prompt_fails_run(tmp_path: Path) -> None:
         _bootstrap("A claim"),
         _reason({"type": "decompose", "from": "f1", "question": "Split it."}),
     )
-    engine = Engine(model=model, search=_FakeSearch(), prompt=_NoValidate(), store=store)
+    engine = Engine(
+        worker=LocalWorker(model=model),
+        search=_FakeSearch(),
+        prompt=_NoValidate(),
+        store=store,
+    )
     board = await engine.run(origin=_origin(), goal=_goal())
     assert board.status == "failed"
     assert store.read_events()[-1].type == "FAILED"
@@ -434,9 +454,10 @@ async def test_reason_complete_writes_complete(tmp_path: Path) -> None:
     assert board.verdict == "部分偏差"
     events = store.read_events()
     assert events[-1].type == "COMPLETE"
-    assert events[-2].type == "REASON"
-    assert events[-2].payload["phase"] == "end"
-    assert events[-2].payload["triggerFacts"] == ["f1"]
+    assert events[-2].type == "SESSION"
+    assert events[-3].type == "REASON"
+    assert events[-3].payload["phase"] == "end"
+    assert events[-3].payload["triggerFacts"] == ["f1"]
 
 
 async def test_reason_rejects_intents_and_complete_together(tmp_path: Path) -> None:
@@ -551,7 +572,7 @@ def test_parse_validation_rejects_malformed(reply: str) -> None:
 @pytest.mark.skipif(not os.environ.get("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
 async def test_live_bootstrap_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from originweave import config
-    from originweave.capabilities import build_model, build_prompt, build_search
+    from originweave.capabilities import build_prompt, build_search, build_worker
 
     monkeypatch.chdir(REPO_ROOT)
     cfg = config.Config()
@@ -562,7 +583,7 @@ async def test_live_bootstrap_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         {"id": "origin", "kind": "origin", "label": "Document A", "note": document}
     )
     engine = Engine(
-        model=build_model(cfg),
+        worker=build_worker(cfg),
         search=build_search(cfg),
         prompt=build_prompt(cfg),
         store=RunStore(tmp_path / "live"),

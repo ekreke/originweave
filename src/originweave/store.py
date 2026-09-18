@@ -6,6 +6,7 @@ A run directory looks like::
     ├── events.jsonl        # append-only, one Event per line
     ├── input/              # document A snapshot
     ├── sources/            # source snapshots
+    ├── sessions/           # per-worker-call session snapshots (raw in/out + steps)
     └── report.md           # final artefact             (populated in M2)
 """
 
@@ -25,6 +26,7 @@ class RunStore:
 
     def __init__(self, root: Path) -> None:
         self._root = Path(root)
+        self._count: int | None = None
 
     @property
     def root(self) -> Path:
@@ -43,19 +45,26 @@ class RunStore:
         return self._root / "sources"
 
     @property
+    def sessions_dir(self) -> Path:
+        return self._root / "sessions"
+
+    @property
     def report_path(self) -> Path:
         return self._root / "report.md"
 
     def init_layout(self) -> None:
         """Create the run directory and its sub-directories."""
         self._root.mkdir(parents=True, exist_ok=True)
-        for directory in (self.input_dir, self.sources_dir):
+        for directory in (self.input_dir, self.sources_dir, self.sessions_dir):
             directory.mkdir(parents=True, exist_ok=True)
 
     def event_count(self) -> int:
-        if not self.events_path.is_file():
-            return 0
-        return sum(1 for _ in self.iter_events())
+        if self._count is None:
+            if not self.events_path.is_file():
+                self._count = 0
+            else:
+                self._count = sum(1 for _ in self.iter_events())
+        return self._count
 
     def iter_events(self) -> Iterator[Event]:
         """Yield events in append order, raising on malformed lines."""
@@ -91,8 +100,9 @@ class RunStore:
     ) -> Event:
         """Append an event, assigning a monotonic id and a UTC timestamp."""
         resolved_tone = tone if tone is not None else DEFAULT_TONE.get(event_type, "info")
+        sequence = self.event_count() + 1
         event = Event(
-            id=format_event_id(self.event_count() + 1),
+            id=format_event_id(sequence),
             at=at if at is not None else now_iso(),
             type=event_type,
             payload=dict(payload or {}),
@@ -103,7 +113,22 @@ class RunStore:
         with self.events_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event.to_dict(), sort_keys=True, ensure_ascii=False))
             handle.write("\n")
+        self._count = sequence
         return event
+
+    def write_session(self, session_id: str, session: Mapping[str, Any]) -> Path:
+        """Write the raw session snapshot for one worker call (M6).
+
+        The snapshot holds the untruncated raw input/output and step chain; the
+        ``SESSION`` / ``WORKER_STEP`` events only index it. Not an event: the board
+        never derives from it, so ``replay`` of the board is unaffected.
+        """
+        self.sessions_dir.mkdir(parents=True, exist_ok=True)
+        path = self.sessions_dir / f"{session_id}.json"
+        with path.open("w", encoding="utf-8") as handle:
+            handle.write(json.dumps(session, sort_keys=True, ensure_ascii=False, indent=2))
+            handle.write("\n")
+        return path
 
 
 __all__ = ["RunStore"]

@@ -196,7 +196,7 @@ message Event {
   string at = 2;
   // PROJECT | INTENT | EXECUTE | CONCLUDE | REASON | COMPLETE | HEARTBEAT |
   // RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT | FAILED | STOPPED |
-  // VALIDATE | ENTITY | RELATION
+  // VALIDATE | SESSION | WORKER_STEP | ENTITY | RELATION
   string type = 3;
   string message = 4;
   string tone = 5; // info | success | warning | danger

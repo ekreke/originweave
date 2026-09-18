@@ -190,14 +190,30 @@ Event {
   id, at, type,           # type: PROJECT | INTENT | EXECUTE | CONCLUDE | REASON |
   message, tone,          #       COMPLETE | HEARTBEAT | RELEASE | HINT |
   payload                 #       REQUEST_HUMAN | HUMAN_INPUT | FAILED | STOPPED |
-}                          #       VALIDATE | ENTITY | RELATION
+}                          #       VALIDATE | SESSION | WORKER_STEP | ENTITY | RELATION
                            # tone: info | success | warning | danger
 ```
 事件类型（黑板协议）：`PROJECT` / `INTENT` / `EXECUTE` / `CONCLUDE` / `REASON` /
 `COMPLETE` / `HEARTBEAT` / `RELEASE` / `HINT` / `REQUEST_HUMAN` / `HUMAN_INPUT` /
-`FAILED` / `STOPPED` / `VALIDATE` / `ENTITY` / `RELATION`。
+`FAILED` / `STOPPED` / `VALIDATE` / `SESSION` / `WORKER_STEP` / `ENTITY` / `RELATION`。
 `type` 决定事件种类，`payload` 携带该种类的结构化字段（逐事件字段表见
 [`blackboard-protocol.md`](blackboard-protocol.md) 第 5 节）；`message` / `tone` 仅用于展示。
+
+### Session（Worker 会话，M6）
+```text
+Session {
+  id, runId, worker, task,  # task: Bootstrap | Reason | Explore | Validate
+  intentId?,                # 派发给 Intent 的任务有；Reason/Validate 为空
+  model,
+  input, output,            # 原始输入（渲染后的 prompt/board）与原始输出（回复文本）
+  steps: SessionStep[],     # { seq, kind: turn-start|tool-call|tool-result|message|turn-end, name?, text?, ok? }
+  startedAt, endedAt
+}
+```
+一次 Worker 调用 = 一个**隔离会话**（上下文不跨调用共享），是一个"节点"任务的完整历史。
+原始输入/输出全文落 run dir `sessions/<id>.json`；`SESSION` / `WORKER_STEP` 事件只作索引，
+不参与 DAG 状态派生。Worker 执行体可插拔（`[worker].provider = local | pi`；`local` 已实现，
+`pi` 归 **M6 P2**），项目级可设 `maxConcurrency`（并发上限）与 `tools`（工具白名单）。
 
 ## 5. CLI 面（冻结）
 

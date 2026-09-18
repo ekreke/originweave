@@ -16,6 +16,9 @@ def test_default_values() -> None:
     assert cfg.capability.model.provider == "openai"
     assert cfg.capability.model.model == "deepseek-v4.1-flash"
     assert cfg.capability.model.base_url == ""
+    assert cfg.worker.provider == "local"
+    assert cfg.worker.max_concurrency == 1
+    assert cfg.worker.tools == ()
     assert cfg.budget.max_steps == 60
     assert cfg.budget.max_wall == "10m"
     assert cfg.budget.max_cost == 2.0
@@ -91,6 +94,64 @@ def test_validate_rejects_unknown_model_provider() -> None:
     )
     with pytest.raises(config.ConfigError):
         cfg.validate()
+
+
+def test_validate_rejects_unknown_worker_provider() -> None:
+    cfg = config.Config(worker=config.WorkerConfig(provider="nope"))
+    with pytest.raises(config.ConfigError):
+        cfg.validate()
+
+
+def test_validate_rejects_bad_worker_concurrency() -> None:
+    cfg = config.Config(worker=config.WorkerConfig(max_concurrency=0))
+    with pytest.raises(config.ConfigError):
+        cfg.validate()
+
+
+def test_validate_rejects_unknown_worker_tool() -> None:
+    cfg = config.Config(worker=config.WorkerConfig(tools=("teleport",)))
+    with pytest.raises(config.ConfigError) as excinfo:
+        cfg.validate()
+    assert "teleport" in str(excinfo.value)
+
+
+def test_load_reads_worker_overrides(tmp_path: Path) -> None:
+    path = tmp_path / "originweave.toml"
+    path.write_text(
+        """
+[worker]
+provider = "pi"
+max_concurrency = 4
+tools = ["search", "read"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    cfg = config.load(path)
+    assert cfg.worker.provider == "pi"
+    assert cfg.worker.max_concurrency == 4
+    assert cfg.worker.tools == ("search", "read")
+
+
+def test_load_rejects_bad_worker_tools_type(tmp_path: Path) -> None:
+    path = tmp_path / "originweave.toml"
+    path.write_text('[worker]\ntools = "search"\n', encoding="utf-8")
+    with pytest.raises(config.ConfigError):
+        config.load(path)
+
+
+def test_load_rejects_unknown_worker_key(tmp_path: Path) -> None:
+    path = tmp_path / "originweave.toml"
+    path.write_text("[worker]\nmax_workers = 3\n", encoding="utf-8")
+    with pytest.raises(config.ConfigError) as excinfo:
+        config.load(path)
+    assert "max_workers" in str(excinfo.value)
+
+
+def test_load_rejects_bool_worker_concurrency(tmp_path: Path) -> None:
+    path = tmp_path / "originweave.toml"
+    path.write_text("[worker]\nmax_concurrency = true\n", encoding="utf-8")
+    with pytest.raises(config.ConfigError):
+        config.load(path)
 
 
 def test_validate_rejects_bad_budget() -> None:

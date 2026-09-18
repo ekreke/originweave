@@ -15,6 +15,7 @@ from ..config import (
     ALLOWED_MODEL_PROVIDERS,
     ALLOWED_PROMPT_PROVIDERS,
     ALLOWED_SEARCH_PROVIDERS,
+    ALLOWED_WORKER_PROVIDERS,
     Config,
 )
 from .base import (
@@ -29,6 +30,7 @@ from .base import (
 from .model import ChatMessage, ModelProvider, OpenAIModel
 from .prompt import LANGFUSE_ENV_VARS, LangfusePrompt, LocalPrompt
 from .search import ENV_VARS, ExaSearch, ParallelSearch, credential_env
+from .worker import LocalWorker, Worker, WorkerReply, WorkerStep
 
 SEARCH_PROVIDERS: dict[str, Callable[[], SearchProvider]] = {
     "exa": ExaSearch,
@@ -43,6 +45,8 @@ PROMPT_PROVIDERS: dict[str, Callable[[Path], PromptProvider]] = {
 MODEL_PROVIDERS: dict[str, Callable[[str, str], ModelProvider]] = {
     "openai": lambda model, base_url: OpenAIModel(model=model, base_url=base_url),
 }
+
+WORKER_PROVIDERS: frozenset[str] = ALLOWED_WORKER_PROVIDERS
 
 
 def get_search(name: str) -> SearchProvider:
@@ -94,14 +98,31 @@ def build_model(config: Config) -> ModelProvider:
     )
 
 
+def build_worker(config: Config) -> Worker:
+    """Resolve the configured worker provider (M6)."""
+    provider = config.worker.provider
+    if provider not in ALLOWED_WORKER_PROVIDERS:
+        raise CapabilityError(
+            f"unknown worker provider {provider!r}; expected one of {sorted(WORKER_PROVIDERS)}"
+        )
+    if provider == "local":
+        return LocalWorker(model=build_model(config))
+    # provider == "pi"
+    raise ProviderUnavailableError(
+        "the pi worker provider is not implemented yet (M6 P2); use provider = 'local'"
+    )
+
+
 __all__ = [
     "ENV_VARS",
     "LANGFUSE_ENV_VARS",
     "MODEL_PROVIDERS",
     "PROMPT_PROVIDERS",
     "SEARCH_PROVIDERS",
+    "WORKER_PROVIDERS",
     "CapabilityError",
     "ChatMessage",
+    "LocalWorker",
     "MissingCredentialError",
     "ModelProvider",
     "OpenAIModel",
@@ -110,9 +131,13 @@ __all__ = [
     "ProviderError",
     "ProviderUnavailableError",
     "SearchProvider",
+    "Worker",
+    "WorkerReply",
+    "WorkerStep",
     "build_model",
     "build_prompt",
     "build_search",
+    "build_worker",
     "credential_env",
     "get_model",
     "get_prompt",

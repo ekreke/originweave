@@ -23,14 +23,20 @@ CONFIG_FILENAME = "originweave.toml"
 ALLOWED_SEARCH_PROVIDERS: frozenset[str] = frozenset({"exa", "parallel"})
 ALLOWED_PROMPT_PROVIDERS: frozenset[str] = frozenset({"local", "langfuse"})
 ALLOWED_MODEL_PROVIDERS: frozenset[str] = frozenset({"openai"})
+ALLOWED_WORKER_PROVIDERS: frozenset[str] = frozenset({"local", "pi"})
+# Pi tool allowlist (M6); ``search`` is the TS extension tool, the rest are Pi built-ins.
+ALLOWED_WORKER_TOOLS: frozenset[str] = frozenset(
+    {"search", "read", "grep", "find", "ls", "bash", "edit", "write"}
+)
 
-_TOP_LEVEL_KEYS: frozenset[str] = frozenset({"hitl", "capability", "budget", "run"})
+_TOP_LEVEL_KEYS: frozenset[str] = frozenset({"hitl", "capability", "worker", "budget", "run"})
 _TABLE_KEYS: dict[str, frozenset[str]] = {
     "hitl": frozenset({"auto"}),
     "capability": frozenset({"search", "prompt", "model"}),
     "capability.search": frozenset({"provider"}),
     "capability.prompt": frozenset({"provider", "directory"}),
     "capability.model": frozenset({"provider", "model", "base_url"}),
+    "worker": frozenset({"provider", "max_concurrency", "tools"}),
     "budget": frozenset({"max_steps", "max_wall", "max_cost"}),
     "run": frozenset({"dir"}),
 }
@@ -73,6 +79,15 @@ class CapabilityConfig:
 
 
 @dataclass(frozen=True)
+class WorkerConfig:
+    provider: str = "local"  # local | pi
+    # Per-run cap on concurrent workers (enforced by the dispatcher, M6).
+    max_concurrency: int = 1
+    # Pi tool allowlist; empty means "no tools" (M6).
+    tools: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class BudgetConfig:
     max_steps: int = 60
     max_wall: str = "10m"
@@ -88,6 +103,7 @@ class RunConfig:
 class Config:
     hitl: HitlConfig = field(default_factory=HitlConfig)
     capability: CapabilityConfig = field(default_factory=CapabilityConfig)
+    worker: WorkerConfig = field(default_factory=WorkerConfig)
     budget: BudgetConfig = field(default_factory=BudgetConfig)
     run: RunConfig = field(default_factory=RunConfig)
 
@@ -106,6 +122,11 @@ class Config:
                     "model": self.capability.model.model,
                     "base_url": self.capability.model.base_url,
                 },
+            },
+            "worker": {
+                "provider": self.worker.provider,
+                "max_concurrency": self.worker.max_concurrency,
+                "tools": list(self.worker.tools),
             },
             "budget": {
                 "max_steps": self.budget.max_steps,
@@ -134,6 +155,22 @@ class Config:
             raise ConfigError(
                 f"unknown model provider {model!r}; "
                 f"expected one of {sorted(ALLOWED_MODEL_PROVIDERS)}"
+            )
+        worker = self.worker.provider
+        if worker not in ALLOWED_WORKER_PROVIDERS:
+            raise ConfigError(
+                f"unknown worker provider {worker!r}; "
+                f"expected one of {sorted(ALLOWED_WORKER_PROVIDERS)}"
+            )
+        if self.worker.max_concurrency <= 0:
+            raise ConfigError(
+                f"worker.max_concurrency must be > 0, got {self.worker.max_concurrency}"
+            )
+        unknown_tools = sorted(set(self.worker.tools) - ALLOWED_WORKER_TOOLS)
+        if unknown_tools:
+            raise ConfigError(
+                f"worker.tools: unknown tool(s) {unknown_tools}; "
+                f"allowed: {sorted(ALLOWED_WORKER_TOOLS)}"
             )
         if self.budget.max_steps <= 0:
             raise ConfigError(f"budget.max_steps must be > 0, got {self.budget.max_steps}")
@@ -181,6 +218,14 @@ def _as_float(value: Any, where: str, default: float) -> float:
     return float(value)
 
 
+def _as_str_list(value: Any, where: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    if value is None:
+        return default
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ConfigError(f"{where} must be a list of strings")
+    return tuple(value)
+
+
 def _check_keys(table: Mapping[str, Any], where: str, allowed: frozenset[str]) -> None:
     unknown = sorted(set(table) - allowed)
     if unknown:
@@ -197,6 +242,7 @@ def from_dict(data: Mapping[str, Any]) -> Config:
     search = _as_mapping(capability.get("search"), "capability.search")
     prompt = _as_mapping(capability.get("prompt"), "capability.prompt")
     model = _as_mapping(capability.get("model"), "capability.model")
+    worker = _as_mapping(data.get("worker"), "worker")
     budget = _as_mapping(data.get("budget"), "budget")
     run = _as_mapping(data.get("run"), "run")
 
@@ -205,6 +251,7 @@ def from_dict(data: Mapping[str, Any]) -> Config:
     _check_keys(search, "capability.search", _TABLE_KEYS["capability.search"])
     _check_keys(prompt, "capability.prompt", _TABLE_KEYS["capability.prompt"])
     _check_keys(model, "capability.model", _TABLE_KEYS["capability.model"])
+    _check_keys(worker, "worker", _TABLE_KEYS["worker"])
     _check_keys(budget, "budget", _TABLE_KEYS["budget"])
     _check_keys(run, "run", _TABLE_KEYS["run"])
 
@@ -246,6 +293,23 @@ def from_dict(data: Mapping[str, Any]) -> Config:
                     "capability.model.base_url",
                     defaults.capability.model.base_url,
                 ),
+            ),
+        ),
+        worker=WorkerConfig(
+            provider=_as_str(
+                worker.get("provider"),
+                "worker.provider",
+                defaults.worker.provider,
+            ),
+            max_concurrency=_as_int(
+                worker.get("max_concurrency"),
+                "worker.max_concurrency",
+                defaults.worker.max_concurrency,
+            ),
+            tools=_as_str_list(
+                worker.get("tools"),
+                "worker.tools",
+                defaults.worker.tools,
             ),
         ),
         budget=BudgetConfig(

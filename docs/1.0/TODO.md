@@ -5,12 +5,23 @@
 
 ## 下一个任务
 
+- **M6 · Pi Worker、可配置工具与会话**（用户新增；进度真相见 `SPEC.md` M6）。计划 P0–P6：
+  - **P0 契约/文档（已完成）**、**P1 Worker 抽象 + 会话 + 事件（已完成）**：`capabilities/worker.py`、
+    `Engine(worker=...)`、`[worker]` 配置、`SESSION`/`WORKER_STEP` 事件、run dir `sessions/`。
+  - **本轮（仅 docs）**：把「项目级完整化」写入 `SPEC.md` M6 + 本文件（见下）。
+  - **下一步 P1b 配置迁移**：退役顶层 `[budget]` → `[worker].budget`；`[worker].provider` 默认 `pi`；
+    worker LLM 复用 `[capability.model]`（仅 openai 兼容）。
+  - **P2 `PiWorker`**（`capabilities/pi.py`，`pi-py-sdk`，每会话隔离，运行时缺失明确报错，
+    Pi turns 计入 `max_steps`，注入 fake 测试）。
+  - P3 proto/server（Settings/Search/Session）；P4 TS 搜索扩展回调 server `Search`；
+    P5 前端 Settings + 会话视图；P6 容器化（并入 M3）。
+  - 依赖：P1/P2 不依赖 server；P3–P5 依赖 **M1c-1**。
 - **M1 迭代切片**（引擎为库层、进程内 Dispatcher；`model`/`search` provider 已就绪）：
   已落地：**I1** Bootstrap、**I2a** `FAILED`/`STOPPED`、**I2** Reason、**I2b** Validate 去重
   （`engine.py`、`prompts/{bootstrap,reason,validate}.txt`）。
   待做：
   1. **I3 · Explore + search**：来源回链 `citation`/`source` + `Evidence`。
-  2. **I4 · 并发**：asyncio 多 Worker + `HEARTBEAT`/`RELEASE` + Dispatcher 确定性提交。
+  2. **I4 · 并发**：asyncio 多 Worker + `HEARTBEAT`/`RELEASE` + Dispatcher 确定性提交（受 `[worker].max_concurrency` 约束）。
   3. **I5 · HITL**：Gate A 挂起/恢复 + `auto` 跳过。
   4. **I6 · 收敛**：Stigmergy 多轮收敛 → `COMPLETE` + 确定性 Board 单测。
 - 随后：M1c-1（server）→ M1c-2（前端接线与 UI）。
@@ -44,12 +55,31 @@
 - [ ] server 监听端口（前端 `transport` 暂用 8787；与 CLI `ui` 的 8765 区分）→ M1c-1 定
 - [ ] Docker runtime 的镜像来源与构建归属（server 仓内构建 vs 独立镜像）
 - [ ] HITL Gate 的默认范围与配置粒度（三个 Gate 是否可逐项开关；`auto` 是否支持 per-gate）
-- [ ] Worker 并发数 N 的默认值与上限（asyncio 任务并发，Dispatcher 确定性提交；受预算约束）
+- [x] Worker 并发上限的位置与默认值 → 独立 `[worker].max_concurrency`（默认 1，代码校验 `>0`）（M6 定）
+- [ ] Worker 并发上限的**具体上限**（是否需要 `max_concurrency` 上界校验）→ 待定
 - [ ] 关系样例 fixture 来源（新增含多个组织的样例 vs 复用 `copilot_productivity`）
 - [ ] 实体消歧粒度：同名/别名归一的规范化规则（大小写、全称/简称、去空白）
 - [ ] CLI `capabilities install-obscura` 命名：旧 `obscura_kitesurf` 占位样例已被从零构建的
       `copilot_productivity` 替换，该命令名（`product-overview.md` §5 冻结契约）语义脱节；
       是否改名留待 M3 决定
+
+### M6 决策（均已定，2026-09）
+
+- [x] Worker 执行体 → **可插拔 `Worker`**，`[worker].provider = local | pi`（方案 B：Worker 一等概念）
+- [x] Pi 包 → **`pi-py-sdk`**（驱动官方 TS agent 运行时；运行时需 Node + `pi` 二进制；alpha）
+- [x] Pi 工具 → **开启且可配置**（`[worker].tools`），设置页可改；默认建议只读 + `cwd` 沙箱
+- [x] 检索 → Pi 侧 TS 扩展执行，**回调 server `Search` RPC**（provider 选择留 Python，保红线 4）
+- [x] 设置存储 → 项目 `originweave.toml`，独立 **`[worker]`** 表（含 `max_concurrency`）
+- [x] 会话 → 每次 Worker 调用一个**隔离会话**；原始 input/output 落 `sessions/<id>.json`，
+      `SESSION` 事件做轻量索引；**保留 `WORKER_STEP` 事件**（turn/tool 级，`text` 截断）
+- [x] 里程碑 → 新增 **M6**（P1/P2 不依赖 server；P3–P5 依赖 M1c-1；P6 并入 M3）
+- [x] Worker 的 **LLM 配置** → **复用 `[capability.model]`**（单一来源）；仅 **openai 兼容**：
+      `model` + `base_url`（端点走 `OPENAI_BASE_URL`）+ `OPENAI_API_KEY`（env，设置页不落密钥）
+- [x] 预算 → **退役顶层 `[budget]`，迁至 `[worker].budget`**（`max_steps`/`max_wall`/`max_cost`；
+      补 `max_wall` 时长校验）；`CreateRunRequest` 的三个预算字段语义改为**覆盖 `[worker].budget`**
+- [x] 默认 provider → **`pi`**（`local` 保留为可选）
+- [x] 运行时缺失 → **明确报错 + 安装指引**（Node + `pi` 二进制），不静默降级为 `local`
+- [x] Pi 会话 turns → **计入 `max_steps`**，单会话受 `[worker].budget` 约束（P2 落地）
 
 ## 已知风险 / 缺口
 
@@ -73,7 +103,34 @@
 - M0b 遗留（review 判定非阻塞，可后补）：异常层次未完全收口（`LocalPrompt` 的
   `FileNotFoundError`）、`max_wall` 未做 duration 校验。（原 cache 相关遗留随 Phase R 撤销。）
 
+- **M6 风险**：`pi-py-sdk` 为 alpha 且运行时需 Node + `pi`（CI 只能注入 fake，live 依赖 runtime 镜像）；
+  **默认切 `pi` 后**，无 Node/`pi` 的环境将直接报错（不再开箱即用，须给出安装指引）；
+  Pi 输出需严格 JSON（工具开启后更易夹带散文，可能需一次 repair retry）；`bash/write/edit` 是真实
+  写入/执行面（须 `cwd` 沙箱 + 白名单，默认只读 + 检索走扩展）；Pi 内部轮次需计入 `max_steps`（P2）；
+  **`[worker].budget` 目前只是配置，尚未强制执行**（enforcement 归 M3）；
+  `sessions/` 原始输入**不得写入任何凭据**；`WORKER_STEP` 需 `text` 截断常量防事件膨胀。
+- **`[budget]` 退役的迁移影响**：顶层 `[budget]` 迁到 `[worker].budget` 后，含 `[budget]` 的旧
+  `originweave.toml` 会因未知键报错（仓库无提交的 toml，影响小，类比 Phase R 去 `[live]`）；
+  `CreateRunRequest` 的 `max_steps`/`max_wall`/`max_cost` 结构不变，但语义改为覆盖 `[worker].budget`，
+  需同步 `dashboard.md §4.3` 与 `agent-design.md §2.1/§4`（P1b）。
+  review 遗留（低优先）：`runId = store.root.name` 在 root 为 `.` 时为空、`_session_seq` 每次 `run()`
+  重置（同一 store 多次 run 会覆盖会话）；`WORKER_ID` 硬编码 `worker-1`（I4 并发需改造）；
+  `[worker].tools` 允许重复项。
+
 ## 已完成（近期）
+
+- **M6 P0/P1 · Worker 抽象与会话**：契约（`[worker]`、`sessions/`、`SESSION`/`WORKER_STEP`、
+  `Session` 领域模型、Settings/Search proto 草案）落 `overview/`；代码新增
+  `capabilities/worker.py`（`Worker`/`WorkerReply`/`WorkerStep`/`LocalWorker`/`render_messages`），
+  `Engine` 改接 `worker` 并把每次调用落为**隔离会话**（`sessions/sess_NNN.json` 存原始输入/输出/步骤，
+  `SESSION`/`WORKER_STEP` 事件做索引，reducer 忽略）；`config.py` 增顶层 `[worker]`
+  （`provider`/`max_concurrency`/`tools`）；`store.py` 增 `sessions_dir`/`write_session`；
+  CLI `capabilities list` 展示 worker。`make lint`（ruff+mypy strict）与 `make test`
+  （139 passed, 1 skipped）全绿；`make replay` 样例不变。P2（`PiWorker`）待做。
+  经 subagent review 后的加固：worker/provider 异常→`FAILED`（Bootstrap 失败不再进 Reason）、
+  会话 id 按调用顺序分配、`SESSION` 先于 `WORKER_STEP`、`event_count()` 去 O(n²)、
+  `WORKER_STEP` 端到端测试与失败/负例、proto `Event.type` 注释与文档事实错误修正
+  （`WorkerReply{text,input,steps}`、`tools` 扁平白名单、M6 计划项标注）。当前 146 passed。
 
 - **Phase R · 移除离线/录制（代码部分）**：删 `capabilities/cache.py` / `record.py` 与样例
   `capabilities/**`；`config.py` 去 `[live]`/`ORIGINWEAVE_LIVE`、加 `ModelConfig`

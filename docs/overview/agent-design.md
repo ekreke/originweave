@@ -25,6 +25,14 @@
 | `search` | `exa` / `parallel` | 检索来源、定位一手材料 |
 | `prompt` | `local` / `langfuse` | 获取 prompt 模板（本地文件或 Langfuse） |
 | `model` | `openai`（OpenAI 兼容） | 执行 OODA 任务（Bootstrap/Reason/Explore/Validate），返回结构化结果（Fact/Intent） |
+| `worker` | `local` / `pi` | **Worker 执行体**：`local` = 单轮 `model` 调用；`pi` = 经 `pi-py-sdk` 驱动的 Pi agent 运行时（多轮 + 工具，**归 M6 P2**）。仅产出回复文本与步骤，**不写黑板** |
+
+**Worker 与会话（M6）**：一次 Worker 调用（一个"节点"任务，含 Bootstrap/Reason/Explore/Validate）
+对应一个**隔离会话**：上下文与消息历史不跨调用共享，`pi` provider 每次新建 Pi session 并于结束
+`dispose`。会话原始输入/输出与步骤链落 run dir `sessions/<id>.json`（快照，类比 `sources/`），
+并由 `SESSION` / `WORKER_STEP` 事件建索引；**Engine 仍是黑板唯一写入者**，事件仍是唯一事实来源与
+重放源。Pi 的工具（`[worker].tools`）可配置，检索类工具经 TS 扩展**回调 server `Search` RPC**，
+使 `search` provider 仍可替换（红线 4）。
 
 要求：
 
@@ -52,6 +60,10 @@ directory = "prompts"  # local provider 的模板目录
 provider = "openai"     # OpenAI 兼容
 model    = "deepseek-v4.1-flash"
 base_url = ""           # 端点由 OPENAI_BASE_URL 提供（内网地址不入库）
+[worker]                # Worker 执行体（M6）
+provider = "local"      # local | pi
+max_concurrency = 1     # 本项目每次 run 的 worker 并发上限（server 调度处强制）
+tools = []              # Pi 工具白名单：search|read|grep|find|ls|bash|edit|write；空 = 不启用
 [budget]
 max_steps = 60
 max_wall = "10m"
@@ -146,6 +158,7 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 ├── events.jsonl        # append-only，每行一个 Event
 ├── input/              # 资料 A 快照（URL 抓取或文本）
 ├── sources/            # 来源快照（可回链的原文/存档）
+├── sessions/           # 会话快照：一次 Worker 调用的原始输入/输出 + 步骤链（M6）
 ├── entity-graph.json   # 实体-关系图快照（可重建，非事实来源）
 └── report.md           # 最终产物（可再生成）
 ```
@@ -167,7 +180,9 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 ## 6. Runtime：container-per-run
 
 - 每个 run 启动一个**临时容器**执行实际任务；run 结束即销毁。
-- 容器内运行**多个平等 Worker**（运行时可配置 N ≥ 1）。
+- 容器内运行**多个平等 Worker**（运行时可配置 N ≥ 1；项目级上限见 `[worker].max_concurrency`，M6）。
+- **Worker 执行体可插拔（M6）**：`[worker].provider=pi` 时容器内以 Pi agent 运行时执行任务，
+  镜像需内置 **Node + `pi` 二进制 + TS 搜索扩展**；每次 Worker 调用一个隔离会话（见 §2 与 §5）。
 - 容器生命周期（创建/监控/回收）由 **server** 拥有，前端与 CLI 不直接管理容器。
 - 容器需要挂载该 run 的 run 目录，以写入事件与快照。
 - 容器镜像与 server 镜像分离：server 常驻，runtime 短命。

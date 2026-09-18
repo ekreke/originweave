@@ -40,6 +40,8 @@ docs/
 | **Bootstrap / Reason / Explore / Validate** | 任务指令，每次只给 Worker 其一；`Validate` 是对候选 Intent 的独立判重 pass。 |
 | **Stigmergy** | 间接协调：Worker 不互相通信，只通过往黑板写 Fact 改变环境来协调。 |
 | **Dispatcher** | 调度与容器生命周期管理，协议的唯一写入者；Worker 不直接调用协议接口。 |
+| **Worker** | 任务执行体：接收「黑板图 + 一条任务指令」，返回严格 JSON。`[worker].provider` ∈ local/pi；**不写黑板**。 |
+| **Session（会话）** | 一次 Worker 调用的隔离历史（上下文不跨调用共享），含原始输入/输出与步骤链；落 `sessions/<id>.json`，由 `SESSION`/`WORKER_STEP` 事件索引。 |
 | **HITL** | Human-in-the-loop。主动写 Hint，或在关键 Gate 被动确认（run → `awaiting_human`）。 |
 | **Gate** | HITL 阻塞点：A 论点确认 / B 歧义裁决 / C 最终审阅。 |
 | **provenance DAG** | 溯源有向无环图。节点为 Fact/Intent，边表示推导/探索关系。 |
@@ -51,7 +53,7 @@ docs/
 | **deviation** | A 相对源头的偏差项（篡改、改写、省略、归因错误、时间错置等），带 `severity` 与 `confidence`。 |
 | **run** | 一次端到端核验的执行实例，产出 DAG + 偏差记分卡 + report；`analysis` 含 relation 时另含实体-关系图。 |
 | **run dir** | 一次 run 的持久化目录，含 append-only 事件日志与快照，可 `replay` 重放。 |
-| **capability** | 外部能力抽象（检索 `search`、prompt `prompt`、模型 `model`），provider 可替换；**真实调用**，无离线缓存。 |
+| **capability** | 外部能力抽象（检索 `search`、prompt `prompt`、模型 `model`、Worker 执行体 `worker`），provider 可替换；**真实调用**，无离线缓存。 |
 | **verdict** | report 的整体判定（如"部分偏差"）。 |
 
 ## 更新规则

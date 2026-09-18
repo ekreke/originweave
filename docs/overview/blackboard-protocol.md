@@ -148,6 +148,12 @@ Relation {
 Worker 只看到两样东西：**当前完整黑板图** + **一条任务指令**。系统里没有任何一行
 代码告诉 Worker"溯源该怎么做"。
 
+**Worker 实现可替换（M6）**：Worker 的执行体由 `[worker].provider` 选择——`local` 为单轮
+`model` 调用，`pi` 为经 `pi-py-sdk` 驱动的 Pi agent 运行时（可多轮、可用工具）。无论哪种，
+Worker **仍只返回一个严格 JSON 对象**、**仍不写协议**；Dispatcher/Engine 依旧是唯一写入者。
+一次 Worker 调用 = 一个**隔离会话**：上下文不跨调用共享，原始输入/输出与步骤链落
+`sessions/<id>.json`，并以 `SESSION` / `WORKER_STEP` 事件建索引（§5）。
+
 ## 4. Agent 工作循环
 
 ### 4.1 OODA 循环
@@ -301,8 +307,14 @@ run 的全部状态由 append-only 事件派生。事件取代此前的领域事
 | `FAILED` | 执行异常终止，run → `failed` | `reason` |
 | `STOPPED` | 预算触顶或人工终止，run → `stopped` | `reason`, `budget?` |
 | `VALIDATE` | Validate 判重任务开始/结束 | `phase`(start\|end), `candidates`, `kept?`, `dropped?`, `drops[]?`（`{index, duplicateOf, reason}`）|
+| `SESSION` | 一次 Worker 调用的会话元数据（索引，指向会话快照） | `sessionId`, `task`, `worker`, `intentId?`, `ref`（run dir 相对路径） |
+| `WORKER_STEP` | 会话内的执行步骤（turn/tool 级；文本截断） | `sessionId`, `worker`, `intentId?`, `seq`, `kind`(turn-start\|tool-call\|tool-result\|message\|turn-end), `name?`, `text?`, `ok?` |
 | `ENTITY` | 抽取/归并到实体 | `entity: Entity` |
 | `RELATION` | 判别出实体间关系 | `relation: Relation` |
+
+`SESSION` / `WORKER_STEP` **不参与 Board 状态派生**（reducer 忽略，同 `REASON`）：会话的原始
+输入/输出全文只在 `sessions/<id>.json` 快照里，事件只作可重放的索引。因此 Board 结构与
+`replay` 确定性不受影响。
 
 `PROJECT`/`INTENT`/`CONCLUDE`/`HINT`/`ENTITY`/`RELATION` 的 payload **携带完整对象**
 （而非仅 id），使 reducer 无需回查即可重建黑板；结构性边由 reducer 从 Intent 字段自动
@@ -314,7 +326,8 @@ Event {
   at,
   type,      # PROJECT | INTENT | EXECUTE | CONCLUDE | REASON | COMPLETE |
              # HEARTBEAT | RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT |
-             # FAILED | STOPPED | VALIDATE | ENTITY | RELATION
+             # FAILED | STOPPED | VALIDATE | SESSION | WORKER_STEP |
+             # ENTITY | RELATION
   message,   # 人类可读摘要（UI 时间线）
   tone,      # info | success | warning | danger
   payload    # 与 type 对应的结构化字段，见上表

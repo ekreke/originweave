@@ -54,7 +54,8 @@
 
 目标：一次 run 的全部状态由 append-only 黑板事件派生，且可只读重放。
 
-- [x] run 目录布局落地（`events.jsonl`、`input/`、`sources/`、`report.md`；其中 `report.md` 于 M2 生成）
+- [x] run 目录布局落地（`events.jsonl`、`input/`、`sources/`、`report.md`；其中 `report.md` 于 M2 生成；
+      `sessions/` 由 **M6** 增补，权威布局见 `agent-design.md` §5）
 - [x] 黑板协议事件 writer：`PROJECT/INTENT/EXECUTE/CONCLUDE/REASON/COMPLETE/HEARTBEAT/RELEASE/HINT/REQUEST_HUMAN/HUMAN_INPUT`（`Event{id,at,type,message,tone,payload}`）
 - [x] 由事件重建黑板状态（`Board{origin,goal,facts,intents,hints}` + `edges/status/decisions/waitingFor/verdict`）的 reducer
 - [x] `originweave replay <run-dir>` 只读、不触网、复现含人工输入在内的结论（替换当前 stub）
@@ -252,3 +253,48 @@ Hint 注入、Gate C 行为均可观测。
 验收：`CreateRun(analysis=relation)` 产出一张实体-关系图，每条关系或带
 `quote+url` 证据、或标记 `inferred`（虚线 + 置信度）；UI 的 `RELATIONS` 页签可查看并
 回链证据；`replay` 复现同一张图；架构红线未被突破。
+
+---
+
+## M6 · Pi Worker、可配置工具与会话
+
+目标：把执行体抽为**可插拔 `Worker`**（`local` / `pi`），接入 Pi（`pi-py-sdk`，驱动官方
+TS agent 运行时）作为 Worker 实现，并**以 `pi` 为项目级默认**；每个 agent 任务（节点）= 一次
+Worker 调用 = 一个**隔离会话**，历史以会话为单位保留**原始输入/输出**与步骤链；worker 为
+**项目级配置**（`[worker]`：provider / max_concurrency / tools / budget），其 **LLM 复用
+`[capability.model]`**（openai 兼容：model + base_url，密钥 `OPENAI_API_KEY` 仅 env）；工具可配置；
+检索由 Pi 侧 TS 扩展执行但**回调 server `Search` RPC**（provider 选择留在 Python，保红线 4）。
+**Engine 始终是编排者与黑板唯一写入者**，事件溯源契约不变。
+
+> 依赖：P1/P2 不依赖 server；P3–P5 依赖 **M1c-1**（server 骨架）先落地；容器化并入 M3。
+
+- [x] P0 契约/文档：`agent-design.md`（`[worker]`、run dir `sessions/`、Pi 于 runtime）、
+      `blackboard-protocol.md`（`SESSION`/`WORKER_STEP`）、`dashboard.md`（设置页 + Settings/Search RPC +
+      会话视图）、`product-overview.md`（`Session`）、`docs/README.md`（术语）
+- [x] P1 `Worker` 抽象：`capabilities/worker.py`（`Worker` Protocol / `WorkerReply{text,input,steps}` /
+      `WorkerStep` / `LocalWorker`）；`Engine` 改接 `worker`，发 `SESSION`/`WORKER_STEP`、落会话文件
+- [x] P1 配置 `[worker]`（`provider` / `max_concurrency` / `tools`）+ `config.py` 校验
+- [x] P1 事件 `SESSION`/`WORKER_STEP`（reducer 忽略，Board 不变、`replay` 确定）+ run dir `sessions/`
+- [ ] P1b 配置迁移（项目级完整化）：**退役顶层 `[budget]`，迁至 `[worker].budget`**
+      （`max_steps` / `max_wall` / `max_cost`；补 `max_wall` 时长校验）；`[worker].provider` **默认 `pi`**；
+      worker 的 LLM **复用 `[capability.model]`**（仅 openai 兼容：`model` + `base_url` + `OPENAI_API_KEY` env，
+      设置页不落密钥）。同步 `agent-design.md §2.1/§4`、`dashboard.md §4.3`（`CreateRun` 预算 override 回落
+      `[worker].budget`）、`product-overview.md`、`AGENTS.md`；改 `tests/test_config.py`、`tests/test_worker.py`
+- [ ] P2 `PiWorker`（`capabilities/pi.py`）：每会话新建并 `dispose`、`prompt_stream → WorkerStep`、
+      工具白名单 + `cwd` 沙箱、`[capability.model]` → Pi model/auth 映射；**运行时（Node + `pi` 二进制）
+      缺失时明确报错并给安装指引（不静默降级）**；**Pi 会话 turns 计入 `max_steps`，单会话受
+      `[worker].budget` 约束**（注入 fake 测试，不打真网）
+- [ ] P3 proto + server：`Session`/`SessionStep`、`Settings`/`WorkerSettings`
+      （`provider`、`tools` 扁平 `string[]`、`budget{maxSteps,maxWall,maxCost}`，LLM 字段来自
+      `[capability.model]`）、`GetSettings`/`UpdateSettings`、`Search` RPC；`RunDetail.sessions[]`；
+      `max_concurrency` 调度限流
+- [ ] P4 TS 搜索扩展：注册 `search` 工具，仅回调 server `Search` RPC
+- [ ] P5 前端：Settings 页（worker provider（默认 pi）/ LLM（model、base_url；密钥仅占位提示）/
+      budget（max_steps、max_wall、max_cost）/ 工具开关）+ INSPECTOR 会话视图（原始输入 + 原始输出 +
+      步骤链）+ EVENTS 按 worker 过滤
+- [ ] P6 容器化（并入 M3）：runtime 镜像内置 Node + `pi` + TS 扩展；会话 `cwd` 沙箱
+
+验收：`[worker].provider="pi"`（默认）时，一次 run 的每个节点产生隔离会话（`sessions/*.json` 含原始
+输入/输出与步骤链），`WORKER_STEP` 事件可按 worker 复原执行链路；worker 的 LLM 由 `[capability.model]`
+提供，预算由 `[worker].budget` 约束；运行时缺失时给出可操作的报错而非静默失败；`parse_*`/`reduce`/`replay`
+行为不变；TS 扩展检索经 server `Search`，切换 `[capability.search]` provider 不需改 Pi；架构红线未被突破。

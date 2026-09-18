@@ -15,18 +15,17 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 from .blackboard import BlackboardError, Board, Evidence, Fact, Intent
 from .capabilities.base import CapabilityError, PromptProvider, PromptTemplate, SearchProvider
-from .capabilities.model import ChatMessage, ModelProvider
+from .capabilities.worker import TaskKind, Worker, WorkerReply
+from .events import now_iso
 from .reduce import reduce
 from .store import RunStore
 
-# The directive issued to a worker for one turn. This is a different axis from
-# blackboard.IntentType (decompose/explore/verify): an "Explore" task executes one
-# Intent whose type may be any of them.
-TaskKind = Literal["Bootstrap", "Reason", "Explore", "Validate"]
+# The in-process dispatcher runs a single worker until M1 I4 adds concurrency.
+WORKER_ID = "worker-1"
 
 # Bootstrap has no Intent of its own in the protocol; it is modelled as an ``explore``
 # Intent so the pass is auditable and dispatchable like any other.
@@ -221,40 +220,6 @@ def _claim_index(decisions: dict[int, IntentDecision], index: int) -> None:
         raise EngineError(f"candidate {index} classified more than once")
 
 
-def _board_payload(board: Board) -> dict[str, Any]:
-    """Render the board slice a worker observes (the Observe step)."""
-    return {
-        "origin": board.origin.to_dict(),
-        "goal": board.goal.to_dict(),
-        "facts": [fact.to_dict() for fact in board.facts],
-        "intents": [intent.to_dict() for intent in board.intents],
-        "hints": [hint.to_dict() for hint in board.hints],
-    }
-
-
-def render_messages(
-    task: TaskKind,
-    template: PromptTemplate,
-    board: Board,
-    *,
-    extra: Mapping[str, Any] | None = None,
-) -> list[ChatMessage]:
-    """Build worker messages: the directive (system) plus the board graph (user).
-
-    ``extra`` carries task-specific input that is not yet on the board (e.g. the
-    candidate Intents handed to Validate).
-    """
-    payload: dict[str, Any] = {"task": task, "board": _board_payload(board)}
-    if extra:
-        payload.update(extra)
-    # sort_keys keeps the rendered input byte-stable, so prompts are reproducible.
-    digest = json.dumps(payload, sort_keys=True, ensure_ascii=False, indent=2)
-    return [
-        ChatMessage(role="system", content=template.text),
-        ChatMessage(role="user", content=digest),
-    ]
-
-
 class Engine:
     """Drive the OODA loop for one run, writing events to ``store``.
 
@@ -264,7 +229,7 @@ class Engine:
     - Orient     -- the worker reads that board; the directive frames the situation.
     - Decide     -- the directive picks the move: Bootstrap writes claims, Reason
                     (later) writes intents, Explore (later) claims one.
-    - Act        -- call the capability (``model.complete``, later ``search.search``).
+    - Act        -- call the worker (``Worker.run``) in a fresh isolated session.
     - Write back -- append ``INTENT``/``EXECUTE``/``CONCLUDE`` events; the reducer then
                     derives the structural edges.
 
@@ -276,25 +241,103 @@ class Engine:
     def __init__(
         self,
         *,
-        model: ModelProvider,
+        worker: Worker,
         search: SearchProvider,
         prompt: PromptProvider,
         store: RunStore,
     ) -> None:
-        self._model = model
+        self._worker = worker
         # search is not consumed until the Explore directive lands; wired now for parity.
         self._search = search
         self._prompt = prompt
         self._store = store
         self._fact_seq: dict[str, int] = {}
         self._intent_seq = 0
+        self._session_seq = 0
+
+    @property
+    def _worker_model(self) -> str:
+        # Workers may expose ``.model``; the Worker protocol only promises ``.name``.
+        return getattr(self._worker, "model", None) or self._worker.name
+
+    async def _invoke(
+        self,
+        task: TaskKind,
+        template: PromptTemplate,
+        board: Board,
+        *,
+        extra: Mapping[str, Any] | None = None,
+    ) -> tuple[WorkerReply, str, str, str]:
+        """Run one worker task in a fresh session, timing it for the snapshot.
+
+        The worker returns raw text plus its steps; parsing and all writes stay here
+        so the engine remains the sole writer of the blackboard. The session id is
+        allocated at call time so ids follow invocation order even when a later call
+        (Validate) records its snapshot first.
+        """
+        started = now_iso()
+        reply = await self._worker.run(task, template, board, extra=extra)
+        ended = now_iso()
+        self._session_seq += 1
+        return reply, started, ended, f"sess_{self._session_seq:03d}"
+
+    def _record_session(
+        self,
+        reply: WorkerReply,
+        *,
+        session_id: str,
+        task: TaskKind,
+        intent_id: str | None,
+        started: str,
+        ended: str,
+    ) -> None:
+        """Persist one worker session: snapshot file first, then the event index.
+
+        The snapshot holds the untruncated raw input/output and steps; the events are
+        an index the UI/replay can group by worker. Neither event type affects the board.
+        """
+        session: dict[str, Any] = {
+            "id": session_id,
+            "runId": self._store.root.name,
+            "worker": WORKER_ID,
+            "task": task,
+            "model": self._worker_model,
+            "input": reply.input,
+            "output": reply.text,
+            "steps": [step.to_session_dict() for step in reply.steps],
+            "startedAt": started,
+            "endedAt": ended,
+        }
+        if intent_id is not None:
+            session["intentId"] = intent_id
+        self._store.write_session(session_id, session)
+        session_event: dict[str, Any] = {
+            "sessionId": session_id,
+            "task": task,
+            "worker": WORKER_ID,
+            "ref": f"sessions/{session_id}.json",
+        }
+        if intent_id is not None:
+            session_event["intentId"] = intent_id
+        self._store.append_event("SESSION", session_event)
+        for step in reply.steps:
+            payload: dict[str, Any] = {"sessionId": session_id, "worker": WORKER_ID}
+            payload.update(step.to_dict())
+            if intent_id is not None:
+                payload["intentId"] = intent_id
+            self._store.append_event("WORKER_STEP", payload)
 
     async def run(self, *, origin: Fact, goal: Fact) -> Board:
         """Start a run: ``PROJECT``, one Bootstrap pass, one Reason pass, then reduce."""
         self._fact_seq = {}
         self._intent_seq = 0
+        self._session_seq = 0
         self._store.append_event("PROJECT", {"origin": origin.to_dict(), "goal": goal.to_dict()})
         await self._bootstrap()
+        board = reduce(self._store.read_events())
+        if board.status != "running":
+            # Bootstrap failed / completed: never run Reason on a dead board.
+            return board
         await self._reason()
         # The board is always folded from the event log, never mutated in place.
         return reduce(self._store.read_events())
@@ -302,8 +345,13 @@ class Engine:
     async def _bootstrap(self) -> None:
         template = await self._prompt.get("bootstrap")
         board = reduce(self._store.read_events())  # Observe: the current graph
-        reply = await self._model.complete(render_messages("Bootstrap", template, board))
-        result = parse_result(reply)
+        try:
+            reply, started, ended, session_id = await self._invoke("Bootstrap", template, board)
+        except CapabilityError as exc:
+            # A worker/provider failure still ends the run loudly and terminal.
+            self._store.append_event("FAILED", {"reason": str(exc)})
+            return
+        result = parse_result(reply.text)
 
         # Act / write back: record the task as an Intent, claim it, then conclude.
         intent = Intent(
@@ -313,11 +361,9 @@ class Engine:
             question=BOOTSTRAP_QUESTION,
         )
         self._store.append_event("INTENT", {"intent": intent.to_dict()})
-        # OpenAIModel exposes ``.model``; the ModelProvider protocol only promises ``.name``.
-        model_name = getattr(self._model, "model", None) or self._model.name
         self._store.append_event(
             "EXECUTE",
-            {"intentId": intent.id, "worker": "worker-1", "model": model_name},
+            {"intentId": intent.id, "worker": WORKER_ID, "model": self._worker_model},
         )
         # Worker replies carry no ids; assign deterministic ones before writing back.
         for fact in result.facts:
@@ -325,6 +371,14 @@ class Engine:
         self._store.append_event(
             "CONCLUDE",
             {"intentId": intent.id, "facts": [fact.to_dict() for fact in result.facts]},
+        )
+        self._record_session(
+            reply,
+            session_id=session_id,
+            task="Bootstrap",
+            intent_id=intent.id,
+            started=started,
+            ended=ended,
         )
 
     async def _reason(self) -> None:
@@ -343,8 +397,13 @@ class Engine:
         self._store.append_event(
             "REASON", {"phase": "start", "triggerFacts": triggers}, message="Reason: start"
         )
-        reply = await self._model.complete(render_messages("Reason", template, board))
-        result = parse_result(reply)
+        try:
+            reply, started, ended, session_id = await self._invoke("Reason", template, board)
+        except CapabilityError as exc:
+            # A worker/provider failure still ends the run loudly and terminal.
+            self._store.append_event("FAILED", {"reason": str(exc)})
+            return
+        result = parse_result(reply.text)
         if result.facts:
             raise EngineError("Reason must not produce facts; that is Explore's job")
         if result.complete is not None:
@@ -352,6 +411,14 @@ class Engine:
                 raise EngineError("Reason reply must not carry both intents and complete")
             self._store.append_event(
                 "REASON", {"phase": "end", "triggerFacts": triggers}, message="Reason: end"
+            )
+            self._record_session(
+                reply,
+                session_id=session_id,
+                task="Reason",
+                intent_id=None,
+                started=started,
+                ended=ended,
             )
             self._store.append_event("COMPLETE", {"verdict": result.complete})
             return
@@ -367,6 +434,14 @@ class Engine:
                 decisions = (await self._validate(result.intents, board)).decisions
             except (EngineError, CapabilityError, FileNotFoundError) as exc:
                 # A validator we cannot run or trust ends the run rather than guessing.
+                self._record_session(
+                    reply,
+                    session_id=session_id,
+                    task="Reason",
+                    intent_id=None,
+                    started=started,
+                    ended=ended,
+                )
                 self._store.append_event("FAILED", {"reason": str(exc)})
                 return
         # The model's lifecycle fields are untrusted: rebuild each candidate as a fresh
@@ -386,6 +461,14 @@ class Engine:
         self._store.append_event(
             "REASON", {"phase": "end", "triggerFacts": triggers}, message="Reason: end"
         )
+        self._record_session(
+            reply,
+            session_id=session_id,
+            task="Reason",
+            intent_id=None,
+            started=started,
+            ended=ended,
+        )
 
     async def _validate(self, candidates: list[Intent], board: Board) -> ValidationResult:
         """Ask the Validate worker which candidate Intents are new; duplicates drop."""
@@ -399,11 +482,11 @@ class Engine:
             {"phase": "start", "candidates": len(candidates)},
             message="Validate: start",
         )
-        reply = await self._model.complete(
-            render_messages("Validate", template, board, extra={"candidates": candidate_payload})
+        reply, started, ended, session_id = await self._invoke(
+            "Validate", template, board, extra={"candidates": candidate_payload}
         )
         known_intent_ids = {intent.id for intent in board.intents}
-        result = parse_validation(reply, len(candidates), known_intent_ids)
+        result = parse_validation(reply.text, len(candidates), known_intent_ids)
         self._store.append_event(
             "VALIDATE",
             {
@@ -423,6 +506,14 @@ class Engine:
             },
             message="Validate: end",
         )
+        self._record_session(
+            reply,
+            session_id=session_id,
+            task="Validate",
+            intent_id=None,
+            started=started,
+            ended=ended,
+        )
         return result
 
     def _next_intent_id(self) -> str:
@@ -441,10 +532,8 @@ __all__ = [
     "Engine",
     "EngineError",
     "IntentDecision",
-    "TaskKind",
     "ValidationResult",
     "WorkerResult",
     "parse_result",
     "parse_validation",
-    "render_messages",
 ]

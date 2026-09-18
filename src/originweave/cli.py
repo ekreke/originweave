@@ -22,6 +22,7 @@ from .capabilities import (
     MODEL_PROVIDERS,
     PROMPT_PROVIDERS,
     SEARCH_PROVIDERS,
+    WORKER_PROVIDERS,
 )
 from .capabilities.model import BASE_URL_ENV_VAR as OPENAI_BASE_URL_ENV
 from .capabilities.model import ENV_VAR as OPENAI_ENV_VAR
@@ -115,6 +116,15 @@ def _cmd_capabilities(args: argparse.Namespace) -> int:
         print(
             f" {mark} {name:<9} model={model_cfg.model}"
             f" · {OPENAI_BASE_URL_ENV} {base} · {OPENAI_ENV_VAR} {key}"
+        )
+
+    worker_cfg = cfg.worker
+    print("worker:")
+    for name in sorted(WORKER_PROVIDERS):
+        tools = ", ".join(worker_cfg.tools) if worker_cfg.tools else "none"
+        mark = "*" if name == worker_cfg.provider else " "
+        print(
+            f" {mark} {name:<9} max_concurrency={worker_cfg.max_concurrency} · tools={tools}"
         )
 
     return 0

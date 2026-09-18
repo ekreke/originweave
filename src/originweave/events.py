@@ -28,6 +28,8 @@ EVENT_TYPES: tuple[str, ...] = (
     "FAILED",
     "STOPPED",
     "VALIDATE",
+    "SESSION",
+    "WORKER_STEP",
 )
 EVENT_TYPE_SET: frozenset[str] = frozenset(EVENT_TYPES)
 
@@ -48,6 +50,8 @@ DEFAULT_TONE: dict[str, str] = {
     "FAILED": "danger",
     "STOPPED": "warning",
     "VALIDATE": "info",
+    "SESSION": "info",
+    "WORKER_STEP": "info",
 }
 
 

@@ -44,8 +44,13 @@
 - `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出、**勿手改**）：前端 TS 由
   `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，落到 `frontend/src/gen/`），
   server Python 归 M1c-1（根 `buf.gen.yaml`）。
-- **前端（`frontend/`，M1b 脚手架）**：React + Vite + TS + React Flow + Connect；目前是
+- **前端（`fronten*d/`，M1b 脚手架）**：React + Vite + TS + React Flow + Connect；目前是
   **无数据空壳**（不接 mock），真实数据接线与 DAG/Gate UI 归 **M1c-2**。
+- **M6（进行中，见 `SPEC.md` M6）**：把执行体抽为可插拔 **`Worker`**（`[worker].provider = local | pi`）；
+  `pi` 经 **`pi-py-sdk`** 驱动官方 TS agent 运行时（运行时需 **Node + `pi` 二进制**，仅 CI 之外）。
+  每次 Worker 调用 = 一个**隔离会话**，原始输入/输出 + 步骤链落 run dir `sessions/<id>.json`，
+  并由 `SESSION`/`WORKER_STEP` 事件索引（reducer 忽略，Board 不变）。检索类工具由 **TS 扩展回调
+  server `Search` RPC*（provider 选择留 Python）。P1/P2 不依赖 server；P3–P5 依赖 M1c-1；P6 并入 M3。
 
 ## 常用命令
 
@@ -86,15 +91,17 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   `ConfigError`（防 `max_step` 之类拼写错误被静默忽略）。`CONFIG_FILENAME` 是**相对路径**，
   测试靠 `monkeypatch.chdir(tmp_path)`，不要在库代码里假设绝对路径。
   `[capability.model]` 默认 `openai` / `deepseek-v4.1-flash`，端点由 `OPENAI_BASE_URL` 提供
-  （内网地址不入库）。
+  （内网地址不入库）。**M6** 新增顶层 `[worker]`：`provider`(local\|pi)、`max_concurrency`(>0)、
+  `tools`(Pi 工具白名单)；Pi 的 model/base_url 复用 `[capability.model]`。
 - **HITL 开关**：`[hitl].auto` 或 `CreateRunRequest.auto` 只控制 Gate（默认人工介入）。
 - **凭据只从环境变量读**，不写入配置，且**多为可选**：`EXA_API_KEY` / `PARALLEL_API_KEY`
   （search 免费端点默认免 key）、`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、
   `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
 - **能力为真实调用**（Phase R 已移除 `[live]`/cache/录制回放）：测试注入 fake provider，不打真网。
 - **事件字段名是契约**：`Event{id,at,type,message,tone,payload}`；reducer 只消费 `type`+`payload`，
-  `message`/`tone` 仅展示。现有 13 种类型（M1 增 `FAILED`/`STOPPED` → `status=failed|stopped`），
-  见 `docs/overview/blackboard-protocol.md` §5。
+  `message`/`tone` 仅展示。已实现 16 种类型（M1 增 `FAILED`/`STOPPED` → `status=failed|stopped`；
+  M6 增 `SESSION`/`WORKER_STEP`，reducer 忽略、Board 不变）；`ENTITY`/`RELATION` 属 M5。见
+  `docs/overview/blackboard-protocol.md` §5。
 - `events.jsonl` 的唯一写入口是 `RunStore.append_event()`（id 单调递增、append-only）；reducer
   是纯 fold（`reduce(events) -> Board`，`src/originweave/reduce.py`），同事件必得同 `Board`。
   语义边（`main-chain`/`dependency`/`goal-derived`）必须显式写进事件 payload，结构边由 reducer 派生。

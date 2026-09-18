@@ -24,6 +24,7 @@ originweave 的版本与里程碑索引。**当前唯一活跃版本：`1.0`**�
 | M3 | agent runtime：Docker container-per-run（多 Worker）、容器 Dispatcher、MCP、`langfuse`、预算、异步 Hint、Gate C（`search`/`model` 已提前至 M1） | 未开始 | M2 |
 | M4 | 端到端、Deployment 与文档回归：`make demo` 闭环、server Docker、`overview/`+`proto/` 契约无漂移 | 未开始 | M3 |
 | M5 | 实体/组织关系图：从 A 抽取实体并判别关系，产出独立的关系图（本体 + 证据/推断标注） | 未开始 | M4 |
+| M6 | Pi Worker 与可配置工具：执行体抽为可插拔 `Worker`（默认 `pi`，经 `pi-py-sdk`）；节点级隔离会话（原始输入/输出 + 步骤链）；项目级 `[worker]`（provider / 并发 / 工具 / `[worker].budget`，LLM 复用 `[capability.model]`）；TS 搜索扩展回调 server | 进行中 | M1c-1（P3+；P1/P2 不依赖） |
 
 ## 下一版本（待规划）
 

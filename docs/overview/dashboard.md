@@ -67,7 +67,7 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 | `/projects/:projectId` | 项目详情 + run 列表 |
 | `/projects/:projectId/runs/new` | 新建核验（提交后走 `CreateRun`） |
 | `/projects/:projectId/runs/:runId` | 审阅台（三栏：run 列表 / 图与页签 / INSPECTOR） |
-| `/settings` | 设置（主题等） |
+| `/settings` | 设置（主题、Worker provider / 并发上限 / 工具开关；M6） |
 
 ## 4. 冻结 proto 契约（Connect）
 
@@ -93,6 +93,9 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 | `CreateRun` | `CreateRunRequest` | `CreateRunResponse{run}` | 新建 run（**起一次核验的唯一入口**） |
 | `AddHint` | `AddHintRequest{run_id, text}` | `AddHintResponse{hint}` | 写一条 Hint（`author=human`，非阻塞） |
 | `SubmitHumanInput` | `SubmitHumanInputRequest` | `SubmitHumanInputResponse{run}` | 提交 Gate 决策，解除 `awaiting_human` |
+| `GetSettings` | `GetSettingsRequest{}` | `GetSettingsResponse{settings}` | 读项目设置（`[worker]` 等；**M6 P3，尚未入 `proto/`**） |
+| `UpdateSettings` | `UpdateSettingsRequest{settings}` | `UpdateSettingsResponse{settings}` | 写回项目 `originweave.toml`（未知键报错；**M6 P3，尚未入 `proto/`**） |
+| `Search` | `SearchRequest{query, num_results?}` | `SearchResponse{text}` | 经 `[capability.search]` 执行检索；供 Pi 的 TS 搜索扩展回调（**M6 P4，尚未入 `proto/`**） |
 
 错误沿用 Connect 的统一错误模型（`code` + `message`）。
 
@@ -102,7 +105,8 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 `run` · `origin` · `goal` · `facts[]` · `intents[]` · `hints[]` · `edges[]` ·
 `entity_graph?`（`analysis` 含 relation 时） · `deviations[]` · `events[]` ·
 `waiting_for?`（仅 `status = awaiting_human`） · `report?`（未产出时为空） ·
-`decisions[]`（`HUMAN_INPUT` 裁决记录）。
+`decisions[]`（`HUMAN_INPUT` 裁决记录） · `sessions[]`（M6：一次 Worker 调用的会话，含原始
+输入/输出与步骤链；**P3，尚未入 `proto/`**）。
 
 ### 4.3 CreateRunRequest
 
@@ -127,6 +131,30 @@ goal, max_steps?, max_wall?, max_cost?, auto?
 `Deviation` / `Event` / `Report` / `Entity` / `Relation` / `EntityGraph` 的定义一律以
 `product-overview.md` 第 4 节与
 `blackboard-protocol.md` 为准，此处不重复。
+
+### 4.6 设置与会话（M6，**P3/P5 计划，尚未入 `proto/`**）
+
+```text
+Settings {
+  worker: WorkerSettings {
+    provider,                         # local | pi
+    maxConcurrency,                   # 本项目每次 run 的 worker 上限
+    tools: string[]                   # 启用的工具名单（扁平白名单，与 [worker].tools 一致）
+  }
+}
+
+Session {                             # 一次 Worker 调用的历史（隔离）
+  id, runId, worker, task,            # task: Bootstrap | Reason | Explore | Validate
+  intentId?, model,                   # worker = worker 实例 id（如 "worker-1"）
+  input,                              # 原始输入（渲染后的 prompt / board）
+  output,                             # 原始输出（Worker 最终回复文本）
+  steps: SessionStep[] { seq, kind, name?, text?, ok? },
+  startedAt, endedAt
+}
+```
+`GetSettings`/`UpdateSettings` 读写项目 `originweave.toml`（与 `[worker]` 单一来源）。
+会话快照落 run dir `sessions/<id>.json`；`RunDetail.sessions` 与 `SESSION`/`WORKER_STEP` 事件
+互为索引，前端 INSPECTOR 依会话展示原始输入/输出与步骤链。
 
 ## 5. 契约原型与样例
 
