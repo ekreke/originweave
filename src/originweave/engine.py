@@ -15,14 +15,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from .blackboard import BlackboardError, Board, Evidence, Fact, Intent
 from .capabilities.base import CapabilityError, PromptProvider, PromptTemplate, SearchProvider
 from .capabilities.worker import TaskKind, Worker, WorkerReply
-from .events import now_iso
+from .events import Event, now_iso
 from .reduce import reduce
 from .store import RunStore
 
@@ -33,6 +33,9 @@ WORKER_ID = "worker-1"
 # Bootstrap has no Intent of its own in the protocol; it is modelled as an ``explore``
 # Intent so the pass is auditable and dispatchable like any other.
 BOOTSTRAP_QUESTION = "Extract document A's core abstract claim(s) (Bootstrap)."
+
+# HITL gate identifiers (frozen in proto/...:303-309): Gate A confirms the core claim.
+GATE_A = "confirm-claim"
 
 # Human-readable id prefix per Fact.kind, so replayed ids read as f1/c1/s1/... .
 _PREFIX: dict[str, str] = {
@@ -235,6 +238,12 @@ def _claim_index(decisions: dict[int, IntentDecision], index: int) -> None:
         raise EngineError(f"candidate {index} classified more than once")
 
 
+def _session_suffix(session_id: str) -> int:
+    """Return the numeric part of a ``"sess_007"`` id (0 when it is not one)."""
+    _, _, digits = session_id.partition("_")
+    return int(digits) if digits.isdigit() else 0
+
+
 @dataclass
 class _ExploreOutcome:
     """Result of one concurrent Explore pass, before the engine commits it.
@@ -284,6 +293,7 @@ class Engine:
         heartbeat_interval: float = 15.0,
         heartbeat_timeout: float = 300.0,
         heartbeat_on_timeout: str = "release",
+        auto: bool = False,
     ) -> None:
         if max_concurrency <= 0:
             raise ValueError(f"max_concurrency must be > 0, got {max_concurrency}")
@@ -309,6 +319,9 @@ class Engine:
         self._heartbeat_interval = heartbeat_interval
         self._heartbeat_timeout = heartbeat_timeout
         self._heartbeat_on_timeout = heartbeat_on_timeout
+        # HITL: when false the engine pauses at Gate A for human confirmation. The
+        # product default ([hitl].auto=false) is passed by the server (M1c-1).
+        self._auto = auto
         self._fact_seq: dict[str, int] = {}
         self._intent_seq = 0
         self._session_seq = 0
@@ -428,8 +441,13 @@ class Engine:
             )
         self._store.append_event("FAILED", {"reason": str(exc)})
 
-    async def run(self, *, origin: Fact, goal: Fact) -> Board:
-        """Start a run: ``PROJECT``, Bootstrap, one Reason pass, then dispatch.
+    async def run(self, *, origin: Fact, goal: Fact, auto: bool | None = None) -> Board:
+        """Start a run: ``PROJECT``, Bootstrap, then Reason + one dispatch round.
+
+        When HITL is on (``auto`` false, the default) the run stops right after Bootstrap
+        by writing ``REQUEST_HUMAN`` for **Gate A** and returns an ``awaiting_human``
+        board; call :meth:`resume` with the human decision to continue. ``auto=True``
+        (constructor or per-run override, wired from ``[hitl].auto``) skips the gate.
 
         Dispatch executes one round of every open Intent the engine can run (Explore
         passes run concurrently up to ``max_concurrency``, committed in id order); a
@@ -444,6 +462,91 @@ class Engine:
         if board.status != "running":
             # Bootstrap failed / completed: never run Reason on a dead board.
             return board
+        if not (self._auto if auto is None else auto):
+            # Gate A: confirm the core abstract claim(s) before decomposing them. It fires
+            # whenever HITL is on, even if Bootstrap found no claim, so the human is never
+            # silently bypassed.
+            claim_ids = [fact.id for fact in board.facts if fact.role == "main-claim"]
+            question = "Confirm the core claim(s)"
+            question += f": {', '.join(claim_ids)}" if claim_ids else " (none were extracted)"
+            self._store.append_event(
+                "REQUEST_HUMAN",
+                {"gate": GATE_A, "question": question},
+                message="Gate A: confirm the core claim(s)",
+            )
+            return reduce(self._store.read_events())
+        return await self._continue()
+
+    async def resume(
+        self,
+        *,
+        decision: str,
+        text: str = "",
+        targets: Sequence[str] = (),
+    ) -> Board:
+        """Resolve a paused HITL gate and continue the run (programmatic resume).
+
+        ``decision`` is ``approve`` / ``edit`` (both continue) or ``reject`` (the run
+        stops as human-terminated, ``STOPPED``). ``edit`` is currently **record-only**:
+        ``text`` / ``targets`` land in the ``HUMAN_INPUT`` payload, but changing a Fact
+        needs a fact-supersession event the contract does not have yet, so the board is
+        unchanged (``blackboard-protocol.md`` section 7). The board is the source of truth
+        for where we paused, and the id counters are rebuilt from it, so resuming works
+        even on a fresh ``Engine`` over the same run directory.
+        """
+        if decision not in ("approve", "edit", "reject"):
+            raise EngineError(f"unknown decision {decision!r}; expected approve|edit|reject")
+        events = self._store.read_events()
+        board = reduce(events)
+        if board.status != "awaiting_human" or board.waitingFor is None:
+            raise EngineError("no human gate is awaiting input")
+        gate = board.waitingFor.gate
+        if gate != GATE_A:
+            raise EngineError(f"unsupported gate {gate!r}")
+        self._restore_counters(board, events)
+        self._store.append_event(
+            "HUMAN_INPUT",
+            {
+                "gate": gate,
+                "decision": decision,
+                "text": text,
+                "targets": list(targets),
+                "author": "human",
+            },
+            message=f"Gate A: {decision}",
+        )
+        if decision == "reject":
+            self._store.append_event("STOPPED", {"reason": "Gate A rejected by human"})
+            return reduce(self._store.read_events())
+        return await self._continue()
+
+    def _restore_counters(self, board: Board, events: Sequence[Event]) -> None:
+        """Rebuild the deterministic id counters from an existing run (I5 resume).
+
+        Fact and Intent ids are contiguous on the board, so counting reconstructs the next
+        value. Session ids are allocated up-front but only recorded when a pass commits, so
+        a gap is possible (a released/failed pass); the counter is restored from the **max
+        numeric suffix** seen in ``SESSION`` events, not an event count, to avoid reusing a
+        suffix. This lets resume continue without colliding on ``f1``/``i1``/``sess_001``
+        when it runs on a fresh ``Engine``.
+        """
+        fact_seq: dict[str, int] = {}
+        for fact in board.facts:
+            prefix = _PREFIX.get(fact.kind, "f")
+            fact_seq[prefix] = fact_seq.get(prefix, 0) + 1
+        self._fact_seq = fact_seq
+        self._intent_seq = len(board.intents)
+        self._session_seq = max(
+            (
+                _session_suffix(str(event.payload.get("sessionId", "")))
+                for event in events
+                if event.type == "SESSION"
+            ),
+            default=0,
+        )
+
+    async def _continue(self) -> Board:
+        """Run Reason and one dispatch round, stopping early on any terminal state."""
         await self._reason()
         board = reduce(self._store.read_events())
         if board.status != "running":
@@ -919,6 +1022,7 @@ class Engine:
 __all__ = [
     "BOOTSTRAP_QUESTION",
     "DISPATCHABLE_TYPES",
+    "GATE_A",
     "Engine",
     "EngineError",
     "IntentDecision",

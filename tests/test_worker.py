@@ -86,6 +86,7 @@ def _engine(store: RunStore, *replies: str) -> Engine:
         search=_FakeSearch(),
         prompt=_FakePrompt(),
         store=store,
+        auto=True,
     )
 
 
@@ -432,6 +433,7 @@ async def test_engine_indexes_worker_steps(tmp_path: Path) -> None:
         search=_FakeSearch(),
         prompt=_FakePrompt(),
         store=store,
+        auto=True,
     )
     await engine.run(origin=_origin(), goal=_goal())
 
@@ -482,6 +484,7 @@ async def test_bootstrap_worker_failure_is_terminal(tmp_path: Path) -> None:
         search=_FakeSearch(),
         prompt=_FakePrompt(),
         store=store,
+        auto=True,
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 

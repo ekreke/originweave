@@ -388,9 +388,18 @@ Worker A 写入新 Fact  →  图变化（环境更新）  →  Worker B 下一�
 | 被动 Gate | 关键节点发 `REQUEST_HUMAN`，run → `awaiting_human`，输入后继续 | 是 |
 
 三个关键 Gate：
-- **Gate A · 论点确认**（Bootstrap/decompose 之后）：确认核心抽象论点与其拆解树。
-- **Gate B · 歧义裁决**（verify 阶段，置信度低或来源冲突时）：人工定夺口径/取值。
-- **Gate C · 最终审阅**（记分卡产出前）：确认结论，或要求重查（产生新 Intent）。
+- **Gate A · 论点确认**（Bootstrap 之后、Reason 之前）：确认核心抽象论点（`role=main-claim`）
+  后再去拆解。gate id = `confirm-claim`。
+- **Gate B · 歧义裁决**（verify 阶段，置信度低或来源冲突时）：人工定夺口径/取值。gate id = `arbitrate`。
+- **Gate C · 最终审阅**（记分卡产出前）：确认结论，或要求重查（产生新 Intent）。gate id = `review`。
+
+**程序化挂起/恢复（M1，库层）**：非 auto 时，`Engine.run` 在 Bootstrap 产出 main-claim 后写
+`REQUEST_HUMAN{gate:"confirm-claim", question}` 并返回 `awaiting_human` 的 Board（不再往下跑）。
+调用方审阅后调 `Engine.resume(decision, text?, targets?)`：写 `HUMAN_INPUT`（`author=human`）并继续
+——`approve` / `edit` 继续 Reason → dispatch，`reject` 写 `STOPPED`（人工终止）。**`edit` 目前仅记录**
+（`text`/`targets` 进入 `HUMAN_INPUT`，黑板不变）；修改 Fact 需要契约新增「事实取代」事件，留待后续
+切片，UI 层不得直接改黑板（红线 5）。`resume` 从黑板重建确定性 id 计数器，因此在同一 run dir 上
+新建的 `Engine` 也能正确恢复（server 友好）。decision 取值冻结于 proto：`approve|edit|reject`。
 
 人类输入亦以 `HUMAN_INPUT` 事件记录（`author=human`），因此**是输入而非旁路**：
 不破坏可审计与可重放原则。

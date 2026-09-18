@@ -87,6 +87,23 @@ def test_evidence_quotes_are_verbatim(capsys: pytest.CaptureFixture[str]) -> Non
             assert _collapse(evidence["quote"]) in _collapse(snapshots[evidence["url"]])
 
 
+def test_fixture_gate_ids_match_frozen_contract() -> None:
+    gates: set[str] = set()
+    decisions: set[str] = set()
+    lines = (SAMPLE / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    for line in lines:
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        if event["type"] == "REQUEST_HUMAN":
+            gates.add(event["payload"]["gate"])
+        elif event["type"] == "HUMAN_INPUT":
+            decisions.add(event["payload"]["decision"])
+    # Gate ids and decisions are frozen in proto/originweave/v1/originweave.proto.
+    assert gates <= {"confirm-claim", "arbitrate", "review"}
+    assert decisions <= {"approve", "edit", "reject"}
+
+
 def test_fixtures_are_up_to_date(tmp_path: Path) -> None:
     builder = _load_builder()
     builder.build(tmp_path / "sample")

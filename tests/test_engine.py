@@ -115,6 +115,7 @@ def _engine(store: RunStore, *replies: str) -> Engine:
         search=_FakeSearch(),
         prompt=_FakePrompt(),
         store=store,
+        auto=True,
     )
 
 
@@ -175,7 +176,11 @@ async def test_bootstrap_produces_a_main_claim(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     model = _FakeModel(_bootstrap("Copilot cut task time by 55%."), NO_REASON)
     engine = Engine(
-        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
@@ -368,7 +373,11 @@ async def test_validate_skips_when_no_candidates(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     model = _FakeModel(_bootstrap("A claim"), NO_REASON)
     engine = Engine(
-        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
     )
     await engine.run(origin=_origin(), goal=_goal())
 
@@ -401,7 +410,11 @@ async def test_validate_passes_candidates_to_worker(tmp_path: Path) -> None:
         _validate(0),
     )
     engine = Engine(
-        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
     )
     await engine.run(origin=_origin(), goal=_goal())
 
@@ -520,7 +533,11 @@ async def test_validate_provider_error_fails_run(tmp_path: Path) -> None:
             raise ProviderError("validate model exploded")
 
     engine = Engine(
-        worker=LocalWorker(model=_Boom()), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=_Boom()),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
     )
     board = await engine.run(origin=_origin(), goal=_goal())
     assert board.status == "failed"
@@ -547,6 +564,7 @@ async def test_missing_validate_prompt_fails_run(tmp_path: Path) -> None:
         search=_FakeSearch(),
         prompt=_NoValidate(),
         store=store,
+        auto=True,
     )
     board = await engine.run(origin=_origin(), goal=_goal())
     assert board.status == "failed"
@@ -563,7 +581,7 @@ async def test_explore_runs_search_and_registers_evidence(tmp_path: Path) -> Non
         _explore_reply(_source_fact("GitHub lab study reports a 55% speedup")),
     )
     engine = Engine(
-        worker=LocalWorker(model=model), search=search, prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model), search=search, prompt=_FakePrompt(), store=store, auto=True
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
@@ -595,7 +613,7 @@ async def test_explore_passes_intent_and_search_to_worker(tmp_path: Path) -> Non
         _explore_reply(_source_fact("Primary source")),
     )
     engine = Engine(
-        worker=LocalWorker(model=model), search=search, prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model), search=search, prompt=_FakePrompt(), store=store, auto=True
     )
     await engine.run(origin=_origin(), goal=_goal())
 
@@ -621,7 +639,7 @@ async def test_explore_decompose_produces_sub_claims(tmp_path: Path) -> None:
         _explore_reply(_sub_claim("Experienced users sped up"), _sub_claim("Novices did not")),
     )
     engine = Engine(
-        worker=LocalWorker(model=model), search=search, prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model), search=search, prompt=_FakePrompt(), store=store, auto=True
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
@@ -647,7 +665,11 @@ async def test_explore_leaves_verify_intents_open(tmp_path: Path) -> None:
         _validate(0),
     )
     engine = Engine(
-        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
@@ -675,7 +697,11 @@ async def test_explore_search_failure_fails_run(tmp_path: Path) -> None:
         _validate(0),
     )
     engine = Engine(
-        worker=LocalWorker(model=model), search=_BoomSearch(), prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model),
+        search=_BoomSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
@@ -696,7 +722,11 @@ async def test_decompose_rejects_citation_facts(tmp_path: Path) -> None:
         _explore_reply(_source_fact("A source, not a sub-claim")),
     )
     engine = Engine(
-        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
@@ -728,7 +758,11 @@ async def test_dispatch_commit_stops_after_a_failed_intent(tmp_path: Path) -> No
         _explore_reply(_sub_claim("Committed too late")),
     )
     engine = Engine(
-        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
@@ -798,7 +832,11 @@ async def test_explore_bad_reply_fails_run(tmp_path: Path, reply: str) -> None:
         reply,
     )
     engine = Engine(
-        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
@@ -819,7 +857,11 @@ async def test_explore_records_session_and_event_order(tmp_path: Path) -> None:
         _explore_reply(_source_fact("Primary source")),
     )
     engine = Engine(
-        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+        worker=LocalWorker(model=model),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
     )
     await engine.run(origin=_origin(), goal=_goal())
 
@@ -881,6 +923,7 @@ def _concurrency_scenario(
         search=_RecordingSearch(),
         prompt=_FakePrompt(),
         store=store,
+        auto=True,
         max_concurrency=max_concurrency,
     )
     return engine, model
@@ -960,6 +1003,7 @@ async def test_heartbeat_is_emitted_while_worker_runs(tmp_path: Path) -> None:
         search=_RecordingSearch(),
         prompt=_FakePrompt(),
         store=store,
+        auto=True,
         heartbeat_interval=0.01,
         heartbeat_timeout=5.0,
     )
@@ -978,6 +1022,7 @@ async def test_heartbeat_timeout_releases_intent(tmp_path: Path) -> None:
         search=_RecordingSearch(),
         prompt=_FakePrompt(),
         store=store,
+        auto=True,
         heartbeat_interval=0.01,
         heartbeat_timeout=0.05,
         heartbeat_on_timeout="release",
@@ -1001,6 +1046,7 @@ async def test_heartbeat_timeout_fails_run_when_configured(tmp_path: Path) -> No
         search=_RecordingSearch(),
         prompt=_FakePrompt(),
         store=store,
+        auto=True,
         heartbeat_interval=0.01,
         heartbeat_timeout=0.05,
         heartbeat_on_timeout="fail",
@@ -1033,6 +1079,7 @@ async def test_unexpected_worker_error_is_committed_not_raised(tmp_path: Path) -
         search=_RecordingSearch(),
         prompt=_FakePrompt(),
         store=store,
+        auto=True,
         max_concurrency=2,
         heartbeat_interval=0.01,
         heartbeat_timeout=5.0,
@@ -1063,6 +1110,7 @@ async def test_slow_search_trips_heartbeat_timeout(tmp_path: Path) -> None:
         search=_SlowSearch(),
         prompt=_FakePrompt(),
         store=store,
+        auto=True,
         heartbeat_interval=0.01,
         heartbeat_timeout=0.05,
         heartbeat_on_timeout="release",
@@ -1089,6 +1137,256 @@ def test_engine_rejects_bad_heartbeat_settings(tmp_path: Path) -> None:
         build(heartbeat_interval=1.0, heartbeat_timeout=1.0)
     with pytest.raises(ValueError):
         build(heartbeat_on_timeout="explode")
+
+
+async def test_gate_a_suspends_run_after_bootstrap(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(model=_FakeModel(_bootstrap("A claim"))),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    assert board.status == "awaiting_human"
+    assert board.waitingFor is not None
+    assert board.waitingFor.gate == "confirm-claim"
+    assert "f1" in board.waitingFor.question
+    # Only Bootstrap ran; Reason is held back until the human confirms.
+    assert [intent.id for intent in board.intents] == ["i1"]
+    assert sum(event.type == "REQUEST_HUMAN" for event in store.read_events()) == 1
+
+
+async def test_auto_skips_gate_a(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(model=_FakeModel(_bootstrap("A claim"), NO_REASON)),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    assert board.status == "running"
+    assert not any(event.type == "REQUEST_HUMAN" for event in store.read_events())
+
+
+async def test_run_auto_override_skips_gate(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(  # constructor default is human-in-the-loop
+        worker=LocalWorker(model=_FakeModel(_bootstrap("A claim"), NO_REASON)),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+    )
+    board = await engine.run(origin=_origin(), goal=_goal(), auto=True)
+
+    assert board.status == "running"
+    assert not any(event.type == "REQUEST_HUMAN" for event in store.read_events())
+
+
+async def test_run_auto_false_override_pauses(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(  # constructor default is human-in-the-loop
+        worker=LocalWorker(model=_FakeModel(_bootstrap("A claim"), NO_REASON)),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
+    )
+    board = await engine.run(origin=_origin(), goal=_goal(), auto=False)
+
+    assert board.status == "awaiting_human"
+
+
+async def test_gate_a_suspends_even_without_main_claims(tmp_path: Path) -> None:
+    # Bootstrap returning a non-claim fact must not silently bypass the human.
+    no_claim = json.dumps(
+        {
+            "facts": [{"label": "x", "kind": "fact", "role": "none", "status": "open"}],
+            "intents": [],
+            "complete": None,
+        }
+    )
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(model=_FakeModel(no_claim)),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    assert board.status == "awaiting_human"
+    assert board.waitingFor is not None
+    assert board.waitingFor.gate == "confirm-claim"
+    assert "none were extracted" in board.waitingFor.question
+
+
+async def test_resume_approve_continues_the_run(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+    )
+    assert (await engine.run(origin=_origin(), goal=_goal())).status == "awaiting_human"
+
+    board = await engine.resume(decision="approve")
+
+    assert board.status == "running"
+    decisions = [event for event in store.read_events() if event.type == "HUMAN_INPUT"]
+    assert decisions[0].payload["decision"] == "approve"
+    assert decisions[0].payload["author"] == "human"
+    assert [intent.id for intent in board.intents] == ["i1", "i2"]
+    assert board.intents[1].status == "done"
+    assert board.intents[1].producedFacts == ["f2"]
+
+
+async def test_resume_edit_records_decision_and_continues(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+    )
+    await engine.run(origin=_origin(), goal=_goal())
+
+    board = await engine.resume(decision="edit", text="tighten the claim", targets=["f1"])
+
+    assert board.status == "running"
+    decision = next(event for event in store.read_events() if event.type == "HUMAN_INPUT")
+    assert decision.payload["decision"] == "edit"
+    assert decision.payload["text"] == "tighten the claim"
+    assert decision.payload["targets"] == ["f1"]
+    # edit is record-only for now, so the board still decomposes the original claim.
+    assert board.decisions[0].targets == ["f1"]
+
+
+async def test_resume_twice_raises(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(model=_FakeModel(_bootstrap("A claim"), NO_REASON)),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+    )
+    await engine.run(origin=_origin(), goal=_goal())
+    await engine.resume(decision="approve")
+
+    with pytest.raises(EngineError):
+        await engine.resume(decision="approve")
+
+
+async def test_resume_reject_stops_the_run(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(model=_FakeModel(_bootstrap("A claim"))),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+    )
+    await engine.run(origin=_origin(), goal=_goal())
+
+    board = await engine.resume(decision="reject", text="not the core claim")
+
+    assert board.status == "stopped"
+    events = store.read_events()
+    assert events[-1].type == "STOPPED"
+    assert "rejected" in events[-1].payload["reason"]
+    # A rejected gate never reaches Reason.
+    assert not any(event.type == "REASON" for event in events)
+
+
+async def test_resume_without_pending_gate_raises(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(model=_FakeModel(_bootstrap("A claim"), NO_REASON)),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
+    )
+    await engine.run(origin=_origin(), goal=_goal())
+
+    with pytest.raises(EngineError):
+        await engine.resume(decision="approve")
+
+
+async def test_resume_rejects_unknown_decision(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(model=_FakeModel(_bootstrap("A claim"))),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+    )
+    await engine.run(origin=_origin(), goal=_goal())
+
+    with pytest.raises(EngineError):
+        await engine.resume(decision="maybe")
+
+
+async def test_resume_on_fresh_engine_rebuilds_id_counters(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    first = Engine(
+        worker=LocalWorker(model=_FakeModel(_bootstrap("A claim"))),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+    )
+    await first.run(origin=_origin(), goal=_goal())
+
+    # A brand-new Engine over the same run dir resumes as if it had never paused.
+    resumed = Engine(
+        worker=LocalWorker(
+            model=_FakeModel(
+                _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+                _validate(0),
+                _explore_reply(_sub_claim("Sub claim")),
+            )
+        ),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+    )
+    board = await resumed.resume(decision="approve")
+
+    assert [intent.id for intent in board.intents] == ["i1", "i2"]
+    assert board.intents[1].producedFacts == ["f2"]
+    ids = [intent.id for intent in board.intents]
+    assert len(ids) == len(set(ids))
+    sessions = [
+        event.payload["sessionId"] for event in store.read_events() if event.type == "SESSION"
+    ]
+    assert len(sessions) == len(set(sessions))
+
+
+async def test_replay_reproduces_human_input(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(model=_FakeModel(_bootstrap("A claim"), NO_REASON)),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+    )
+    await engine.run(origin=_origin(), goal=_goal())
+    board = await engine.resume(decision="approve")
+
+    replayed = reduce(store.read_events())
+    assert replayed.decisions[0].gate == "confirm-claim"
+    assert replayed.decisions[0].decision == "approve"
+    assert render_canonical(replayed) == render_canonical(board)
 
 
 async def test_bootstrap_bad_reply_fails_run(tmp_path: Path) -> None:
@@ -1131,6 +1429,7 @@ async def test_missing_prompt_fails_run(tmp_path: Path, missing: str) -> None:
         search=_FakeSearch(),
         prompt=_MissingPrompt(),
         store=store,
+        auto=True,
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
@@ -1283,6 +1582,7 @@ async def test_live_bootstrap_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         search=build_search(cfg),
         prompt=build_prompt(cfg),
         store=RunStore(tmp_path / "live"),
+        auto=False,
     )
     board = await engine.run(origin=origin, goal=_goal())
     assert any(fact.role == "main-claim" for fact in board.facts)

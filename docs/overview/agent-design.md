@@ -83,6 +83,12 @@ dir = "runs"
 
 - `heartbeat_*` 是**单次调用**的租约（liveness），`[worker.budget].max_wall` 是**会话总预算**
   （M3 执行 → `STOPPED`）；两者语义不同。`release` 忠于协议 §8「超时自动释放」，`fail` 则终止 run。
+- **HITL（M1 I5）**：`[hitl].auto=false`（默认）时 server 以 `auto=False` 构造 `Engine`，run 在
+  Bootstrap 后停在 **Gate A**（`REQUEST_HUMAN{gate:"confirm-claim"}`，run → `awaiting_human`），
+  由 `Engine.resume(decision, text?, targets?)` 写 `HUMAN_INPUT` 后继续（`approve`/`edit` 继续
+  Reason→dispatch，`reject` → `STOPPED`；`edit` 目前仅记录，Fact 修改待契约新增取代事件）；
+  `auto=true` / `CreateRunRequest.auto` 跳过 Gate。
+  `resume` 从黑板重建 id 计数器，可在新 `Engine` 实例上恢复。
 
 - **未知键会报错**（`ConfigError`），避免 `max_step` 之类的拼写错误被静默忽略。
 - **凭据只从环境变量读取**，不写入配置，且**多为可选**：

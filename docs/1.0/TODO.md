@@ -21,10 +21,10 @@
   **I3** Explore + search（来源回链 `citation`/`source` + `Evidence`；`decompose`/`explore`
   派发分支，`verify` 留待 M2；单轮派发，`engine.py`、`prompts/explore.txt`）、
   **I4** 并发派发 + 心跳/超时（`engine.py` `_dispatch`/`_run_explore`/`_heartbeat`；
-  `[worker].heartbeat_{interval,timeout,on_timeout}`、`max_concurrency<=16`）。
+  `[worker].heartbeat_{interval,timeout,on_timeout}`、`max_concurrency<=16`）、
+  **I5** HITL Gate A（`engine.py` `run`/`resume`；`REQUEST_HUMAN`/`HUMAN_INPUT`，`auto` 跳过）。
   待做：
-  1. **I5 · HITL**：Gate A 挂起/恢复 + `auto` 跳过。
-  2. **I6 · 收敛**：Stigmergy 多轮收敛 → `COMPLETE` + 确定性 Board 单测。
+  1. **I6 · 收敛**：Stigmergy 多轮收敛 → `COMPLETE` + 确定性 Board 单测。
 - 随后：M1c-1（server）→ M1c-2（前端接线与 UI）。
 
 ## 待确认决策
@@ -55,7 +55,12 @@
   `paused` 仍无事件，随 M3 可控性。落 **I2a**。
 - [ ] server 监听端口（前端 `transport` 暂用 8787；与 CLI `ui` 的 8765 区分）→ M1c-1 定
 - [ ] Docker runtime 的镜像来源与构建归属（server 仓内构建 vs 独立镜像）
-- [ ] HITL Gate 的默认范围与配置粒度（三个 Gate 是否可逐项开关；`auto` 是否支持 per-gate）
+- [x] HITL Gate A 触发点与语义 → **Bootstrap 之后、Reason 之前**（先确认 main-claim 再拆解；
+  非 auto 时即使 Bootstrap 没抽出 main-claim 也照常挂起，不静默绕过）。原协议「decompose 之后确认
+  拆解树」改为后续 Gate/切片再评估；`edit` 目前仅记录（`text`/`targets` 入 `HUMAN_INPUT`），
+  修改 Fact 需契约新增「事实取代」事件（I5 定）
+- [ ] HITL Gate 的默认范围与配置粒度（三个 Gate 是否可逐项开关；`auto` 是否支持 per-gate）→
+  本轮（I5）维持**全局 `[hitl].auto`**；per-gate 开关待 Gate B/C（M2/M3）再评估
 - [x] Worker 并发上限的位置与默认值 → 独立 `[worker].max_concurrency`（默认 1，代码校验 `>0`）（M6 定）
 - [x] Worker 并发上限的**具体上限** → 固定上界 `MAX_WORKER_CONCURRENCY=16`（I4 定；
   `max_concurrency` 需 `>0 且 <=16`）
@@ -124,6 +129,18 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M1 I5 · HITL Gate A（挂起/恢复）**：`engine.py` 增 `auto`（默认 `False`，产品默认人工介入）与
+  `GATE_A="confirm-claim"`。`run(origin, goal, auto=None)` 在 Bootstrap 后、Reason 之前，非 auto 时
+  写 `REQUEST_HUMAN{gate, question}` 并返回 `awaiting_human` 的 Board（即使未抽出 main-claim 也挂起，
+  不静默绕过）；`run(auto=True)` / 构造 `auto=True` 跳过。新增 `resume(decision, text?, targets?)`：
+  校验当前处于该 gate → 写 `HUMAN_INPUT{author:"human"}` → `approve`/`edit` 继续 Reason→dispatch
+  （`edit` 仅记录，Fact 取代事件待补）、`reject` 写 `STOPPED`。`_restore_counters` 从黑板重建
+  `_fact_seq`/`_intent_seq` 并从 `SESSION` 事件的**最大后缀**重建 `_session_seq`，使 resume 可在
+  **新 Engine 实例**上正确续号（server 友好）。契约同步 `blackboard-protocol §7`、`agent-design §2.1`；
+  样例行 `examples/copilot_productivity/events.jsonl` 的 gate id/decision 已对齐冻结契约
+  （`confirm-claim`/`arbitrate`、`approve`/`edit`，`build_sample_fixtures.py` + README + 契约测试）。
+  `make lint` + `make test`（223 passed, 1 skipped）全绿，`make replay` 不变。
 
 - **M1 I4 · 并发派发 + 心跳/超时**：`engine.py` 重写 `_dispatch`——一轮内按 id 序统一 `EXECUTE`
   认领（标签 `worker-{n}`），以 `asyncio.Semaphore([worker].max_concurrency)` 并发跑 `_run_explore`

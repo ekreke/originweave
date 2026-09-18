@@ -447,7 +447,7 @@ def _events() -> list[tuple[str, dict[str, Any], str, str]]:
     events.append(
         event(
             "REQUEST_HUMAN",
-            {"gate": "A", "question": "确认核心抽象论点及其拆解树。"},
+            {"gate": "confirm-claim", "question": "确认核心抽象论点及其拆解树。"},
             "Gate A：等待人工确认论点",
         )
     )
@@ -455,7 +455,7 @@ def _events() -> list[tuple[str, dict[str, Any], str, str]]:
         event(
             "HUMAN_INPUT",
             {
-                "gate": "A",
+                "gate": "confirm-claim",
                 "decision": "approve",
                 "text": "论点成立，按子断言继续。",
                 "targets": ["f1"],
@@ -579,7 +579,7 @@ def _events() -> list[tuple[str, dict[str, Any], str, str]]:
     events.append(
         event(
             "REQUEST_HUMAN",
-            {"gate": "B", "question": "55% 的归因以哪一份一手来源为准？"},
+            {"gate": "arbitrate", "question": "55% 的归因以哪一份一手来源为准？"},
             "Gate B：等待人工裁决来源冲突",
         )
     )
@@ -587,8 +587,8 @@ def _events() -> list[tuple[str, dict[str, Any], str, str]]:
         event(
             "HUMAN_INPUT",
             {
-                "gate": "B",
-                "decision": "以一手来源为准",
+                "gate": "arbitrate",
+                "decision": "edit",
                 "text": "55% 归属 2022 实验室研究；Accenture 研究不含耗时指标。",
                 "targets": ["s1", "s2"],
                 "author": "human",
