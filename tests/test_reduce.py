@@ -140,6 +140,55 @@ def test_complete_sets_verdict() -> None:
     assert board.verdict == "部分偏差"
 
 
+def test_failed_sets_terminal_status() -> None:
+    board = reduce([project(), ev(2, "FAILED", {"reason": "validator failed"})])
+    assert board.status == "failed"
+
+
+def test_stopped_clears_waiting() -> None:
+    board = reduce(
+        [
+            project(),
+            ev(2, "REQUEST_HUMAN", {"gate": "confirm-claim", "question": "ok?"}),
+            ev(3, "STOPPED", {"reason": "max_steps"}),
+        ]
+    )
+    assert board.status == "stopped"
+    assert board.waitingFor is None
+
+
+def test_terminal_keeps_accumulated_state() -> None:
+    board = reduce(
+        [
+            project(),
+            ev(2, "INTENT", {"intent": {"id": "i001", "type": "explore"}}),
+            ev(3, "FAILED", {"reason": "boom"}),
+        ]
+    )
+    assert board.status == "failed"
+    assert [intent.id for intent in board.intents] == ["i001"]
+
+
+@pytest.mark.parametrize("kind", ["FAILED", "STOPPED"])
+@pytest.mark.parametrize("payload", [{}, {"reason": 123}, {"reason": None}])
+def test_terminal_requires_string_reason(kind: str, payload: dict[str, object]) -> None:
+    with pytest.raises(ReduceError):
+        reduce([project(), ev(2, kind, payload)])
+
+
+def test_terminal_status_follows_last_event_and_keeps_verdict() -> None:
+    failed_after_complete = reduce(
+        [project(), ev(2, "COMPLETE", {"verdict": "部分偏差"}), ev(3, "FAILED", {"reason": "boom"})]
+    )
+    assert failed_after_complete.status == "failed"
+    assert failed_after_complete.verdict == "部分偏差"
+
+    completed_after_failed = reduce(
+        [project(), ev(2, "FAILED", {"reason": "boom"}), ev(3, "COMPLETE", {"verdict": "done"})]
+    )
+    assert completed_after_failed.status == "completed"
+
+
 def test_reduce_requires_project() -> None:
     with pytest.raises(ReduceError):
         reduce([ev(1, "REASON", {"phase": "start"})])

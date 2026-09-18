@@ -36,6 +36,11 @@ def _string(payload: Mapping[str, Any], key: str) -> str:
     return value
 
 
+def _require_string(payload: Mapping[str, Any], key: str) -> None:
+    """Validate that ``payload[key]`` is a string; raise :class:`ReduceError` otherwise."""
+    _string(payload, key)
+
+
 def _edges(payload: Mapping[str, Any]) -> list[Edge]:
     raw = payload.get("edges", [])
     if not isinstance(raw, list):
@@ -157,6 +162,14 @@ def reduce(events: Iterable[Event]) -> Board:
         elif event.type == "COMPLETE":
             verdict = str(payload.get("verdict", "")) or None
             status = "completed"
+            waiting = None
+        elif event.type == "FAILED":
+            _require_string(payload, "reason")  # a malformed terminal event should fail loudly
+            status = "failed"
+            waiting = None
+        elif event.type == "STOPPED":
+            _require_string(payload, "reason")
+            status = "stopped"
             waiting = None
         # REASON carries no derivable state in M0c.
 

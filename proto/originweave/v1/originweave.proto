@@ -193,7 +193,8 @@ message Event {
   string id = 1;
   string at = 2;
   // PROJECT | INTENT | EXECUTE | CONCLUDE | REASON | COMPLETE | HEARTBEAT |
-  // RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT | ENTITY | RELATION
+  // RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT | FAILED | STOPPED |
+  // ENTITY | RELATION
   string type = 3;
   string message = 4;
   string tone = 5; // info | success | warning | danger

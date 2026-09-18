@@ -51,6 +51,19 @@ def test_every_event_type_has_a_default_tone() -> None:
     assert set(DEFAULT_TONE) == set(EVENT_TYPES)
 
 
+def test_terminal_events_are_known() -> None:
+    assert DEFAULT_TONE["FAILED"] == "danger"
+    assert DEFAULT_TONE["STOPPED"] == "warning"
+    failed = Event.from_dict(
+        {"id": "e1", "at": "t", "type": "FAILED", "payload": {"reason": "x"}}
+    )
+    stopped = Event.from_dict(
+        {"id": "e2", "at": "t", "type": "STOPPED", "payload": {"reason": "x"}}
+    )
+    assert failed.tone == "danger"
+    assert stopped.tone == "warning"
+
+
 def test_format_event_id_is_zero_padded() -> None:
     assert format_event_id(1) == "e0001"
     assert format_event_id(42) == "e0042"
