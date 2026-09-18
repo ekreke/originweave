@@ -102,12 +102,12 @@ API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）�
 - [x] `search` capability 真实接入：`exa` / `parallel`（`capabilities/search.py`；免费 MCP 端点，`EXA_API_KEY` / `PARALLEL_API_KEY` 可选）（Phase R）
 - [x] 任务指令：`Bootstrap`（抽取核心抽象论点）— `engine.py` + `prompts/bootstrap.txt`
 - [x] 任务指令：`Reason`（产出候选 Intent）— `engine.py` + `prompts/reason.txt`
-- [ ] 任务指令：`Explore`（认领 Intent 并执行探索）
+- [x] 任务指令：`Explore`（认领 Intent 并执行探索）— `engine.py` + `prompts/explore.txt`
 - [x] 任务指令：`Validate`（独立判重 pass）— `engine.py` + `prompts/validate.txt`
-- [ ] Intent 三型调度分支：`decompose` / `explore` / `verify`
+- [ ] Intent 三型调度分支：`decompose` / `explore` / `verify`（decompose/explore 已随 I3 落地，`verify` 待 M2 `compare`）
 - [x] 抽象论点抽取：`Bootstrap` → `main-claim` — `engine.py` + `prompts/bootstrap.txt`
-- [ ] 抽象论点拆解：`Intent(decompose)` → `sub-claim`
-- [ ] 来源回链：`citation` / `source` 节点与 `Evidence{quote,sourceTitle,url,locator}` 登记
+- [x] 抽象论点拆解：`Intent(decompose)` → `sub-claim` — `engine.py`（`_explore` 派发分支）+ `prompts/explore.txt`
+- [x] 来源回链：`citation` / `source` 节点与 `Evidence{quote,sourceTitle,url,locator}` 登记 — `engine.py`（explore 分支调 `search`，结果经 `extra` 注入 worker）+ `prompts/explore.txt`
 - [ ] 多 Worker asyncio 任务并发认领 Intent + 心跳/超时自动释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按确定性顺序提交，保证 Board 确定
 - [ ] Stigmergy：新 Fact 触发新一轮 Reason（去重）
 - [x] Reason 产出 Intent 的去重：`Validate` pass（复用 `model`，纯 LLM 语义判重、无 L1 预筛，比对含 `done`/`dropped` 及批内候选）→ 重复项写 `status=dropped` 留痕（`Intent.duplicateOf`）— `engine.py` + `prompts/validate.txt`

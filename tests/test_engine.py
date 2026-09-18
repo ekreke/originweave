@@ -45,6 +45,18 @@ class _FakeSearch:
         return ""
 
 
+class _RecordingSearch:
+    name = "recording"
+
+    def __init__(self, result: str = "") -> None:
+        self.result = result
+        self.queries: list[str] = []
+
+    async def search(self, query: str, *, num_results: int = 8) -> str:
+        self.queries.append(query)
+        return self.result
+
+
 class _FakePrompt:
     name = "fake"
 
@@ -88,6 +100,38 @@ def _reason(*intents: dict[str, object]) -> str:
 
 def _validate(*keep: int, drop: list[dict[str, object]] | None = None) -> str:
     return json.dumps({"keep": list(keep), "drop": drop or []})
+
+
+def _explore_reply(*facts: dict[str, object]) -> str:
+    return json.dumps({"facts": list(facts), "intents": [], "complete": None})
+
+
+def _sub_claim(label: str) -> dict[str, object]:
+    return {
+        "label": label,
+        "kind": "fact",
+        "role": "sub-claim",
+        "status": "open",
+        "confidence": 0.5,
+    }
+
+
+def _source_fact(label: str) -> dict[str, object]:
+    return {
+        "label": label,
+        "kind": "source",
+        "role": "none",
+        "status": "verified",
+        "confidence": 0.9,
+        "evidence": [
+            {
+                "quote": "developers completed tasks 55% faster",
+                "sourceTitle": "GitHub Copilot lab study",
+                "url": "https://example.com/lab-study",
+                "locator": "section 3.1",
+            }
+        ],
+    }
 
 
 async def test_bootstrap_produces_a_main_claim(tmp_path: Path) -> None:
@@ -150,15 +194,20 @@ async def test_reason_writes_candidate_intents(tmp_path: Path) -> None:
         _bootstrap("A claim"),
         _reason({"type": "decompose", "from": "f1", "question": "Split into sub-claims."}),
         _validate(0),
+        _explore_reply(_sub_claim("Sub claim one")),
     ).run(origin=_origin(), goal=_goal())
 
     assert [intent.id for intent in board.intents] == ["i1", "i2"]
     proposed = board.intents[1]
     assert proposed.type == "decompose"
     assert proposed.from_ == "f1"
-    assert proposed.status == "open"
+    # The dispatch round executed the kept Intent right after Reason.
+    assert proposed.status == "done"
+    assert proposed.producedFacts == ["f2"]
     relations = {(edge.source, edge.target, edge.relation) for edge in board.edges}
     assert ("f1", "i2", "spawns") in relations
+    assert ("i2", "f2", "resolves") in relations
+    assert ("f1", "f2", "decomposes") in relations
 
 
 async def test_reason_rejects_facts(tmp_path: Path) -> None:
@@ -166,18 +215,28 @@ async def test_reason_rejects_facts(tmp_path: Path) -> None:
     bad_reason = json.dumps(
         {"facts": [{"label": "x", "kind": "fact", "role": "none"}], "intents": [], "complete": None}
     )
-    with pytest.raises(EngineError):
-        await _engine(store, _bootstrap("A claim"), bad_reason).run(origin=_origin(), goal=_goal())
+    board = await _engine(store, _bootstrap("A claim"), bad_reason).run(
+        origin=_origin(), goal=_goal()
+    )
+
+    assert board.status == "failed"
+    events = store.read_events()
+    assert events[-1].type == "FAILED"
+    # The unusable reply stays auditable via its session snapshot.
+    assert events[-2].type == "SESSION"
+    assert events[-2].payload["task"] == "Reason"
 
 
 async def test_reason_rejects_unknown_from(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
-    with pytest.raises(EngineError):
-        await _engine(
-            store,
-            _bootstrap("A claim"),
-            _reason({"type": "decompose", "from": "f9", "question": "?"}),
-        ).run(origin=_origin(), goal=_goal())
+    board = await _engine(
+        store,
+        _bootstrap("A claim"),
+        _reason({"type": "decompose", "from": "f9", "question": "?"}),
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    assert store.read_events()[-1].type == "FAILED"
 
 
 async def test_reason_assigns_sequential_ids(tmp_path: Path) -> None:
@@ -190,21 +249,28 @@ async def test_reason_assigns_sequential_ids(tmp_path: Path) -> None:
             {"type": "explore", "from": "f2", "question": "Source f2."},
         ),
         _validate(0, 1),
+        _explore_reply(_sub_claim("Sub of f1")),
+        _explore_reply(_source_fact("Primary source for f2")),
     ).run(origin=_origin(), goal=_goal())
 
     assert [intent.id for intent in board.intents] == ["i1", "i2", "i3"]
     assert [intent.type for intent in board.intents[1:]] == ["decompose", "explore"]
-    assert all(intent.status == "open" for intent in board.intents[1:])
+    # The dispatch round executed both intents in id order.
+    assert [intent.status for intent in board.intents[1:]] == ["done", "done"]
+    assert board.intents[1].producedFacts == ["f3"]
+    assert board.intents[2].producedFacts == ["s1"]
 
 
 async def test_reason_rejects_goal_as_from(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
-    with pytest.raises(EngineError):
-        await _engine(
-            store,
-            _bootstrap("A claim"),
-            _reason({"type": "explore", "from": "goal", "question": "?"}),
-        ).run(origin=_origin(), goal=_goal())
+    board = await _engine(
+        store,
+        _bootstrap("A claim"),
+        _reason({"type": "explore", "from": "goal", "question": "?"}),
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    assert store.read_events()[-1].type == "FAILED"
 
 
 async def test_reason_bad_from_writes_nothing(tmp_path: Path) -> None:
@@ -213,8 +279,9 @@ async def test_reason_bad_from_writes_nothing(tmp_path: Path) -> None:
         {"type": "decompose", "from": "f1", "question": "ok"},
         {"type": "explore", "from": "f9", "question": "bad"},
     )
-    with pytest.raises(EngineError):
-        await _engine(store, _bootstrap("A claim"), reason).run(origin=_origin(), goal=_goal())
+    board = await _engine(store, _bootstrap("A claim"), reason).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
     # The good candidate must not be half-written when a later one is rejected.
     assert sum(event.type == "INTENT" for event in store.read_events()) == 1
 
@@ -247,6 +314,7 @@ async def test_validate_drops_duplicate_candidates(tmp_path: Path) -> None:
             {"type": "decompose", "from": "f1", "question": "Split f1."},
         ),
         _validate(1, drop=[{"index": 0, "duplicateOf": "i1", "reason": "same as i1"}]),
+        _explore_reply(_sub_claim("Sub claim")),
     ).run(origin=_origin(), goal=_goal())
 
     assert [intent.id for intent in board.intents] == ["i1", "i2", "i3"]
@@ -254,7 +322,7 @@ async def test_validate_drops_duplicate_candidates(tmp_path: Path) -> None:
     assert dropped.status == "dropped"
     assert dropped.duplicateOf == "i1"
     kept = board.intents[2]
-    assert kept.status == "open"
+    assert kept.status == "done"  # executed by the dispatch round
     assert kept.type == "decompose"
     assert kept.duplicateOf is None
 
@@ -384,14 +452,17 @@ async def test_validate_rebuilds_candidate_lifecycle_fields(tmp_path: Path) -> N
             "complete": None,
         }
     )
-    board = await _engine(store, _bootstrap("A claim"), reason, _validate(0)).run(
+    board = await _engine(store, _bootstrap("A claim"), reason, _validate(0), _explore_reply()).run(
         origin=_origin(), goal=_goal()
     )
 
     candidate = board.intents[1]
-    assert candidate.status == "open"
+    # The engine rebuilt the candidate's lifecycle fields (the reply claimed
+    # done/evil) and the dispatch round then claimed and closed it itself.
+    assert candidate.status == "done"
     assert candidate.duplicateOf is None
-    assert candidate.claimedBy is None
+    assert candidate.claimedBy == "worker-1"
+    assert candidate.producedFacts == []
 
 
 async def test_validate_provider_error_fails_run(tmp_path: Path) -> None:
@@ -445,6 +516,354 @@ async def test_missing_validate_prompt_fails_run(tmp_path: Path) -> None:
     assert store.read_events()[-1].type == "FAILED"
 
 
+async def test_explore_runs_search_and_registers_evidence(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    search = _RecordingSearch(result="Study: 55% faster task completion.")
+    model = _FakeModel(
+        _bootstrap("Copilot cut task time by 55%."),
+        _reason({"type": "explore", "from": "f1", "question": "Find the primary source for f1."}),
+        _validate(0),
+        _explore_reply(_source_fact("GitHub lab study reports a 55% speedup")),
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model), search=search, prompt=_FakePrompt(), store=store
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    # The engine queried the search capability with the intent's question.
+    assert search.queries == ["Find the primary source for f1."]
+
+    source = board.facts[1]
+    assert source.id == "s1"
+    assert source.kind == "source"
+    assert [evidence.id for evidence in source.evidence] == ["ev1"]
+    assert source.evidence[0].quote == "developers completed tasks 55% faster"
+    assert source.evidence[0].url == "https://example.com/lab-study"
+    assert source.evidence[0].sourceTitle == "GitHub Copilot lab study"
+
+    intent = board.intents[1]
+    assert intent.status == "done"
+    assert intent.producedFacts == ["s1"]
+    relations = {(edge.source, edge.target, edge.relation) for edge in board.edges}
+    assert ("i2", "s1", "resolves") in relations
+
+
+async def test_explore_passes_intent_and_search_to_worker(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    search = _RecordingSearch(result="S1: the lab study.")
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason({"type": "explore", "from": "f1", "question": "Source f1."}),
+        _validate(0),
+        _explore_reply(_source_fact("Primary source")),
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model), search=search, prompt=_FakePrompt(), store=store
+    )
+    await engine.run(origin=_origin(), goal=_goal())
+
+    explore_call = model.calls[3]
+    assert explore_call[0].content == "EXPLORE"  # _FakePrompt uppercases the name
+    payload = json.loads(explore_call[1].content)
+    assert payload["intent"] == {
+        "id": "i2",
+        "type": "explore",
+        "from": "f1",
+        "question": "Source f1.",
+    }
+    assert payload["search"] == "S1: the lab study."
+
+
+async def test_explore_decompose_produces_sub_claims(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    search = _RecordingSearch()
+    model = _FakeModel(
+        _bootstrap("Copilot cut task time by 55%."),
+        _reason({"type": "decompose", "from": "f1", "question": "Split into sub-claims."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Experienced users sped up"), _sub_claim("Novices did not")),
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model), search=search, prompt=_FakePrompt(), store=store
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    # A decompose pass never searches.
+    assert search.queries == []
+    subs = [fact for fact in board.facts if fact.role == "sub-claim"]
+    assert [fact.id for fact in subs] == ["f2", "f3"]
+    intent = board.intents[1]
+    assert intent.status == "done"
+    assert intent.producedFacts == ["f2", "f3"]
+    relations = {(edge.source, edge.target, edge.relation) for edge in board.edges}
+    assert ("i2", "f2", "resolves") in relations
+    assert ("i2", "f3", "resolves") in relations
+    assert ("f1", "f2", "decomposes") in relations
+    assert ("f1", "f3", "decomposes") in relations
+
+
+async def test_explore_leaves_verify_intents_open(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason({"type": "verify", "from": "f1", "question": "Compare f1 with its source."}),
+        _validate(0),
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    # "verify" needs the compare capability (M2): it stays open, unclaimed.
+    assert len(model.calls) == 3
+    verify = board.intents[1]
+    assert verify.type == "verify"
+    assert verify.status == "open"
+    assert verify.claimedBy is None
+    assert board.status == "running"
+
+
+async def test_explore_search_failure_fails_run(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+
+    class _BoomSearch:
+        name = "boom"
+
+        async def search(self, query: str, *, num_results: int = 8) -> str:
+            raise ProviderError("search exploded")
+
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason({"type": "explore", "from": "f1", "question": "Source f1."}),
+        _validate(0),
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model), search=_BoomSearch(), prompt=_FakePrompt(), store=store
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    events = store.read_events()
+    assert events[-1].type == "FAILED"
+    assert events[-1].payload["reason"] == "search exploded"
+    # The claim was already written, so the audit shows "claimed, then died".
+    assert events[-2].type == "EXECUTE"
+
+
+async def test_decompose_rejects_citation_facts(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_source_fact("A source, not a sub-claim")),
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    events = store.read_events()
+    assert events[-1].type == "FAILED"
+    assert "decompose intent" in events[-1].payload["reason"]
+    assert events[-2].type == "SESSION"
+    assert events[-2].payload["task"] == "Explore"
+
+
+async def test_dispatch_stops_after_a_failed_intent(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    bad = json.dumps(
+        {
+            "facts": [{"label": "x", "kind": "citation", "role": "none", "status": "open"}],
+            "intents": [],
+            "complete": None,
+        }
+    )
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason(
+            {"type": "decompose", "from": "f1", "question": "Split f1."},
+            {"type": "decompose", "from": "f1", "question": "Split f1 again."},
+        ),
+        _validate(0, 1),
+        bad,
+        _explore_reply(_sub_claim("Never dispatched")),
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    # Bootstrap, Reason, Validate, the first Explore; the second is never dispatched.
+    assert len(model.calls) == 4
+    second = board.intents[2]
+    assert second.status == "open"
+    assert second.claimedBy is None
+    assert second.producedFacts == []
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        # Reason's job leaked into an Explore reply.
+        _reason({"type": "decompose", "from": "f1", "question": "Reason's job."}),
+        # Completion is Reason's job, too.
+        json.dumps({"facts": [], "intents": [], "complete": {"verdict": "done"}}),
+        # An explore Intent may not produce claim facts.
+        json.dumps(
+            {
+                "facts": [{"label": "x", "kind": "fact", "role": "main-claim", "status": "open"}],
+                "intents": [],
+                "complete": None,
+            }
+        ),
+        # A citation must not claim a role (it would pollute the main-claim set).
+        json.dumps(
+            {
+                "facts": [
+                    {
+                        "label": "x",
+                        "kind": "citation",
+                        "role": "main-claim",
+                        "status": "open",
+                        "evidence": [{"quote": "q", "sourceTitle": "t", "url": "u"}],
+                    }
+                ],
+                "intents": [],
+                "complete": None,
+            }
+        ),
+        # citation/source facts must carry at least one evidence entry.
+        json.dumps(
+            {
+                "facts": [{"label": "x", "kind": "source", "role": "none", "status": "verified"}],
+                "intents": [],
+                "complete": None,
+            }
+        ),
+        # Malformed JSON.
+        "not json",
+    ],
+)
+async def test_explore_bad_reply_fails_run(tmp_path: Path, reply: str) -> None:
+    store = RunStore(tmp_path / "run_001")
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason({"type": "explore", "from": "f1", "question": "Source f1."}),
+        _validate(0),
+        reply,
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    events = store.read_events()
+    assert events[-1].type == "FAILED"
+    # The unusable reply is still recorded for the audit trail.
+    assert events[-2].type == "SESSION"
+    assert events[-2].payload["task"] == "Explore"
+
+
+async def test_explore_records_session_and_event_order(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason({"type": "explore", "from": "f1", "question": "Source f1."}),
+        _validate(0),
+        _explore_reply(_source_fact("Primary source")),
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
+    )
+    await engine.run(origin=_origin(), goal=_goal())
+
+    events = store.read_events()
+    assert [event.type for event in events[-3:]] == ["EXECUTE", "CONCLUDE", "SESSION"]
+    session = events[-1]
+    assert session.payload["task"] == "Explore"
+    assert session.payload["intentId"] == "i2"
+    assert session.payload["ref"] == "sessions/sess_004.json"
+    snapshot = json.loads((store.root / "sessions" / "sess_004.json").read_text(encoding="utf-8"))
+    assert snapshot["intentId"] == "i2"
+    assert json.loads(snapshot["input"]["user"])["intent"]["id"] == "i2"
+
+
+async def test_explore_pipeline_is_deterministic(tmp_path: Path) -> None:
+    replies = (
+        _bootstrap("A claim"),
+        _reason(
+            {"type": "decompose", "from": "f1", "question": "Split f1."},
+            {"type": "explore", "from": "f1", "question": "Source f1."},
+        ),
+        _validate(0, 1),
+        _explore_reply(_sub_claim("Sub one")),
+        _explore_reply(_source_fact("Primary source")),
+    )
+    first = await _engine(RunStore(tmp_path / "a"), *replies).run(origin=_origin(), goal=_goal())
+    second = await _engine(RunStore(tmp_path / "b"), *replies).run(origin=_origin(), goal=_goal())
+    # Across two runs only volatile timestamps differ; the structure is identical.
+    assert [(f.id, f.kind, f.role) for f in first.facts] == [
+        (f.id, f.kind, f.role) for f in second.facts
+    ]
+    assert [(i.id, i.type, i.status, i.producedFacts) for i in first.intents] == [
+        (i.id, i.type, i.status, i.producedFacts) for i in second.intents
+    ]
+    assert [(e.source, e.target, e.relation) for e in first.edges] == [
+        (e.source, e.target, e.relation) for e in second.edges
+    ]
+
+
+async def test_bootstrap_bad_reply_fails_run(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(store, "not json").run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    events = store.read_events()
+    assert events[-1].type == "FAILED"
+    # The unusable reply stays auditable via its session snapshot; the Bootstrap
+    # intent was never written, so the session carries no intentId.
+    assert events[-2].type == "SESSION"
+    assert events[-2].payload["task"] == "Bootstrap"
+    assert "intentId" not in events[-2].payload
+
+
+@pytest.mark.parametrize("missing", ["bootstrap", "reason", "explore"])
+async def test_missing_prompt_fails_run(tmp_path: Path, missing: str) -> None:
+    store = RunStore(tmp_path / "run_001")
+
+    class _MissingPrompt:
+        name = "fake"
+
+        async def get(self, name: str) -> PromptTemplate:
+            if name == missing:
+                raise FileNotFoundError(f"no {name} template")
+            return PromptTemplate(name=name, text=name.upper())
+
+    if missing == "explore":
+        # The explore template is only fetched once an Intent is dispatched.
+        replies: tuple[str, ...] = (
+            _bootstrap("A claim"),
+            _reason({"type": "explore", "from": "f1", "question": "Source f1."}),
+            _validate(0),
+        )
+    else:
+        replies = (_bootstrap("A claim"), NO_REASON)
+    engine = Engine(
+        worker=LocalWorker(model=_FakeModel(*replies)),
+        search=_FakeSearch(),
+        prompt=_MissingPrompt(),
+        store=store,
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    assert store.read_events()[-1].type == "FAILED"
+
+
 async def test_reason_complete_writes_complete(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     reason = json.dumps({"facts": [], "intents": [], "complete": {"verdict": "部分偏差"}})
@@ -469,8 +888,10 @@ async def test_reason_rejects_intents_and_complete_together(tmp_path: Path) -> N
             "complete": {"verdict": "done"},
         }
     )
-    with pytest.raises(EngineError):
-        await _engine(store, _bootstrap("A claim"), reason).run(origin=_origin(), goal=_goal())
+    board = await _engine(store, _bootstrap("A claim"), reason).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    assert store.read_events()[-1].type == "FAILED"
 
 
 async def test_board_is_deterministic(tmp_path: Path) -> None:

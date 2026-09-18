@@ -16,7 +16,7 @@ originweave 的版本与里程碑索引。**当前唯一活跃版本：`1.0`**�
 | M0b | 配置与 capability 层骨架：`init` 生成默认配置（含 `auto`）、provider 注册表（离线/cache/录制已于 Phase R 撤销） | 已完成 | M0a |
 | M0c | 黑板事件日志与事件溯源：run 目录布局、黑板协议事件、`replay` 只读重放 | 已完成 | M0b |
 | M0d | 构建 `copilot_productivity` 样例：资料 A、来源快照、事件日志 | 已完成 | M0c |
-| M1 | 黑板与 Agent 循环（库层）：OODA 三任务、真实 `model`(OpenAI 兼容) + `search`(exa/parallel)、抽象论点拆解与来源回链、真线程多 Worker + Stigmergy、Gate A | 未开始 | M0d |
+| M1 | 黑板与 Agent 循环（库层）：OODA 三任务、真实 `model`(OpenAI 兼容) + `search`(exa/parallel)、抽象论点拆解与来源回链、真线程多 Worker + Stigmergy、Gate A | 进行中 | M0d |
 | M1b | 前端脚手架：React + Vite + TS + Connect、Swiss/Blueprint 布局与页签空态（无 mock；可与 M1 并行） | 已完成 | M0d |
 | M1c-1 | server 骨架：Connect Python server（Starlette + uvicorn）、`Run`/`Project` 持久化、接线 M1 引擎、`originweave ui` | 未开始 | M1 |
 | M1c-2 | 前端接线与 UI：React Query 数据层、DAG/React Flow 渲染、HITL Gate UI、端到端 | 未开始 | M1c-1 |

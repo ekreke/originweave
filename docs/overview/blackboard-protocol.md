@@ -207,6 +207,18 @@ Worker 的结构化输出（**冻结**）：Worker 只返回**一个 JSON 对象
 - **无结构预筛**：全部候选都交给 Validate 做语义判重（每轮 Reason 因此多一次模型调用）；
   Reason 未产出候选时跳过 Validate（不调模型、不发 `VALIDATE` 事件）。
 
+`Explore` 指令的检索上下文由**引擎**准备：Dispatcher 先写 `EXECUTE`（认领），再由引擎调用
+`search` capability（query = Intent 的 `question`），把检索结果与该 Intent（`{id, type, from,
+question}`）一起经 `extra` 注入 worker 的 user 消息——**provider 选择留在引擎层**（红线 4），
+worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` 落会话快照。产出的 Fact 必须
+匹配 Intent 类型：`explore` → `citation`/`source`（`role=none` 且**至少一条** `Evidence`），
+`decompose` → `fact`/`sub-claim`。回复夹带 `intents` / `complete`、kind/role 不符或证据缺失
+均视为失败。`verify` 型 Intent 依赖 `compare`（M2），派发时保持 `open`。
+
+各任务（Bootstrap / Reason / Explore / Validate）的**非法回复与模板缺失一律写 `FAILED` 终态
+事件**（原始回复经会话快照留痕，供审计），不向调用方抛异常——失败的因果链完整落在事件日志里，
+`replay` 可复现到死亡点。
+
 ### 4.3 一道题的完整生命周期
 ```text
 0 init      : 黑板仅 origin(资料 A) 与 goal(停止条件) 两个特殊 Fact
@@ -226,11 +238,12 @@ Worker 的结构化输出（**冻结**）：Worker 只返回**一个 JSON 对象
 （判关系）两类 Intent，产出写入 `entities` / `relations` 而非 `facts`；事件溯源、
 心跳释放、Stigmergy 与 Gate 机制不变。
 
-### 4.4 走查示例：一次 Bootstrap + 一次 Reason（M1 起实现）
+### 4.4 走查示例：一次 Bootstrap + Reason + 单轮派发（M1 I3）
 
 用样例 `examples/copilot_productivity`（资料 A 是宣传文，含多个论点）走一遍。调用方构造
 `origin`（资料 A，`kind=origin`）与 `goal`（停止条件，`kind=goal`），调 `Engine.run(origin, goal)`：
-先跑一次 Bootstrap，再跑一次 Reason。
+先跑一次 Bootstrap，再跑一次 Reason，然后派发 Reason 产出的开放 Intent（`explore` / `decompose`；
+`verify` 待 M2）。多轮 Stigmergy 收敛（新 Fact 再触发 Reason）归 I6。
 
 **Bootstrap** Worker 返回（严格 JSON，无 id、无边）核心抽象论点：
 
@@ -257,7 +270,9 @@ Worker 的结构化输出（**冻结**）：Worker 只返回**一个 JSON 对象
 引擎把 Bootstrap 记为一条 `explore` Intent（Bootstrap 在协议里没有自己的 Intent，这样建模
 才能像其他任务一样被审计与派发），把 Reason 记为一次 `REASON` 任务（**只有真正的 Reason
 pass 才写 `REASON start/end`，Bootstrap 不被包裹**），并按 kind 前缀发放确定性 id
-（`fact → f1/f2/f3`，`intent → i1/i2`）。`events.jsonl`：
+（`fact → f1/f2/f3`，`intent → i1/i2`、子断言 `fact → f4/f5`）。派发时 `decompose` 型 Intent
+不检索，直接由 Explore 拆出子断言。`events.jsonl`（各次 Worker 调用的 `SESSION` / `WORKER_STEP`
+索引事件从略）：
 
 | id | type | payload |
 |---|---|---|
@@ -268,23 +283,30 @@ pass 才写 `REASON start/end`，Bootstrap 不被包裹**），并按 kind 前�
 | `e0005` | `REASON` | `phase=start` |
 | `e0006` | `INTENT` | `intent=i2`（`type=decompose`, `from=f1`, `status=open`） |
 | `e0007` | `REASON` | `phase=end` |
+| `e0008` | `EXECUTE` | `intentId=i2`, `worker=worker-1`, `model=...` |
+| `e0009` | `CONCLUDE` | `intentId=i2`, `facts=[f4,f5]`（`role=sub-claim`） |
 
 `reduce(events)` 折出的 `Board`（结构性边由 reducer 派生，§2.4）：
 
 ```text
 status   running
 facts    f1/f2/f3（均 role=main-claim）
+         f4/f5（role=sub-claim，由 i2 拆解 f1 得到）
 intents  i1（status=done, producedFacts=[f1,f2,f3], claimedBy=worker-1）
-         i2（status=open, type=decompose, from=f1）   ← 待 Explore（I3）认领
+         i2（status=done, type=decompose, producedFacts=[f4,f5], claimedBy=worker-1）
 edges    origin → i1 (spawns)
          i1 → f1 / f2 / f3 (resolves)
          f1 → i2 (spawns)
+         i2 → f4 / f5 (resolves)
+         f1 → f4 / f5 (decomposes)
 ```
 
 要点：**Worker 不写协议、不起 id**；**引擎是唯一写入者**且只负责「取指令 → 读图 → 调能力 →
 解析 → 发 id → 写事件」这条流水线；Reason 只能产 `open` 候选 Intent（生命周期字段由引擎重建），
-且 `complete` 与 `intents` 互斥；**所有"事实"都在 append-only 事件日志里**，Board 永远由
-`reduce` 折出，故可重放。
+且 `complete` 与 `intents` 互斥；派发为**单轮**（在 Reason 留下的快照上取 `open` 且
+`type∈{explore,decompose}` 的 Intent，按 id 序执行，`verify` 保持 `open`），任一 pass 写 `FAILED`
+即确定性中止本轮，新 Fact 引发的新一轮 Reason 归 I6；**所有"事实"都在 append-only 事件日志里**，
+Board 永远由 `reduce` 折出，故可重放。
 
 ## 5. 事件协议（冻结）
 

@@ -17,13 +17,13 @@
     P5 前端 Settings + 会话视图；P6 容器化（并入 M3）。
   - 依赖：P1/P2 不依赖 server；P3–P5 依赖 **M1c-1**。
 - **M1 迭代切片**（引擎为库层、进程内 Dispatcher；`model`/`search` provider 已就绪）：
-  已落地：**I1** Bootstrap、**I2a** `FAILED`/`STOPPED`、**I2** Reason、**I2b** Validate 去重
-  （`engine.py`、`prompts/{bootstrap,reason,validate}.txt`）。
+  已落地：**I1** Bootstrap、**I2a** `FAILED`/`STOPPED`、**I2** Reason、**I2b** Validate 去重、
+  **I3** Explore + search（来源回链 `citation`/`source` + `Evidence`；`decompose`/`explore`
+  派发分支，`verify` 留待 M2；单轮派发，`engine.py`、`prompts/explore.txt`）。
   待做：
-  1. **I3 · Explore + search**：来源回链 `citation`/`source` + `Evidence`。
-  2. **I4 · 并发**：asyncio 多 Worker + `HEARTBEAT`/`RELEASE` + Dispatcher 确定性提交（受 `[worker].max_concurrency` 约束）。
-  3. **I5 · HITL**：Gate A 挂起/恢复 + `auto` 跳过。
-  4. **I6 · 收敛**：Stigmergy 多轮收敛 → `COMPLETE` + 确定性 Board 单测。
+  1. **I4 · 并发**：asyncio 多 Worker + `HEARTBEAT`/`RELEASE` + Dispatcher 确定性提交（受 `[worker].max_concurrency` 约束）。
+  2. **I5 · HITL**：Gate A 挂起/恢复 + `auto` 跳过。
+  3. **I6 · 收敛**：Stigmergy 多轮收敛 → `COMPLETE` + 确定性 Board 单测。
 - 随后：M1c-1（server）→ M1c-2（前端接线与 UI）。
 
 ## 待确认决策
@@ -118,6 +118,15 @@
   `[worker].tools` 允许重复项。
 
 ## 已完成（近期）
+
+- **M1 I3 · Explore + search（来源回链）**：新增任务指令 `Explore`（`prompts/explore.txt`）；
+  `engine.py` 增 `_dispatch`/`_explore`——`run()` 变为 Bootstrap → Reason → 单轮派发（open 且
+  `type∈{explore,decompose}` 的 Intent 按 id 序执行；`verify` 留待 M2）。explore 型由**引擎**调
+  `search`（query = intent question），结果与 intent 一起经 `extra` 注入 worker（红线 4）；产出
+  `citation`/`source` Fact（引擎强制 `role=none` 且**至少一条** `Evidence`），decompose 型产出
+  `sub-claim`；`EXECUTE` 先于能力调用。**错误路径统一**：任何 pass 的非法回复（含 Reason/Bootstrap，
+  原为向调用方 raise）与模板缺失均 → 会话留痕 + `FAILED`，不抛异常。多轮 Stigmergy 收敛归 I6，
+  多 Worker 并发归 I4。`make lint` + `make test`（186 passed, 1 skipped）全绿，`make replay` 不变。
 
 - **M6 P0/P1 · Worker 抽象与会话**：契约（`[worker]`、`sessions/`、`SESSION`/`WORKER_STEP`、
   `Session` 领域模型、Settings/Search proto 草案）落 `overview/`；代码新增

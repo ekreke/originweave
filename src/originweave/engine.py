@@ -41,6 +41,14 @@ _PREFIX: dict[str, str] = {
     "deviation": "d",
 }
 
+# Intent types the dispatcher can execute in this slice. A "verify" Intent needs the
+# compare capability (M2), so it stays open until then instead of failing the run.
+DISPATCHABLE_TYPES: tuple[str, ...] = ("explore", "decompose")
+
+# What an "explore" Intent may produce (blackboard-protocol.md section 2.2): it chases
+# citations/sources. "decompose" yields sub-claims, checked separately via Fact.role.
+_EXPLORE_FACT_KINDS: frozenset[str] = frozenset({"citation", "source"})
+
 
 class EngineError(ValueError):
     """Raised when a worker reply or engine input is malformed."""
@@ -51,7 +59,7 @@ class WorkerResult:
     """Parsed worker reply; ids are placeholders until the engine assigns them.
 
     Bootstrap writes ``facts``; Reason writes ``intents`` (and may set ``complete``);
-    a later Explore writes the facts behind one Intent.
+    Explore writes the facts behind one Intent.
     """
 
     facts: list[Fact] = field(default_factory=list)
@@ -228,7 +236,7 @@ class Engine:
     - Observe    -- fold the event log into the current board (``reduce``).
     - Orient     -- the worker reads that board; the directive frames the situation.
     - Decide     -- the directive picks the move: Bootstrap writes claims, Reason
-                    (later) writes intents, Explore (later) claims one.
+                    (later) writes intents, Explore claims and executes one.
     - Act        -- call the worker (``Worker.run``) in a fresh isolated session.
     - Write back -- append ``INTENT``/``EXECUTE``/``CONCLUDE`` events; the reducer then
                     derives the structural edges.
@@ -247,7 +255,8 @@ class Engine:
         store: RunStore,
     ) -> None:
         self._worker = worker
-        # search is not consumed until the Explore directive lands; wired now for parity.
+        # The engine picks the search provider (agent-design.md red line 4): Explore
+        # passes call it and hand the results to the worker as context.
         self._search = search
         self._prompt = prompt
         self._store = store
@@ -327,8 +336,39 @@ class Engine:
                 payload["intentId"] = intent_id
             self._store.append_event("WORKER_STEP", payload)
 
+    def _fail(
+        self,
+        exc: Exception,
+        *,
+        reply: WorkerReply,
+        session_id: str,
+        task: TaskKind,
+        intent_id: str | None,
+        started: str,
+        ended: str,
+    ) -> None:
+        """Record the unusable reply as a session, then write the terminal ``FAILED``.
+
+        A bad reply / template failure ends the run on the board rather than raising,
+        so the failure stays replayable; the raw reply lives in the session snapshot.
+        """
+        self._record_session(
+            reply,
+            session_id=session_id,
+            task=task,
+            intent_id=intent_id,
+            started=started,
+            ended=ended,
+        )
+        self._store.append_event("FAILED", {"reason": str(exc)})
+
     async def run(self, *, origin: Fact, goal: Fact) -> Board:
-        """Start a run: ``PROJECT``, one Bootstrap pass, one Reason pass, then reduce."""
+        """Start a run: ``PROJECT``, Bootstrap, one Reason pass, then dispatch.
+
+        Dispatch executes one round of every open Intent the engine can run (id order,
+        one worker at a time until M1 I4 adds concurrency); a multi-round Stigmergy
+        convergence loop is a later slice.
+        """
         self._fact_seq = {}
         self._intent_seq = 0
         self._session_seq = 0
@@ -339,11 +379,21 @@ class Engine:
             # Bootstrap failed / completed: never run Reason on a dead board.
             return board
         await self._reason()
+        board = reduce(self._store.read_events())
+        if board.status != "running":
+            # Reason failed / judged the goal met: nothing left to dispatch.
+            return board
+        await self._dispatch()
         # The board is always folded from the event log, never mutated in place.
         return reduce(self._store.read_events())
 
     async def _bootstrap(self) -> None:
-        template = await self._prompt.get("bootstrap")
+        try:
+            template = await self._prompt.get("bootstrap")
+        except (CapabilityError, FileNotFoundError) as exc:
+            # A missing template is a provider failure: terminal, on the board.
+            self._store.append_event("FAILED", {"reason": str(exc)})
+            return
         board = reduce(self._store.read_events())  # Observe: the current graph
         try:
             reply, started, ended, session_id = await self._invoke("Bootstrap", template, board)
@@ -351,7 +401,20 @@ class Engine:
             # A worker/provider failure still ends the run loudly and terminal.
             self._store.append_event("FAILED", {"reason": str(exc)})
             return
-        result = parse_result(reply.text)
+        try:
+            result = parse_result(reply.text)
+        except EngineError as exc:
+            # An unusable reply ends the run; keep the session for the audit.
+            self._fail(
+                exc,
+                reply=reply,
+                session_id=session_id,
+                task="Bootstrap",
+                intent_id=None,
+                started=started,
+                ended=ended,
+            )
+            return
 
         # Act / write back: record the task as an Intent, claim it, then conclude.
         intent = Intent(
@@ -390,7 +453,12 @@ class Engine:
         the "considered but not taken" branch stays auditable. Multi-round Stigmergy
         convergence is a later concern; this is a single pass.
         """
-        template = await self._prompt.get("reason")
+        try:
+            template = await self._prompt.get("reason")
+        except (CapabilityError, FileNotFoundError) as exc:
+            # A missing template is a provider failure: terminal, on the board.
+            self._store.append_event("FAILED", {"reason": str(exc)})
+            return
         board = reduce(self._store.read_events())  # Observe: the current graph
         # The findings already on the board are what triggered this Reason pass.
         triggers = [fact.id for fact in board.facts]
@@ -403,12 +471,31 @@ class Engine:
             # A worker/provider failure still ends the run loudly and terminal.
             self._store.append_event("FAILED", {"reason": str(exc)})
             return
-        result = parse_result(reply.text)
-        if result.facts:
-            raise EngineError("Reason must not produce facts; that is Explore's job")
-        if result.complete is not None:
-            if result.intents:
+        try:
+            result = parse_result(reply.text)
+            if result.facts:
+                raise EngineError("Reason must not produce facts; that is Explore's job")
+            if result.complete is not None and result.intents:
                 raise EngineError("Reason reply must not carry both intents and complete")
+            # An Intent may only hang off a finding or the origin anchor.
+            known = {"origin"} | {fact.id for fact in board.facts}
+            for candidate in result.intents:
+                if candidate.from_ not in known:
+                    raise EngineError(f"intent.from {candidate.from_!r} is not a known fact id")
+        except EngineError as exc:
+            # An unusable reply ends the run; keep the session for the audit. The reply
+            # is written as FAILED rather than raised, so the board records the death.
+            self._fail(
+                exc,
+                reply=reply,
+                session_id=session_id,
+                task="Reason",
+                intent_id=None,
+                started=started,
+                ended=ended,
+            )
+            return
+        if result.complete is not None:
             self._store.append_event(
                 "REASON", {"phase": "end", "triggerFacts": triggers}, message="Reason: end"
             )
@@ -422,11 +509,6 @@ class Engine:
             )
             self._store.append_event("COMPLETE", {"verdict": result.complete})
             return
-        # An Intent may only hang off a finding or the origin anchor.
-        known = {"origin"} | {fact.id for fact in board.facts}
-        for candidate in result.intents:
-            if candidate.from_ not in known:
-                raise EngineError(f"intent.from {candidate.from_!r} is not a known fact id")
 
         decisions: list[IntentDecision] | None = None
         if result.intents:
@@ -434,15 +516,15 @@ class Engine:
                 decisions = (await self._validate(result.intents, board)).decisions
             except (EngineError, CapabilityError, FileNotFoundError) as exc:
                 # A validator we cannot run or trust ends the run rather than guessing.
-                self._record_session(
-                    reply,
+                self._fail(
+                    exc,
+                    reply=reply,
                     session_id=session_id,
                     task="Reason",
                     intent_id=None,
                     started=started,
                     ended=ended,
                 )
-                self._store.append_event("FAILED", {"reason": str(exc)})
                 return
         # The model's lifecycle fields are untrusted: rebuild each candidate as a fresh
         # open/dropped Intent so only the engine controls status/claim/heartbeat.
@@ -469,6 +551,132 @@ class Engine:
             started=started,
             ended=ended,
         )
+
+    async def _dispatch(self) -> None:
+        """Run one dispatch round: every open Intent the engine can execute, in id order.
+
+        The round works on a snapshot of the board as Reason left it (multi-round
+        Stigmergy convergence is a later slice); ``verify`` Intents stay open until M2
+        wires the compare capability. After each pass the board is re-folded so a
+        terminal event written by one pass stops the round deterministically.
+        """
+        board = reduce(self._store.read_events())
+        pending = [
+            intent
+            for intent in board.intents
+            if intent.status == "open" and intent.type in DISPATCHABLE_TYPES
+        ]
+        for intent in pending:
+            await self._explore(intent)
+            if reduce(self._store.read_events()).status != "running":
+                # A FAILED written by the pass (or any later terminal) ends the round.
+                return
+
+    async def _explore(self, intent: Intent) -> None:
+        """Execute one Intent: claim it, gather search context, conclude its facts.
+
+        The claim (``EXECUTE``) is written before any capability call, so a provider
+        failure is still visible as "claimed, then the run died". For an ``explore``
+        Intent the engine calls ``search`` with the intent's question and passes the
+        results to the worker via ``extra``; the worker itself never touches providers.
+        """
+        try:
+            template = await self._prompt.get("explore")
+        except (CapabilityError, FileNotFoundError) as exc:
+            # A missing template is a provider failure: terminal, on the board. It is
+            # fetched before EXECUTE, so an unclaimable intent is never half-claimed.
+            self._store.append_event("FAILED", {"reason": str(exc)})
+            return
+        board = reduce(self._store.read_events())  # Observe: the current graph
+        self._store.append_event(
+            "EXECUTE",
+            {"intentId": intent.id, "worker": WORKER_ID, "model": self._worker_model},
+        )
+        extra: dict[str, Any] = {
+            "intent": {
+                "id": intent.id,
+                "type": intent.type,
+                "from": intent.from_,
+                "question": intent.question,
+            }
+        }
+        if intent.type == "explore":
+            try:
+                # The query is the intent's auditable question (protocol section 2.2).
+                extra["search"] = await self._search.search(intent.question)
+            except CapabilityError as exc:
+                self._store.append_event("FAILED", {"reason": str(exc)})
+                return
+        try:
+            reply, started, ended, session_id = await self._invoke(
+                "Explore", template, board, extra=extra
+            )
+        except CapabilityError as exc:
+            # A worker/provider failure still ends the run loudly and terminal.
+            self._store.append_event("FAILED", {"reason": str(exc)})
+            return
+        try:
+            result = parse_result(reply.text)
+            if result.intents:
+                raise EngineError("Explore must not produce intents; direction is Reason's job")
+            if result.complete is not None:
+                raise EngineError("Explore must not judge completion; that is Reason's job")
+            self._check_explored_facts(intent, result.facts)
+        except EngineError as exc:
+            # An unusable Explore reply ends the run; keep the session for the audit.
+            self._fail(
+                exc,
+                reply=reply,
+                session_id=session_id,
+                task="Explore",
+                intent_id=intent.id,
+                started=started,
+                ended=ended,
+            )
+            return
+
+        # Worker replies carry no ids; assign deterministic ones before writing back.
+        for fact in result.facts:
+            fact.id = self._next_fact_id(fact.kind)
+        self._store.append_event(
+            "CONCLUDE",
+            {"intentId": intent.id, "facts": [fact.to_dict() for fact in result.facts]},
+        )
+        self._record_session(
+            reply,
+            session_id=session_id,
+            task="Explore",
+            intent_id=intent.id,
+            started=started,
+            ended=ended,
+        )
+
+    def _check_explored_facts(self, intent: Intent, facts: list[Fact]) -> None:
+        """Check a batch of produced facts against what the Intent type may yield."""
+        for fact in facts:
+            if intent.type == "decompose":
+                if fact.kind != "fact" or fact.role != "sub-claim":
+                    raise EngineError(
+                        f"decompose intent {intent.id} must produce fact/sub-claim facts; "
+                        f"got kind={fact.kind!r} role={fact.role!r}"
+                    )
+                continue
+            if fact.kind not in _EXPLORE_FACT_KINDS:
+                raise EngineError(
+                    f"explore intent {intent.id} must produce "
+                    f"{sorted(_EXPLORE_FACT_KINDS)} facts; got kind={fact.kind!r}"
+                )
+            if fact.role != "none":
+                # A claiming role here would pollute the main-claim set Reason reacts to.
+                raise EngineError(
+                    f"explore intent {intent.id} must produce role=none facts; "
+                    f"got {fact.label!r} with role={fact.role!r}"
+                )
+            if not fact.evidence:
+                raise EngineError(
+                    f"explore intent {intent.id}: {fact.kind} fact "
+                    f"{fact.label!r} needs at least one evidence entry"
+                )
 
     async def _validate(self, candidates: list[Intent], board: Board) -> ValidationResult:
         """Ask the Validate worker which candidate Intents are new; duplicates drop."""
@@ -529,6 +737,7 @@ class Engine:
 
 __all__ = [
     "BOOTSTRAP_QUESTION",
+    "DISPATCHABLE_TYPES",
     "Engine",
     "EngineError",
     "IntentDecision",

@@ -20,11 +20,12 @@
 - 已实现：`originweave init`（写 `originweave.toml`，已存在需 `--force`）、
   `originweave capabilities list`、配置加载/校验、capability 注册表，
   事件日志 → 黑板 reducer → `originweave replay <run-dir>`（只读、不触网），
-  以及 **M1 库层 OODA 引擎的 Bootstrap pass**（`src/originweave/engine.py`）。
+  以及 **M1 库层 OODA 引擎的 Bootstrap / Reason / Validate / Explore pass**（I1–I3：
+  `src/originweave/engine.py`、`prompts/{bootstrap,reason,validate,explore}.txt`）。
 - **引擎是库层**：`Engine` 是黑板的**唯一写入者**（事件经 `RunStore.append_event`），
   进程内 Dispatcher 是 M3 容器化前的临时态。**不经 CLI / server 暴露**（server 归 M1c-1）；
-  `Reason` / `Explore` / `Validate` / 并发 / Gate A 为后续 M1 切片（见 `docs/1.0/TODO.md`
-  「下一个任务」）。
+  Explore 派发为**单轮**（`verify` 型 Intent 留待 M2 `compare`），多轮 Stigmergy 收敛（I6）、
+  并发 / Heartbeat / Gate A 为后续 M1 切片（见 `docs/1.0/TODO.md`「下一个任务」）。
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
   `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
 - **stub（打印 “not implemented yet”、返回 0）**：`ui` / `mcp` / `capabilities install-obscura`。

@@ -467,7 +467,12 @@ async def test_session_ids_follow_invocation_order(tmp_path: Path) -> None:
         for event in store.read_events()
         if event.type == "SESSION"
     }
-    assert by_task == {"sess_001": "Bootstrap", "sess_002": "Reason", "sess_003": "Validate"}
+    assert by_task == {
+        "sess_001": "Bootstrap",
+        "sess_002": "Reason",
+        "sess_003": "Validate",
+        "sess_004": "Explore",
+    }
 
 
 async def test_bootstrap_worker_failure_is_terminal(tmp_path: Path) -> None:
