@@ -21,3 +21,4 @@ frontend/src/gen/
 .DS_Store
 .idea/
 .vscode/
+.workbuddy/

@@ -284,7 +284,7 @@ Worker 调用 = 一个**隔离会话**，历史以会话为单位保留**原始�
       worker 的 LLM **复用 `[capability.model]`**（仅 openai 兼容：`model` + `base_url` + `OPENAI_API_KEY` env，
       设置页不落密钥）。同步 `agent-design.md §2.1/§4`、`dashboard.md §4.3`（`CreateRun` 预算 override 回落
       `[worker].budget`）、`product-overview.md`、`AGENTS.md`；改 `tests/test_config.py`、`tests/test_worker.py`
-- [ ] P2 `PiWorker`（`capabilities/pi.py`）：每会话新建并 `dispose`、`prompt_stream → WorkerStep`、
+- [x] P2 `PiWorker`（`capabilities/pi.py`）：每会话新建并 `dispose`、`prompt_stream → WorkerStep`、
       工具白名单 + `cwd` 沙箱、`[capability.model]` → Pi model/auth 映射；**运行时（Node + `pi` 二进制）
       缺失时明确报错并给安装指引（不静默降级）**；**Pi 会话 turns 计入 `max_steps`，单会话受
       `[worker].budget` 约束**（注入 fake 测试，不打真网）

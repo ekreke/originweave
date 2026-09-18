@@ -28,6 +28,7 @@ from .base import (
     SearchProvider,
 )
 from .model import ChatMessage, ModelProvider, OpenAIModel
+from .pi import PiWorker
 from .prompt import LANGFUSE_ENV_VARS, LangfusePrompt, LocalPrompt
 from .search import ENV_VARS, ExaSearch, ParallelSearch, credential_env
 from .worker import LocalWorker, Worker, WorkerReply, WorkerStep
@@ -107,10 +108,7 @@ def build_worker(config: Config) -> Worker:
         )
     if provider == "local":
         return LocalWorker(model=build_model(config))
-    # provider == "pi"
-    raise ProviderUnavailableError(
-        "the pi worker provider is not implemented yet (M6 P2); use provider = 'local'"
-    )
+    return PiWorker(model=config.capability.model, tools=config.worker.tools)
 
 
 __all__ = [
@@ -126,6 +124,7 @@ __all__ = [
     "MissingCredentialError",
     "ModelProvider",
     "OpenAIModel",
+    "PiWorker",
     "PromptProvider",
     "PromptTemplate",
     "ProviderError",

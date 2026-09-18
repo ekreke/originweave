@@ -25,7 +25,7 @@
 | `search` | `exa` / `parallel` | 检索来源、定位一手材料 |
 | `prompt` | `local` / `langfuse` | 获取 prompt 模板（本地文件或 Langfuse） |
 | `model` | `openai`（OpenAI 兼容） | 执行 OODA 任务（Bootstrap/Reason/Explore/Validate），返回结构化结果（Fact/Intent） |
-| `worker` | `local` / `pi` | **Worker 执行体**：`local` = 单轮 `model` 调用；`pi` = 经 `pi-py-sdk` 驱动的 Pi agent 运行时（多轮 + 工具，**归 M6 P2**）。仅产出回复文本与步骤，**不写黑板** |
+| `worker` | `local` / `pi` | **Worker 执行体**：`local` = 单轮 `model` 调用；`pi` = 经 `pi-py-sdk` 驱动的 Pi agent 运行时（多轮 + 工具，M6 P2）。仅产出回复文本与步骤，**不写黑板** |
 
 **Worker 与会话（M6）**：一次 Worker 调用（一个"节点"任务，含 Bootstrap/Reason/Explore/Validate）
 对应一个**隔离会话**：上下文与消息历史不跨调用共享，`pi` provider 每次新建 Pi session 并于结束
@@ -33,6 +33,12 @@
 并由 `SESSION` / `WORKER_STEP` 事件建索引；**Engine 仍是黑板唯一写入者**，事件仍是唯一事实来源与
 重放源。Pi 的工具（`[worker].tools`）可配置，检索类工具经 TS 扩展**回调 server `Search` RPC**，
 使 `search` provider 仍可替换（红线 4）。
+
+**PiWorker（M6 P2）** 每次调用均创建 ephemeral Pi RPC session：使用私有临时
+`PI_CODING_AGENT_DIR` 写入 OpenAI-compatible provider 配置，复用 `[capability.model]` 与
+`OPENAI_API_KEY` / `OPENAI_BASE_URL`，不改写用户 `~/.pi`。它要求 `node` 与 `pi` 在 `PATH`，
+缺失时给出安装指引；禁用自动扩展、skills、上下文文件，并只传递 `[worker].tools` 的内建白名单。
+`search` 工具须等 M6 P4 的 TS 扩展；`cwd` 仅是 P2 的工具默认根目录，容器级安全隔离归 M3/P6。
 
 要求：
 

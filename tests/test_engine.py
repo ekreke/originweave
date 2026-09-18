@@ -572,7 +572,8 @@ def test_parse_validation_rejects_malformed(reply: str) -> None:
 @pytest.mark.skipif(not os.environ.get("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
 async def test_live_bootstrap_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from originweave import config
-    from originweave.capabilities import build_prompt, build_search, build_worker
+    from originweave.capabilities import build_model, build_prompt, build_search
+    from originweave.capabilities.worker import LocalWorker
 
     monkeypatch.chdir(REPO_ROOT)
     cfg = config.Config()
@@ -583,7 +584,7 @@ async def test_live_bootstrap_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         {"id": "origin", "kind": "origin", "label": "Document A", "note": document}
     )
     engine = Engine(
-        worker=build_worker(cfg),
+        worker=LocalWorker(model=build_model(cfg)),
         search=build_search(cfg),
         prompt=build_prompt(cfg),
         store=RunStore(tmp_path / "live"),

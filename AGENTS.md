@@ -47,7 +47,8 @@
 - **前端（`fronten*d/`，M1b 脚手架）**：React + Vite + TS + React Flow + Connect；目前是
   **无数据空壳**（不接 mock），真实数据接线与 DAG/Gate UI 归 **M1c-2**。
 - **M6（进行中，见 `SPEC.md` M6）**：把执行体抽为可插拔 **`Worker`**（`[worker].provider = local | pi`）；
-  `pi` 经 **`pi-py-sdk`** 驱动官方 TS agent 运行时（运行时需 **Node + `pi` 二进制**，仅 CI 之外）。
+  **P2 `PiWorker` 已落地**，经固定 `pi-py-sdk` 驱动官方 TS agent 运行时（运行时需 **Node + `pi` 二进制**，
+  仅 CI 之外）。
   每次 Worker 调用 = 一个**隔离会话**，原始输入/输出 + 步骤链落 run dir `sessions/<id>.json`，
   并由 `SESSION`/`WORKER_STEP` 事件索引（reducer 忽略，Board 不变）。检索类工具由 **TS 扩展回调
   server `Search` RPC*（provider 选择留 Python）。P1/P2 不依赖 server；P3–P5 依赖 M1c-1；P6 并入 M3。
