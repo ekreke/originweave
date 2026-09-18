@@ -217,6 +217,7 @@ def _intent(
         "claimedBy": None,
         "heartbeatAt": None,
         "createdAt": at,
+        "duplicateOf": None,
     }
 
 

@@ -13,11 +13,12 @@ runs in-process here (``docs/overview/agent-design.md`` section 6).
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .blackboard import BlackboardError, Board, Evidence, Fact, Intent
-from .capabilities.base import PromptProvider, PromptTemplate, SearchProvider
+from .capabilities.base import CapabilityError, PromptProvider, PromptTemplate, SearchProvider
 from .capabilities.model import ChatMessage, ModelProvider
 from .reduce import reduce
 from .store import RunStore
@@ -25,7 +26,7 @@ from .store import RunStore
 # The directive issued to a worker for one turn. This is a different axis from
 # blackboard.IntentType (decompose/explore/verify): an "Explore" task executes one
 # Intent whose type may be any of them.
-TaskKind = Literal["Bootstrap", "Reason", "Explore"]
+TaskKind = Literal["Bootstrap", "Reason", "Explore", "Validate"]
 
 # Bootstrap has no Intent of its own in the protocol; it is modelled as an ``explore``
 # Intent so the pass is auditable and dispatchable like any other.
@@ -133,6 +134,93 @@ def parse_result(text: str) -> WorkerResult:
     return WorkerResult(facts=facts, intents=intents, complete=complete)
 
 
+@dataclass
+class IntentDecision:
+    """Validate's verdict for one candidate Intent, addressed by its index."""
+
+    index: int
+    drop: bool
+    duplicate_of: str | None = None
+    reason: str = ""
+
+
+@dataclass
+class ValidationResult:
+    """Validate's decisions, one per candidate, in candidate order."""
+
+    decisions: list[IntentDecision]
+
+    @property
+    def kept(self) -> int:
+        return sum(1 for decision in self.decisions if not decision.drop)
+
+    @property
+    def dropped(self) -> int:
+        return sum(1 for decision in self.decisions if decision.drop)
+
+
+def parse_validation(text: str, count: int, known_intent_ids: set[str]) -> ValidationResult:
+    """Parse Validate's strict-JSON reply and check it classifies every candidate once.
+
+    ``count`` is the number of candidates; ``known_intent_ids`` bounds what a drop may
+    reference. Malformed or incomplete replies raise :class:`EngineError`.
+    """
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise EngineError(f"validate reply is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise EngineError("validate reply must be a JSON object")
+    raw_keep = data.get("keep", [])
+    raw_drop = data.get("drop", [])
+    if not isinstance(raw_keep, list):
+        raise EngineError("'keep' must be a list")
+    if not isinstance(raw_drop, list):
+        raise EngineError("'drop' must be a list")
+
+    decisions: dict[int, IntentDecision] = {}
+    for raw in raw_keep:
+        index = _candidate_index(raw, "keep")
+        _claim_index(decisions, index)
+        decisions[index] = IntentDecision(index=index, drop=False)
+    for raw in raw_drop:
+        if not isinstance(raw, dict):
+            raise EngineError("each drop entry must be a JSON object")
+        index = _candidate_index(raw.get("index"), "drop.index")
+        duplicate_of = raw.get("duplicateOf")
+        if duplicate_of is not None and not isinstance(duplicate_of, str):
+            raise EngineError("drop.duplicateOf must be a string")
+        if duplicate_of is not None and duplicate_of not in known_intent_ids:
+            raise EngineError(f"drop.duplicateOf {duplicate_of!r} is not a known intent id")
+        reason = raw.get("reason", "")
+        if not isinstance(reason, str):
+            raise EngineError("drop.reason must be a string")
+        _claim_index(decisions, index)
+        decisions[index] = IntentDecision(
+            index=index, drop=True, duplicate_of=duplicate_of, reason=reason
+        )
+
+    expected = set(range(count))
+    if set(decisions) != expected:
+        missing = sorted(expected - set(decisions))
+        extra = sorted(set(decisions) - expected)
+        raise EngineError(
+            f"validate must classify every candidate once; missing={missing} extra={extra}"
+        )
+    return ValidationResult(decisions=[decisions[i] for i in range(count)])
+
+
+def _candidate_index(raw: Any, where: str) -> int:
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise EngineError(f"{where} must be an integer candidate index")
+    return raw
+
+
+def _claim_index(decisions: dict[int, IntentDecision], index: int) -> None:
+    if index in decisions:
+        raise EngineError(f"candidate {index} classified more than once")
+
+
 def _board_payload(board: Board) -> dict[str, Any]:
     """Render the board slice a worker observes (the Observe step)."""
     return {
@@ -144,15 +232,23 @@ def _board_payload(board: Board) -> dict[str, Any]:
     }
 
 
-def render_messages(task: TaskKind, template: PromptTemplate, board: Board) -> list[ChatMessage]:
-    """Build worker messages: the directive (system) plus the board graph (user)."""
-    # sort_keys keeps the rendered board byte-stable, so prompts are reproducible.
-    digest = json.dumps(
-        {"task": task, "board": _board_payload(board)},
-        sort_keys=True,
-        ensure_ascii=False,
-        indent=2,
-    )
+def render_messages(
+    task: TaskKind,
+    template: PromptTemplate,
+    board: Board,
+    *,
+    extra: Mapping[str, Any] | None = None,
+) -> list[ChatMessage]:
+    """Build worker messages: the directive (system) plus the board graph (user).
+
+    ``extra`` carries task-specific input that is not yet on the board (e.g. the
+    candidate Intents handed to Validate).
+    """
+    payload: dict[str, Any] = {"task": task, "board": _board_payload(board)}
+    if extra:
+        payload.update(extra)
+    # sort_keys keeps the rendered input byte-stable, so prompts are reproducible.
+    digest = json.dumps(payload, sort_keys=True, ensure_ascii=False, indent=2)
     return [
         ChatMessage(role="system", content=template.text),
         ChatMessage(role="user", content=digest),
@@ -232,15 +328,21 @@ class Engine:
         )
 
     async def _reason(self) -> None:
-        """Run one Reason pass: write candidate Intents, or ``COMPLETE`` if judged done.
+        """Run one Reason pass, then Validate its candidates before writing them.
 
         Reason never produces facts (that is Explore's job), and every proposed Intent
-        must point at an existing fact id or ``origin``. Multi-round Stigmergy
+        must point at an existing fact id or ``origin``. Validate decides which
+        candidates are new; duplicates are still written, but as ``dropped`` Intents, so
+        the "considered but not taken" branch stays auditable. Multi-round Stigmergy
         convergence is a later concern; this is a single pass.
         """
         template = await self._prompt.get("reason")
         board = reduce(self._store.read_events())  # Observe: the current graph
-        self._store.append_event("REASON", {"phase": "start"}, message="Reason: start")
+        # The findings already on the board are what triggered this Reason pass.
+        triggers = [fact.id for fact in board.facts]
+        self._store.append_event(
+            "REASON", {"phase": "start", "triggerFacts": triggers}, message="Reason: start"
+        )
         reply = await self._model.complete(render_messages("Reason", template, board))
         result = parse_result(reply)
         if result.facts:
@@ -248,26 +350,80 @@ class Engine:
         if result.complete is not None:
             if result.intents:
                 raise EngineError("Reason reply must not carry both intents and complete")
-            self._store.append_event("REASON", {"phase": "end"}, message="Reason: end")
+            self._store.append_event(
+                "REASON", {"phase": "end", "triggerFacts": triggers}, message="Reason: end"
+            )
             self._store.append_event("COMPLETE", {"verdict": result.complete})
             return
-        # Validate the whole reply before writing anything, so a bad Intent leaves no
-        # half-written intents behind. An Intent may only hang off a finding or origin.
+        # An Intent may only hang off a finding or the origin anchor.
         known = {"origin"} | {fact.id for fact in board.facts}
-        for intent in result.intents:
-            if intent.from_ not in known:
-                raise EngineError(f"intent.from {intent.from_!r} is not a known fact id")
-        # The model's lifecycle fields are untrusted: rebuild each Intent as a fresh
-        # ``open`` candidate so only the engine controls status/claim/heartbeat.
-        for intent in result.intents:
-            candidate = Intent(
+        for candidate in result.intents:
+            if candidate.from_ not in known:
+                raise EngineError(f"intent.from {candidate.from_!r} is not a known fact id")
+
+        decisions: list[IntentDecision] | None = None
+        if result.intents:
+            try:
+                decisions = (await self._validate(result.intents, board)).decisions
+            except (EngineError, CapabilityError, FileNotFoundError) as exc:
+                # A validator we cannot run or trust ends the run rather than guessing.
+                self._store.append_event("FAILED", {"reason": str(exc)})
+                return
+        # The model's lifecycle fields are untrusted: rebuild each candidate as a fresh
+        # open/dropped Intent so only the engine controls status/claim/heartbeat.
+        for position, candidate in enumerate(result.intents):
+            decision = decisions[position] if decisions is not None else None
+            is_dropped = decision.drop if decision is not None else False
+            intent = Intent(
                 id=self._next_intent_id(),
-                type=intent.type,
-                from_=intent.from_,
-                question=intent.question,
+                type=candidate.type,
+                from_=candidate.from_,
+                question=candidate.question,
+                status="dropped" if is_dropped else "open",
+                duplicateOf=decision.duplicate_of if decision is not None else None,
             )
-            self._store.append_event("INTENT", {"intent": candidate.to_dict()})
-        self._store.append_event("REASON", {"phase": "end"}, message="Reason: end")
+            self._store.append_event("INTENT", {"intent": intent.to_dict()})
+        self._store.append_event(
+            "REASON", {"phase": "end", "triggerFacts": triggers}, message="Reason: end"
+        )
+
+    async def _validate(self, candidates: list[Intent], board: Board) -> ValidationResult:
+        """Ask the Validate worker which candidate Intents are new; duplicates drop."""
+        template = await self._prompt.get("validate")
+        candidate_payload = [
+            {"index": index, "type": c.type, "from": c.from_, "question": c.question}
+            for index, c in enumerate(candidates)
+        ]
+        self._store.append_event(
+            "VALIDATE",
+            {"phase": "start", "candidates": len(candidates)},
+            message="Validate: start",
+        )
+        reply = await self._model.complete(
+            render_messages("Validate", template, board, extra={"candidates": candidate_payload})
+        )
+        known_intent_ids = {intent.id for intent in board.intents}
+        result = parse_validation(reply, len(candidates), known_intent_ids)
+        self._store.append_event(
+            "VALIDATE",
+            {
+                "phase": "end",
+                "candidates": len(candidates),
+                "kept": result.kept,
+                "dropped": result.dropped,
+                "drops": [
+                    {
+                        "index": decision.index,
+                        "duplicateOf": decision.duplicate_of,
+                        "reason": decision.reason,
+                    }
+                    for decision in result.decisions
+                    if decision.drop
+                ],
+            },
+            message="Validate: end",
+        )
+        return result
 
     def _next_intent_id(self) -> str:
         self._intent_seq += 1
@@ -284,8 +440,11 @@ __all__ = [
     "BOOTSTRAP_QUESTION",
     "Engine",
     "EngineError",
+    "IntentDecision",
     "TaskKind",
+    "ValidationResult",
     "WorkerResult",
     "parse_result",
+    "parse_validation",
     "render_messages",
 ]

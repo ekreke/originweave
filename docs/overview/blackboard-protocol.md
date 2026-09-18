@@ -77,7 +77,8 @@ Intent {
   producedFacts[],      # 该 Intent 产出的 Fact id 列表
   claimedBy,            # 认领者（worker 运行时 id）
   heartbeatAt,          # 心跳时间戳（超时自动释放）
-  createdAt
+  createdAt,
+  duplicateOf           # status=dropped 时：被重复的既有 Intent id（Validate 填入，可空）
 }
 ```
 
@@ -193,10 +194,12 @@ Worker 的结构化输出（**冻结**）：Worker 只返回**一个 JSON 对象
   "drop": [ { "index": 1, "duplicateOf": "i3", "reason": "..." } ] }
 ```
 
-- `index` 是候选 Intent 在本次 `Reason` 输出里的下标；`duplicateOf` 指向黑板上的既有 Intent id。
+- `index` 是候选 Intent 在本次 `Reason` 输出里的下标；`duplicateOf` 指向黑板上的既有 Intent id
+  （批内重复时可空）。每个候选必须**恰好**出现在 `keep` 或 `drop` 之一，否则视为失败。
 - 被判重的候选仍以 `INTENT` 事件写入，但 `status=dropped`（保留"考虑过但未采纳"的因果链）；
   keep 的写为 `status=open` 待派发。去重是**产出期**行为，发生在 Dispatcher 写入 `INTENT` 之前。
-- 结构预筛（同一 `(type, from)` 已有 Intent）先于语义判重，减少模型调用。
+- **无结构预筛**：全部候选都交给 Validate 做语义判重（每轮 Reason 因此多一次模型调用）；
+  Reason 未产出候选时跳过 Validate（不调模型、不发 `VALIDATE` 事件）。
 
 ### 4.3 一道题的完整生命周期
 ```text
@@ -297,6 +300,7 @@ run 的全部状态由 append-only 事件派生。事件取代此前的领域事
 | `HUMAN_INPUT` | 人类输入 | `gate`, `decision`, `text?`, `targets?`, `author=human` |
 | `FAILED` | 执行异常终止，run → `failed` | `reason` |
 | `STOPPED` | 预算触顶或人工终止，run → `stopped` | `reason`, `budget?` |
+| `VALIDATE` | Validate 判重任务开始/结束 | `phase`(start\|end), `candidates`, `kept?`, `dropped?`, `drops[]?`（`{index, duplicateOf, reason}`）|
 | `ENTITY` | 抽取/归并到实体 | `entity: Entity` |
 | `RELATION` | 判别出实体间关系 | `relation: Relation` |
 
@@ -310,7 +314,7 @@ Event {
   at,
   type,      # PROJECT | INTENT | EXECUTE | CONCLUDE | REASON | COMPLETE |
              # HEARTBEAT | RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT |
-             # FAILED | STOPPED | ENTITY | RELATION
+             # FAILED | STOPPED | VALIDATE | ENTITY | RELATION
   message,   # 人类可读摘要（UI 时间线）
   tone,      # info | success | warning | danger
   payload    # 与 type 对应的结构化字段，见上表

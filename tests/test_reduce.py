@@ -39,6 +39,29 @@ def test_intent_derives_spawns_edge() -> None:
     assert board.edges[0].relation == "spawns"
 
 
+def test_intent_duplicate_of_roundtrips() -> None:
+    board = reduce(
+        [
+            project(),
+            ev(2, "INTENT", {"intent": {"id": "i001", "type": "explore"}}),
+            ev(
+                3,
+                "INTENT",
+                {
+                    "intent": {
+                        "id": "i002",
+                        "type": "explore",
+                        "status": "dropped",
+                        "duplicateOf": "i001",
+                    }
+                },
+            ),
+        ]
+    )
+    assert board.intents[1].status == "dropped"
+    assert board.intents[1].duplicateOf == "i001"
+
+
 def test_execute_heartbeat_release_transitions() -> None:
     base = [project(), ev(2, "INTENT", {"intent": {"id": "i001", "type": "explore"}})]
     claimed = reduce([*base, ev(3, "EXECUTE", {"intentId": "i001", "worker": "w1"})])

@@ -5,15 +5,14 @@
 
 ## 下一个任务
 
-- **M1 迭代切片**（引擎为库层、进程内 Dispatcher；`model`/`search` provider 已就绪；
-  I1 = Bootstrap 已落地，见 `engine.py`/`prompts/bootstrap.txt`）：
-  1. **I2a · 失败/停止事件**：`FAILED` / `STOPPED` → `status=failed|stopped`。
-  2. **I2 · Reason**：读图产出候选 Intent + 三型分支（`decompose`/`explore`/`verify`）+ Stigmergy 雏形。
-  3. **I2b · Validate 去重**：L1 `(type, from)` 预筛 + `Validate` pass（第 4 种指令，复用 `model`）→ 重复项写 `dropped` 留痕。
-  4. **I3 · Explore + search**：来源回链 `citation`/`source` + `Evidence`。
-  5. **I4 · 并发**：asyncio 多 Worker + `HEARTBEAT`/`RELEASE` + Dispatcher 确定性提交。
-  6. **I5 · HITL**：Gate A 挂起/恢复 + `auto` 跳过。
-  7. **I6 · 收敛**：Stigmergy 去重后收敛 → `COMPLETE` + 确定性 Board 单测。
+- **M1 迭代切片**（引擎为库层、进程内 Dispatcher；`model`/`search` provider 已就绪）：
+  已落地：**I1** Bootstrap、**I2a** `FAILED`/`STOPPED`、**I2** Reason、**I2b** Validate 去重
+  （`engine.py`、`prompts/{bootstrap,reason,validate}.txt`）。
+  待做：
+  1. **I3 · Explore + search**：来源回链 `citation`/`source` + `Evidence`。
+  2. **I4 · 并发**：asyncio 多 Worker + `HEARTBEAT`/`RELEASE` + Dispatcher 确定性提交。
+  3. **I5 · HITL**：Gate A 挂起/恢复 + `auto` 跳过。
+  4. **I6 · 收敛**：Stigmergy 多轮收敛 → `COMPLETE` + 确定性 Board 单测。
 - 随后：M1c-1（server）→ M1c-2（前端接线与 UI）。
 
 ## 待确认决策
@@ -35,9 +34,11 @@
 - [x] 图渲染库 → **React Flow**（`@xyflow/react`），provenance DAG 与 RELATIONS 复用（M1b 定）
 - [x] proto → TS 代码生成 → **本地插件 + 产物不入库**（`@bufbuild/protoc-gen-es`）（M1b 定）
 - [x] Reason 产出 Intent 的去重 → **独立 `Validate` pass（第 4 种任务指令，复用 `model`）**：
-  L1 结构预筛（`(type, from)` 已有即判重）+ L2 LLM 语义判重；比对范围含 `open/claimed/done/dropped`；
-  判重项写成 `status=dropped` 的 Intent 留痕（`duplicateOf` 指向具体 id）；validator 非法/失败 → 中止 run。
-  契约变更 docs-only（§4.2「三种」→「四种」；proto/前端不动）。落 **I2b**。
+  **纯 LLM 语义判重**（不做 L1 结构预筛）；比对范围含 `open/claimed/done/dropped` 及**批内候选**；
+  判重项写成 `status=dropped` 的 Intent 留痕（新字段 `Intent.duplicateOf`，可空）；每个候选必须恰好
+  keep/drop 一次；validator 非法/失败 → 写 `FAILED` 并 graceful 停止。**已于 I2b 落地**（每轮 Reason
+  多一次模型调用）。契约变更：`Intent.duplicateOf`（proto `duplicate_of` + 前端重生成）+ 新增
+  `VALIDATE` 事件（`events.py` + §5）。
 - [x] 失败/停止如何落盘 → **新增事件 `FAILED` / `STOPPED`（现在加）**：reducer 置 `status=failed|stopped`；
   `paused` 仍无事件，随 M3 可控性。落 **I2a**。
 - [ ] server 监听端口（前端 `transport` 暂用 8787；与 CLI `ui` 的 8765 区分）→ M1c-1 定

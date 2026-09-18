@@ -202,6 +202,7 @@ class Intent:
     claimedBy: str | None = None
     heartbeatAt: str | None = None
     createdAt: str = ""
+    duplicateOf: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -214,6 +215,7 @@ class Intent:
             "claimedBy": self.claimedBy,
             "heartbeatAt": self.heartbeatAt,
             "createdAt": self.createdAt,
+            "duplicateOf": self.duplicateOf,
         }
 
     @classmethod
@@ -229,6 +231,7 @@ class Intent:
             claimedBy=_opt_str(data, "claimedBy", "intent"),
             heartbeatAt=_opt_str(data, "heartbeatAt", "intent"),
             createdAt=_str(data, "createdAt"),
+            duplicateOf=_opt_str(data, "duplicateOf", "intent"),
         )
 
 

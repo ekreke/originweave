@@ -105,7 +105,7 @@ API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）�
 - [ ] 来源回链：`citation` / `source` 节点与 `Evidence{quote,sourceTitle,url,locator}` 登记
 - [ ] 多 Worker asyncio 任务并发认领 Intent + 心跳/超时自动释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按确定性顺序提交，保证 Board 确定
 - [ ] Stigmergy：新 Fact 触发新一轮 Reason（去重）
-- [ ] Reason 产出 Intent 的去重：L1 `(type, from)` 预筛 + `Validate` pass（复用 `model` 的 LLM 语义判重，比对含 `done`/`dropped`）→ 重复项写 `status=dropped` 留痕（`duplicateOf`）
+- [ ] Reason 产出 Intent 的去重：`Validate` pass（复用 `model`，纯 LLM 语义判重、无 L1 预筛，比对含 `done`/`dropped` 及批内候选）→ 重复项写 `status=dropped` 留痕（`Intent.duplicateOf`）
 - [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回（唯一写入者）
 - [ ] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1c-2）
 - [ ] 自动路径：`[hitl].auto=true`（或 M1c-1 的 `CreateRunRequest.auto`）跳过 Gate

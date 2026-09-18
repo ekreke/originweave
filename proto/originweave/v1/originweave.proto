@@ -116,6 +116,8 @@ message Intent {
   optional string claimed_by = 7;
   optional string heartbeat_at = 8;
   string created_at = 9;
+  // status=dropped: the existing Intent id this one duplicates (set by Validate)
+  optional string duplicate_of = 10;
 }
 
 message Hint {
@@ -194,7 +196,7 @@ message Event {
   string at = 2;
   // PROJECT | INTENT | EXECUTE | CONCLUDE | REASON | COMPLETE | HEARTBEAT |
   // RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT | FAILED | STOPPED |
-  // ENTITY | RELATION
+  // VALIDATE | ENTITY | RELATION
   string type = 3;
   string message = 4;
   string tone = 5; // info | success | warning | danger

@@ -51,6 +51,10 @@ def test_every_event_type_has_a_default_tone() -> None:
     assert set(DEFAULT_TONE) == set(EVENT_TYPES)
 
 
+def test_validate_event_is_known() -> None:
+    assert DEFAULT_TONE["VALIDATE"] == "info"
+
+
 def test_terminal_events_are_known() -> None:
     assert DEFAULT_TONE["FAILED"] == "danger"
     assert DEFAULT_TONE["STOPPED"] == "warning"

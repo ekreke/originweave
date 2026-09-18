@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 from originweave.blackboard import Fact
-from originweave.capabilities.base import PromptTemplate
+from originweave.capabilities.base import PromptTemplate, ProviderError
 from originweave.capabilities.model import ChatMessage
-from originweave.engine import Engine, EngineError, parse_result
+from originweave.engine import Engine, EngineError, parse_result, parse_validation
 from originweave.reduce import reduce, render_canonical
 from originweave.store import RunStore
 
@@ -85,6 +85,10 @@ def _reason(*intents: dict[str, object]) -> str:
     return json.dumps({"facts": [], "intents": list(intents), "complete": None})
 
 
+def _validate(*keep: int, drop: list[dict[str, object]] | None = None) -> str:
+    return json.dumps({"keep": list(keep), "drop": drop or []})
+
+
 async def test_bootstrap_produces_a_main_claim(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     model = _FakeModel(_bootstrap("Copilot cut task time by 55%."), NO_REASON)
@@ -136,6 +140,7 @@ async def test_reason_writes_candidate_intents(tmp_path: Path) -> None:
         store,
         _bootstrap("A claim"),
         _reason({"type": "decompose", "from": "f1", "question": "Split into sub-claims."}),
+        _validate(0),
     ).run(origin=_origin(), goal=_goal())
 
     assert [intent.id for intent in board.intents] == ["i1", "i2"]
@@ -175,6 +180,7 @@ async def test_reason_assigns_sequential_ids(tmp_path: Path) -> None:
             {"type": "decompose", "from": "f1", "question": "Split f1."},
             {"type": "explore", "from": "f2", "question": "Source f2."},
         ),
+        _validate(0, 1),
     ).run(origin=_origin(), goal=_goal())
 
     assert [intent.id for intent in board.intents] == ["i1", "i2", "i3"]
@@ -207,18 +213,216 @@ async def test_reason_bad_from_writes_nothing(tmp_path: Path) -> None:
 async def test_reason_intents_are_deterministic(tmp_path: Path) -> None:
     bootstrap = _bootstrap("A claim")
     reason = _reason({"type": "decompose", "from": "f1", "question": "Split it."})
-    first = await _engine(RunStore(tmp_path / "a"), bootstrap, reason).run(
+    validate = _validate(0)
+    first = await _engine(RunStore(tmp_path / "a"), bootstrap, reason, validate).run(
         origin=_origin(), goal=_goal()
     )
-    second = await _engine(RunStore(tmp_path / "b"), bootstrap, reason).run(
+    second = await _engine(RunStore(tmp_path / "b"), bootstrap, reason, validate).run(
         origin=_origin(), goal=_goal()
     )
-    assert [(i.id, i.type, i.from_, i.status) for i in first.intents] == [
-        (i.id, i.type, i.from_, i.status) for i in second.intents
+    assert [(i.id, i.type, i.from_, i.status, i.duplicateOf) for i in first.intents] == [
+        (i.id, i.type, i.from_, i.status, i.duplicateOf) for i in second.intents
     ]
     assert [(e.source, e.target, e.relation) for e in first.edges] == [
         (e.source, e.target, e.relation) for e in second.edges
     ]
+
+
+async def test_validate_drops_duplicate_candidates(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("A claim"),
+        _reason(
+            {"type": "explore", "from": "origin", "question": "Re-examine the document."},
+            {"type": "decompose", "from": "f1", "question": "Split f1."},
+        ),
+        _validate(1, drop=[{"index": 0, "duplicateOf": "i1", "reason": "same as i1"}]),
+    ).run(origin=_origin(), goal=_goal())
+
+    assert [intent.id for intent in board.intents] == ["i1", "i2", "i3"]
+    dropped = board.intents[1]
+    assert dropped.status == "dropped"
+    assert dropped.duplicateOf == "i1"
+    kept = board.intents[2]
+    assert kept.status == "open"
+    assert kept.type == "decompose"
+    assert kept.duplicateOf is None
+
+
+async def test_validate_skips_when_no_candidates(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    model = _FakeModel(_bootstrap("A claim"), NO_REASON)
+    engine = Engine(model=model, search=_FakeSearch(), prompt=_FakePrompt(), store=store)
+    await engine.run(origin=_origin(), goal=_goal())
+
+    assert len(model.calls) == 2  # bootstrap + reason only; nothing to validate
+    assert not any(event.type == "VALIDATE" for event in store.read_events())
+
+
+async def test_validate_emits_counted_events(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    await _engine(
+        store,
+        _bootstrap("A claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split it."}),
+        _validate(0),
+    ).run(origin=_origin(), goal=_goal())
+
+    validate_events = [event for event in store.read_events() if event.type == "VALIDATE"]
+    assert [event.payload["phase"] for event in validate_events] == ["start", "end"]
+    assert validate_events[0].payload == {"phase": "start", "candidates": 1}
+    assert validate_events[1].payload["kept"] == 1
+    assert validate_events[1].payload["dropped"] == 0
+    assert validate_events[1].payload["drops"] == []
+
+
+async def test_validate_passes_candidates_to_worker(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split it."}),
+        _validate(0),
+    )
+    engine = Engine(model=model, search=_FakeSearch(), prompt=_FakePrompt(), store=store)
+    await engine.run(origin=_origin(), goal=_goal())
+
+    validate_call = model.calls[2]
+    assert validate_call[0].content == "VALIDATE"  # _FakePrompt uppercases the name
+    assert '"candidates"' in validate_call[1].content
+
+
+async def test_validate_must_classify_every_candidate(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("A claim"),
+        _reason(
+            {"type": "decompose", "from": "f1", "question": "one"},
+            {"type": "explore", "from": "f1", "question": "two"},
+        ),
+        _validate(0),  # candidate 1 is left unclassified
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    assert store.read_events()[-1].type == "FAILED"
+
+
+async def test_validate_rejects_unknown_duplicate_of(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("A claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split it."}),
+        _validate(drop=[{"index": 0, "duplicateOf": "i9", "reason": "nope"}]),
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    assert store.read_events()[-1].type == "FAILED"
+
+
+async def test_validate_bad_reply_fails_run(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("A claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split it."}),
+        "not json",
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    assert store.read_events()[-1].type == "FAILED"
+
+
+async def test_validate_event_records_drops(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    await _engine(
+        store,
+        _bootstrap("A claim"),
+        _reason({"type": "explore", "from": "origin", "question": "Re-scan."}),
+        _validate(drop=[{"index": 0, "duplicateOf": "i1", "reason": "same as i1"}]),
+    ).run(origin=_origin(), goal=_goal())
+
+    end = [
+        event
+        for event in store.read_events()
+        if event.type == "VALIDATE" and event.payload["phase"] == "end"
+    ][0]
+    assert end.payload["kept"] == 0
+    assert end.payload["dropped"] == 1
+    assert end.payload["drops"] == [{"index": 0, "duplicateOf": "i1", "reason": "same as i1"}]
+
+
+async def test_validate_rebuilds_candidate_lifecycle_fields(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    reason = json.dumps(
+        {
+            "facts": [],
+            "intents": [
+                {
+                    "type": "explore",
+                    "from": "origin",
+                    "question": "Re-scan.",
+                    "status": "done",
+                    "duplicateOf": "i1",
+                    "claimedBy": "evil",
+                }
+            ],
+            "complete": None,
+        }
+    )
+    board = await _engine(store, _bootstrap("A claim"), reason, _validate(0)).run(
+        origin=_origin(), goal=_goal()
+    )
+
+    candidate = board.intents[1]
+    assert candidate.status == "open"
+    assert candidate.duplicateOf is None
+    assert candidate.claimedBy is None
+
+
+async def test_validate_provider_error_fails_run(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+
+    class _Boom:
+        name = "boom"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(self, messages: Sequence[ChatMessage]) -> str:
+            self.calls += 1
+            if self.calls == 1:
+                return _bootstrap("A claim")
+            if self.calls == 2:
+                return _reason({"type": "decompose", "from": "f1", "question": "Split it."})
+            raise ProviderError("validate model exploded")
+
+    engine = Engine(model=_Boom(), search=_FakeSearch(), prompt=_FakePrompt(), store=store)
+    board = await engine.run(origin=_origin(), goal=_goal())
+    assert board.status == "failed"
+    assert store.read_events()[-1].type == "FAILED"
+
+
+async def test_missing_validate_prompt_fails_run(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+
+    class _NoValidate:
+        name = "fake"
+
+        async def get(self, name: str) -> PromptTemplate:
+            if name == "validate":
+                raise FileNotFoundError("no validate template")
+            return PromptTemplate(name=name, text=name.upper())
+
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split it."}),
+    )
+    engine = Engine(model=model, search=_FakeSearch(), prompt=_NoValidate(), store=store)
+    board = await engine.run(origin=_origin(), goal=_goal())
+    assert board.status == "failed"
+    assert store.read_events()[-1].type == "FAILED"
 
 
 async def test_reason_complete_writes_complete(tmp_path: Path) -> None:
@@ -231,7 +435,8 @@ async def test_reason_complete_writes_complete(tmp_path: Path) -> None:
     events = store.read_events()
     assert events[-1].type == "COMPLETE"
     assert events[-2].type == "REASON"
-    assert events[-2].payload == {"phase": "end"}
+    assert events[-2].payload["phase"] == "end"
+    assert events[-2].payload["triggerFacts"] == ["f1"]
 
 
 async def test_reason_rejects_intents_and_complete_together(tmp_path: Path) -> None:
@@ -308,6 +513,39 @@ def test_parse_result_rejects_unknown_fact_kind() -> None:
 def test_parse_result_rejects_unknown_intent_type() -> None:
     with pytest.raises(EngineError):
         parse_result(json.dumps({"intents": [{"type": "guess", "question": "q"}]}))
+
+
+def test_parse_validation_accepts_keep_and_drop() -> None:
+    result = parse_validation(
+        json.dumps({"keep": [1], "drop": [{"index": 0, "duplicateOf": "i1", "reason": "dup"}]}),
+        2,
+        {"i1"},
+    )
+    assert [(d.index, d.drop, d.duplicate_of) for d in result.decisions] == [
+        (0, True, "i1"),
+        (1, False, None),
+    ]
+    assert result.kept == 1
+    assert result.dropped == 1
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "not json",
+        "[]",
+        json.dumps({"keep": "nope"}),
+        json.dumps({"keep": [True]}),  # bool index
+        json.dumps({"keep": [0], "drop": [{"index": 0}]}),  # classified twice
+        json.dumps({"keep": []}),  # missing candidates
+        json.dumps({"keep": [5]}),  # out of range
+        json.dumps({"keep": [0], "drop": [{"index": 1, "duplicateOf": "x"}]}),  # unknown dup
+        json.dumps({"keep": [0], "drop": [1]}),  # drop entry not an object
+    ],
+)
+def test_parse_validation_rejects_malformed(reply: str) -> None:
+    with pytest.raises(EngineError):
+        parse_validation(reply, 2, {"i1"})
 
 
 @pytest.mark.skipif(not os.environ.get("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")

@@ -80,7 +80,8 @@ Intent {
   id, type, status,        # type: decompose | explore | verify | extract | relate
   from, question,          # status: open | claimed | done | dropped | awaiting_human
   producedFacts[],
-  claimedBy, heartbeatAt, createdAt
+  claimedBy, heartbeatAt, createdAt,
+  duplicateOf              # status=dropped 时：被重复的既有 Intent id（Validate 填入，可空）
 }
 ```
 `extract` / `relate` 只在 `analysis` 含 relation 时使用，产出 `Entity` / `Relation`
@@ -189,11 +190,12 @@ Event {
   id, at, type,           # type: PROJECT | INTENT | EXECUTE | CONCLUDE | REASON |
   message, tone,          #       COMPLETE | HEARTBEAT | RELEASE | HINT |
   payload                 #       REQUEST_HUMAN | HUMAN_INPUT | FAILED | STOPPED |
-}                          #       ENTITY | RELATION | tone: info|success|warning|danger
+}                          #       VALIDATE | ENTITY | RELATION
+                           # tone: info | success | warning | danger
 ```
 事件类型（黑板协议）：`PROJECT` / `INTENT` / `EXECUTE` / `CONCLUDE` / `REASON` /
 `COMPLETE` / `HEARTBEAT` / `RELEASE` / `HINT` / `REQUEST_HUMAN` / `HUMAN_INPUT` /
-`FAILED` / `STOPPED` / `ENTITY` / `RELATION`。
+`FAILED` / `STOPPED` / `VALIDATE` / `ENTITY` / `RELATION`。
 `type` 决定事件种类，`payload` 携带该种类的结构化字段（逐事件字段表见
 [`blackboard-protocol.md`](blackboard-protocol.md) 第 5 节）；`message` / `tone` 仅用于展示。
 
