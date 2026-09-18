@@ -106,9 +106,9 @@ API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）�
 - [x] 任务指令：`Validate`（独立判重 pass）— `engine.py` + `prompts/validate.txt`
 - [ ] Intent 三型调度分支：`decompose` / `explore` / `verify`（decompose/explore 已随 I3 落地，`verify` 待 M2 `compare`）
 - [x] 抽象论点抽取：`Bootstrap` → `main-claim` — `engine.py` + `prompts/bootstrap.txt`
-- [x] 抽象论点拆解：`Intent(decompose)` → `sub-claim` — `engine.py`（`_explore` 派发分支）+ `prompts/explore.txt`
+- [x] 抽象论点拆解：`Intent(decompose)` → `sub-claim` — `engine.py`（`_run_explore` 派发分支）+ `prompts/explore.txt`
 - [x] 来源回链：`citation` / `source` 节点与 `Evidence{quote,sourceTitle,url,locator}` 登记 — `engine.py`（explore 分支调 `search`，结果经 `extra` 注入 worker）+ `prompts/explore.txt`
-- [ ] 多 Worker asyncio 任务并发认领 Intent + 心跳/超时自动释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按确定性顺序提交，保证 Board 确定
+- [x] 多 Worker asyncio 任务并发认领 Intent + 心跳/超时释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按 Intent id 序确定性提交，保证 Board 确定 — `engine.py` `_dispatch`/`_run_explore`/`_heartbeat`、`config.py` `[worker].heartbeat_*`/`max_concurrency<=16`（I4）
 - [ ] Stigmergy：新 Fact 触发新一轮 Reason（去重）
 - [x] Reason 产出 Intent 的去重：`Validate` pass（复用 `model`，纯 LLM 语义判重、无 L1 预筛，比对含 `done`/`dropped` 及批内候选）→ 重复项写 `status=dropped` 留痕（`Intent.duplicateOf`）— `engine.py` + `prompts/validate.txt`
 - [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回（唯一写入者）

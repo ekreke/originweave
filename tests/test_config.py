@@ -108,6 +108,43 @@ def test_validate_rejects_bad_worker_concurrency() -> None:
         cfg.validate()
 
 
+def test_validate_rejects_worker_concurrency_above_ceiling() -> None:
+    over = config.MAX_WORKER_CONCURRENCY + 1
+    cfg = config.Config(worker=config.WorkerConfig(max_concurrency=over))
+    with pytest.raises(config.ConfigError) as excinfo:
+        cfg.validate()
+    assert "max_concurrency" in str(excinfo.value)
+
+
+def test_validate_rejects_heartbeat_interval_not_below_timeout() -> None:
+    cfg = config.Config(
+        worker=config.WorkerConfig(heartbeat_interval="5m", heartbeat_timeout="30s")
+    )
+    with pytest.raises(config.ConfigError):
+        cfg.validate()
+
+
+def test_validate_rejects_unknown_heartbeat_on_timeout() -> None:
+    cfg = config.Config(worker=config.WorkerConfig(heartbeat_on_timeout="explode"))
+    with pytest.raises(config.ConfigError) as excinfo:
+        cfg.validate()
+    assert "heartbeat_on_timeout" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("text", "seconds"),
+    [("500ms", 0.5), ("5s", 5.0), ("10m", 600.0), ("2h", 7200.0), ("1d", 86400.0)],
+)
+def test_parse_duration(text: str, seconds: float) -> None:
+    assert config.parse_duration(text) == seconds
+
+
+@pytest.mark.parametrize("text", ["10", "0s", "1w", "m", "1 m", "-5s"])
+def test_parse_duration_rejects_bad_values(text: str) -> None:
+    with pytest.raises(config.ConfigError):
+        config.parse_duration(text)
+
+
 def test_validate_rejects_unknown_worker_tool() -> None:
     cfg = config.Config(worker=config.WorkerConfig(tools=("teleport",)))
     with pytest.raises(config.ConfigError) as excinfo:
@@ -123,6 +160,9 @@ def test_load_reads_worker_overrides(tmp_path: Path) -> None:
 provider = "pi"
 max_concurrency = 4
 tools = ["search", "read"]
+heartbeat_interval = "5s"
+heartbeat_timeout = "30s"
+heartbeat_on_timeout = "fail"
 [worker.budget]
 max_steps = 12
 max_wall = "2h"
@@ -134,6 +174,9 @@ max_cost = 1.5
     assert cfg.worker.provider == "pi"
     assert cfg.worker.max_concurrency == 4
     assert cfg.worker.tools == ("search", "read")
+    assert cfg.worker.heartbeat_interval == "5s"
+    assert cfg.worker.heartbeat_timeout == "30s"
+    assert cfg.worker.heartbeat_on_timeout == "fail"
     assert cfg.worker.budget == config.BudgetConfig(max_steps=12, max_wall="2h", max_cost=1.5)
 
 

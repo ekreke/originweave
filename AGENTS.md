@@ -24,8 +24,11 @@
   `src/originweave/engine.py`、`prompts/{bootstrap,reason,validate,explore}.txt`）。
 - **引擎是库层**：`Engine` 是黑板的**唯一写入者**（事件经 `RunStore.append_event`），
   进程内 Dispatcher 是 M3 容器化前的临时态。**不经 CLI / server 暴露**（server 归 M1c-1）；
-  Explore 派发为**单轮**（`verify` 型 Intent 留待 M2 `compare`），多轮 Stigmergy 收敛（I6）、
-  并发 / Heartbeat / Gate A 为后续 M1 切片（见 `docs/1.0/TODO.md`「下一个任务」）。
+  Explore 派发为**单轮**（`verify` 型 Intent 留待 M2 `compare`）。**I4 并发已落地**：一轮内先按
+  id 序 `EXECUTE` 认领，再受 `[worker].max_concurrency`（<=16）并发执行、**按 id 序提交**（Board
+  确定）；执行期引擎代发 `HEARTBEAT`，超过 `[worker].heartbeat_timeout` 按
+  `heartbeat_on_timeout=release|fail` 写 `RELEASE`/`FAILED`。多轮 Stigmergy 收敛（I6）、
+  Gate A（I5）为后续 M1 切片（见 `docs/1.0/TODO.md`「下一个任务」）。
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
   `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
 - **stub（打印 “not implemented yet”、返回 0）**：`ui` / `mcp` / `capabilities install-obscura`。
@@ -93,9 +96,11 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   `ConfigError`（防 `max_step` 之类拼写错误被静默忽略）。`CONFIG_FILENAME` 是**相对路径**，
   测试靠 `monkeypatch.chdir(tmp_path)`，不要在库代码里假设绝对路径。
   `[capability.model]` 默认 `openai` / `deepseek-v4.1-flash`，端点由 `OPENAI_BASE_URL` 提供
-  （内网地址不入库）。**M6** 顶层 `[worker]`：`provider`(local\|pi，默认 `pi`)、`max_concurrency`(>0)、
-  `tools`(Pi 工具白名单)、`budget`（`max_steps` / `max_wall` / `max_cost`）；`max_wall` 为正整数加
-  `ms|s|m|h|d`。Pi 的 model/base_url 复用 `[capability.model]`。顶层 `[budget]` 已退役，旧配置会报错。
+  （内网地址不入库）。**M6** 顶层 `[worker]`：`provider`(local\|pi，默认 `pi`)、`max_concurrency`(>0 且
+  <=16)、`tools`(Pi 工具白名单)、`heartbeat_interval`(默认 `"15s"`)/`heartbeat_timeout`(默认 `"5m"`，
+  须 `> interval`)/`heartbeat_on_timeout`(`release`\|`fail`)、`budget`（`max_steps` / `max_wall` /
+  `max_cost`）；时长均为正整数加 `ms|s|m|h|d`（`config.parse_duration`）。Pi 的 model/base_url 复用
+  `[capability.model]`。顶层 `[budget]` 已退役，旧配置会报错。
 - **HITL 开关**：`[hitl].auto` 或 `CreateRunRequest.auto` 只控制 Gate（默认人工介入）。
 - **凭据只从环境变量读**，不写入配置，且**多为可选**：`EXA_API_KEY` / `PARALLEL_API_KEY`
   （search 免费端点默认免 key）、`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、

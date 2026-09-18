@@ -68,8 +68,11 @@ model    = "deepseek-v4.1-flash"
 base_url = ""           # 端点由 OPENAI_BASE_URL 提供（内网地址不入库）
 [worker]                # Worker 执行体（M6）
 provider = "pi"         # local | pi；Pi 运行时缺失会明确报错
-max_concurrency = 1     # 本项目每次 run 的 worker 并发上限（server 调度处强制）
+max_concurrency = 1     # 本项目每次 run 的 worker 并发上限（>0 且 <=16；server 调度处强制）
 tools = []              # Pi 工具白名单：search|read|grep|find|ls|bash|edit|write；空 = 不启用
+heartbeat_interval = "15s"    # 单次 Worker 调用的 HEARTBEAT 上报间隔（I4）
+heartbeat_timeout = "5m"      # 超过此值判定调用失活（须 > interval）
+heartbeat_on_timeout = "release"  # release（Intent 回 open）| fail（run -> failed）
 [worker.budget]         # 每次 Worker 会话的预算默认值
 max_steps = 60
 max_wall = "10m"        # 正整数 + ms|s|m|h|d
@@ -77,6 +80,9 @@ max_cost = 2.0
 [run]
 dir = "runs"
 ```
+
+- `heartbeat_*` 是**单次调用**的租约（liveness），`[worker.budget].max_wall` 是**会话总预算**
+  （M3 执行 → `STOPPED`）；两者语义不同。`release` 忠于协议 §8「超时自动释放」，`fail` 则终止 run。
 
 - **未知键会报错**（`ConfigError`），避免 `max_step` 之类的拼写错误被静默忽略。
 - **凭据只从环境变量读取**，不写入配置，且**多为可选**：
@@ -132,8 +138,13 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 ### 3.5 协调与并发
 - **Stigmergy（间接协调）**：Worker 不互相通信，只通过往黑板写 Fact 改变环境，
   其他 Worker 下轮读图感知并调整策略。
-- **多 Worker 并发**：1.0 起支持 ≥2 个 Worker 并发认领 Intent；认领带心跳，
-  超时自动释放（`HEARTBEAT` / `RELEASE`）。
+- **多 Worker 并发（I4）**：一轮派发内，所有 `open` 的 `explore`/`decompose` Intent 先按 id 序
+  统一 `EXECUTE` 认领，再以 `[worker].max_concurrency` 为上限并发执行；结果仍按 Intent id 序
+  **提交回写**（分配 Fact id、写 `CONCLUDE`），故并发不改变 Board 结构（确定性）。`verify` 型
+  Intent 需 `compare`（M2），派发时保持 `open`。
+- **心跳/超时释放（I4）**：执行期间引擎按 `[worker].heartbeat_interval` 写 `HEARTBEAT`；调用超过
+  `[worker].heartbeat_timeout` 时按 `heartbeat_on_timeout` 写 `RELEASE`（Intent 回 `open`）或
+  `FAILED`（终止 run）。心跳由引擎（唯一写入者）代发，Worker 不自行认领/心跳（红线 5）。
 - **Dispatcher**：调度与容器生命周期，是协议的唯一写入者；Worker 不直接认领
   Intent、不发心跳，只接收 prompt 并返回结构化结果。
 

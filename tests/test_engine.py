@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import Sequence
@@ -55,6 +56,42 @@ class _RecordingSearch:
     async def search(self, query: str, *, num_results: int = 8) -> str:
         self.queries.append(query)
         return self.result
+
+
+class _ConcurrencyModel:
+    """Model that replays replies by task/Intent key and records overlap (I4 tests)."""
+
+    name = "concurrency"
+
+    def __init__(
+        self,
+        replies: dict[str, str],
+        delays: dict[str, float] | None = None,
+        errors: dict[str, Exception] | None = None,
+    ) -> None:
+        self._replies = replies
+        self._delays = delays or {}
+        self._errors = errors or {}
+        self.calls: list[str] = []
+        self.completed: list[str] = []
+        self.in_flight = 0
+        self.peak = 0
+
+    async def complete(self, messages: Sequence[ChatMessage]) -> str:
+        payload = json.loads(messages[1].content)
+        # Explore passes carry an "intent"; the serial passes are keyed by task name.
+        key = payload["intent"]["id"] if "intent" in payload else payload["task"]
+        self.calls.append(key)
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        try:
+            await asyncio.sleep(self._delays.get(key, 0.0))
+            if key in self._errors:
+                raise self._errors[key]
+            self.completed.append(key)
+            return self._replies[key]
+        finally:
+            self.in_flight -= 1
 
 
 class _FakePrompt:
@@ -671,7 +708,7 @@ async def test_decompose_rejects_citation_facts(tmp_path: Path) -> None:
     assert events[-2].payload["task"] == "Explore"
 
 
-async def test_dispatch_stops_after_a_failed_intent(tmp_path: Path) -> None:
+async def test_dispatch_commit_stops_after_a_failed_intent(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     bad = json.dumps(
         {
@@ -688,7 +725,7 @@ async def test_dispatch_stops_after_a_failed_intent(tmp_path: Path) -> None:
         ),
         _validate(0, 1),
         bad,
-        _explore_reply(_sub_claim("Never dispatched")),
+        _explore_reply(_sub_claim("Committed too late")),
     )
     engine = Engine(
         worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt(), store=store
@@ -696,11 +733,16 @@ async def test_dispatch_stops_after_a_failed_intent(tmp_path: Path) -> None:
     board = await engine.run(origin=_origin(), goal=_goal())
 
     assert board.status == "failed"
-    # Bootstrap, Reason, Validate, the first Explore; the second is never dispatched.
-    assert len(model.calls) == 4
+    # Both claimed Intents run (Bootstrap, Reason, Validate, two Explores); commit stops
+    # at the first failure, so no dispatch Intent is concluded.
+    assert len(model.calls) == 5
+    assert not [
+        event
+        for event in store.read_events()
+        if event.type == "CONCLUDE" and event.payload.get("intentId") in {"i2", "i3"}
+    ]
     second = board.intents[2]
-    assert second.status == "open"
-    assert second.claimedBy is None
+    assert second.status == "claimed"
     assert second.producedFacts == []
 
 
@@ -815,6 +857,238 @@ async def test_explore_pipeline_is_deterministic(tmp_path: Path) -> None:
     assert [(e.source, e.target, e.relation) for e in first.edges] == [
         (e.source, e.target, e.relation) for e in second.edges
     ]
+
+
+def _concurrency_scenario(
+    store: RunStore, *, max_concurrency: int, delays: dict[str, float]
+) -> tuple[Engine, _ConcurrencyModel]:
+    """A Reason pass that yields two dispatchable Intents (i2 decompose, i3 explore)."""
+    model = _ConcurrencyModel(
+        {
+            "Bootstrap": _bootstrap("A claim"),
+            "Reason": _reason(
+                {"type": "decompose", "from": "f1", "question": "Split f1."},
+                {"type": "explore", "from": "f1", "question": "Source f1."},
+            ),
+            "Validate": _validate(0, 1),
+            "i2": _explore_reply(_sub_claim("Sub one")),
+            "i3": _explore_reply(_source_fact("Primary source")),
+        },
+        delays=delays,
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model),
+        search=_RecordingSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        max_concurrency=max_concurrency,
+    )
+    return engine, model
+
+
+async def test_dispatch_runs_intents_concurrently(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine, model = _concurrency_scenario(store, max_concurrency=2, delays={"i2": 0.05, "i3": 0.0})
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    assert model.peak == 2  # the two Explore passes overlapped
+    assert sorted(model.calls) == ["Bootstrap", "Reason", "Validate", "i2", "i3"]
+    assert [intent.status for intent in board.intents[1:]] == ["done", "done"]
+    # Worker labels are assigned deterministically in Intent id order (i1 is Bootstrap).
+    claims = [
+        event.payload["worker"]
+        for event in store.read_events()
+        if event.type == "EXECUTE" and event.payload["intentId"] != "i1"
+    ]
+    assert claims == ["worker-1", "worker-2"]
+
+
+async def test_dispatch_respects_max_concurrency_one(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine, model = _concurrency_scenario(store, max_concurrency=1, delays={"i2": 0.05, "i3": 0.0})
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    assert model.peak == 1  # serialized by the cap
+    assert [intent.status for intent in board.intents[1:]] == ["done", "done"]
+
+
+async def test_concurrent_dispatch_board_is_deterministic(tmp_path: Path) -> None:
+    # The two Intents finish in opposite orders across the two runs; the committed
+    # Board must still be identical because commit order follows Intent id.
+    first_store = RunStore(tmp_path / "a")
+    first, first_model = _concurrency_scenario(
+        first_store, max_concurrency=2, delays={"i2": 0.05, "i3": 0.0}
+    )
+    second_store = RunStore(tmp_path / "b")
+    second, second_model = _concurrency_scenario(
+        second_store, max_concurrency=2, delays={"i2": 0.0, "i3": 0.05}
+    )
+    first_board = await first.run(origin=_origin(), goal=_goal())
+    second_board = await second.run(origin=_origin(), goal=_goal())
+
+    # The dispatch Intents really did finish in opposite orders across the two runs.
+    assert [key for key in first_model.completed if key in {"i2", "i3"}] == ["i3", "i2"]
+    assert [key for key in second_model.completed if key in {"i2", "i3"}] == ["i2", "i3"]
+
+    assert [(f.id, f.kind, f.role) for f in first_board.facts] == [
+        (f.id, f.kind, f.role) for f in second_board.facts
+    ]
+    assert [(i.id, i.type, i.status, i.producedFacts) for i in first_board.intents] == [
+        (i.id, i.type, i.status, i.producedFacts) for i in second_board.intents
+    ]
+    assert [(e.source, e.target, e.relation) for e in first_board.edges] == [
+        (e.source, e.target, e.relation) for e in second_board.edges
+    ]
+
+
+def _single_explore_model(delay: float) -> _ConcurrencyModel:
+    return _ConcurrencyModel(
+        {
+            "Bootstrap": _bootstrap("A claim"),
+            "Reason": _reason({"type": "explore", "from": "f1", "question": "Source f1."}),
+            "Validate": _validate(0),
+            "i2": _explore_reply(_source_fact("Primary source")),
+        },
+        delays={"i2": delay},
+    )
+
+
+async def test_heartbeat_is_emitted_while_worker_runs(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(model=_single_explore_model(0.05)),
+        search=_RecordingSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        heartbeat_interval=0.01,
+        heartbeat_timeout=5.0,
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    heartbeats = [event for event in store.read_events() if event.type == "HEARTBEAT"]
+    assert heartbeats  # the engine kept the lease alive during the slow call
+    assert {event.payload["intentId"] for event in heartbeats} == {"i2"}
+    assert board.intents[1].status == "done"
+
+
+async def test_heartbeat_timeout_releases_intent(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(model=_single_explore_model(1.0)),
+        search=_RecordingSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        heartbeat_interval=0.01,
+        heartbeat_timeout=0.05,
+        heartbeat_on_timeout="release",
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    events = store.read_events()
+    releases = [event for event in events if event.type == "RELEASE"]
+    assert releases and releases[-1].payload["intentId"] == "i2"
+    assert not any(event.type == "FAILED" for event in events)
+    assert board.status == "running"
+    intent = board.intents[1]
+    assert intent.status == "open"  # handed back for a later round (I6)
+    assert intent.claimedBy is None
+
+
+async def test_heartbeat_timeout_fails_run_when_configured(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(model=_single_explore_model(1.0)),
+        search=_RecordingSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        heartbeat_interval=0.01,
+        heartbeat_timeout=0.05,
+        heartbeat_on_timeout="fail",
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    events = store.read_events()
+    assert events[-1].type == "FAILED"
+    assert "heartbeat_timeout" in events[-1].payload["reason"]
+
+
+async def test_unexpected_worker_error_is_committed_not_raised(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    model = _ConcurrencyModel(
+        {
+            "Bootstrap": _bootstrap("A claim"),
+            "Reason": _reason(
+                {"type": "decompose", "from": "f1", "question": "Split f1."},
+                {"type": "decompose", "from": "f1", "question": "Split f1 again."},
+            ),
+            "Validate": _validate(0, 1),
+            "i2": _explore_reply(_sub_claim("Never committed")),
+            "i3": _explore_reply(_sub_claim("Never committed either")),
+        },
+        errors={"i2": RuntimeError("worker bug")},
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model),
+        search=_RecordingSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        max_concurrency=2,
+        heartbeat_interval=0.01,
+        heartbeat_timeout=5.0,
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    # A non-CapabilityError from a worker becomes a committed FAILED, not an escape.
+    assert board.status == "failed"
+    assert store.read_events()[-1].type == "FAILED"
+    # No sibling pass is left writing to the blackboard after run() returned.
+    count = len(store.read_events())
+    await asyncio.sleep(0.05)
+    assert len(store.read_events()) == count
+
+
+async def test_slow_search_trips_heartbeat_timeout(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+
+    class _SlowSearch:
+        name = "slow"
+
+        async def search(self, query: str, *, num_results: int = 8) -> str:
+            await asyncio.sleep(1.0)
+            return "too late"
+
+    engine = Engine(
+        worker=LocalWorker(model=_single_explore_model(0.0)),
+        search=_SlowSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        heartbeat_interval=0.01,
+        heartbeat_timeout=0.05,
+        heartbeat_on_timeout="release",
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    # The lease covers the search phase too, so a hung search does not hold the Intent.
+    assert board.status == "running"
+    assert any(event.type == "RELEASE" for event in store.read_events())
+    assert board.intents[1].status == "open"
+
+
+def test_engine_rejects_bad_heartbeat_settings(tmp_path: Path) -> None:
+    def build(**kwargs: object) -> Engine:
+        return Engine(
+            worker=LocalWorker(model=_FakeModel('{"facts": [], "intents": [], "complete": null}')),
+            search=_FakeSearch(),
+            prompt=_FakePrompt(),
+            store=RunStore(tmp_path / "run_001"),
+            **kwargs,
+        )
+
+    with pytest.raises(ValueError):
+        build(heartbeat_interval=1.0, heartbeat_timeout=1.0)
+    with pytest.raises(ValueError):
+        build(heartbeat_on_timeout="explode")
 
 
 async def test_bootstrap_bad_reply_fails_run(tmp_path: Path) -> None:

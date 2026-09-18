@@ -219,6 +219,14 @@ worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` �
 事件**（原始回复经会话快照留痕，供审计），不向调用方抛异常——失败的因果链完整落在事件日志里，
 `replay` 可复现到死亡点。
 
+**派发（I4）**：一轮派发把快照上所有 `open` 且 `type∈{explore,decompose}` 的 Intent 先按 id 序
+统一写 `EXECUTE` 认领（worker 标签按序 `worker-1..N`），再以 `[worker].max_concurrency` 为上限
+并发执行。每个 Explore pass 的原始结果先缓存在内存，**提交阶段按 Intent id 序**分配 Fact id、
+写 `CONCLUDE`/`SESSION`——因此完成顺序不影响 Board（结构确定）；首个硬失败（provider/解析/超时
+`fail`）写 `FAILED` 并停止提交。执行期间引擎按 `[worker].heartbeat_interval` 代写 `HEARTBEAT`；
+整个 pass（含 `search` 与 worker 调用）超过 `[worker].heartbeat_timeout` 即判定失活，按
+`heartbeat_on_timeout` 写 `RELEASE`（Intent 回 `open`，本轮其余继续）或 `FAILED`（终止 run）。
+
 ### 4.3 一道题的完整生命周期
 ```text
 0 init      : 黑板仅 origin(资料 A) 与 goal(停止条件) 两个特殊 Fact
@@ -393,7 +401,10 @@ Worker A 写入新 Fact  →  图变化（环境更新）  →  Worker B 下一�
 - **终止态落盘**：异常终止写 `FAILED`（→ `status=failed`），预算触顶/人工终止写 `STOPPED`
   （→ `status=stopped`）；两者都是事件，`replay` 可复现到终止点。`paused`（可恢复）尚无事件，
   随 M3 可控性引入。
-- **Intent 心跳超时自动释放**：Worker 崩溃不会永久占住 Intent。
+- **Intent 心跳与超时（I4）**：执行中引擎按 `[worker].heartbeat_interval` 写 `HEARTBEAT`；
+  超过 `[worker].heartbeat_timeout` 判定 Worker 失活，不再永久占住 Intent：`heartbeat_on_timeout=release`
+  写 `RELEASE` 把 Intent 退回 `open`（供后续轮次/重试），`=fail` 写 `FAILED` 终止 run。两值均为
+  `[worker]` 时长配置（默认 `15s` / `5m`，且须 `interval < timeout`）。
 - **完整因果链永久保留**：包含所有死胡同（`dropped` Intent）。
 - **可重放**：`replay` 只读、不触网、复现含人工输入在内的全部结论。
 

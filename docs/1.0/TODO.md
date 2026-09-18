@@ -19,11 +19,12 @@
 - **M1 迭代切片**（引擎为库层、进程内 Dispatcher；`model`/`search` provider 已就绪）：
   已落地：**I1** Bootstrap、**I2a** `FAILED`/`STOPPED`、**I2** Reason、**I2b** Validate 去重、
   **I3** Explore + search（来源回链 `citation`/`source` + `Evidence`；`decompose`/`explore`
-  派发分支，`verify` 留待 M2；单轮派发，`engine.py`、`prompts/explore.txt`）。
+  派发分支，`verify` 留待 M2；单轮派发，`engine.py`、`prompts/explore.txt`）、
+  **I4** 并发派发 + 心跳/超时（`engine.py` `_dispatch`/`_run_explore`/`_heartbeat`；
+  `[worker].heartbeat_{interval,timeout,on_timeout}`、`max_concurrency<=16`）。
   待做：
-  1. **I4 · 并发**：asyncio 多 Worker + `HEARTBEAT`/`RELEASE` + Dispatcher 确定性提交（受 `[worker].max_concurrency` 约束）。
-  2. **I5 · HITL**：Gate A 挂起/恢复 + `auto` 跳过。
-  3. **I6 · 收敛**：Stigmergy 多轮收敛 → `COMPLETE` + 确定性 Board 单测。
+  1. **I5 · HITL**：Gate A 挂起/恢复 + `auto` 跳过。
+  2. **I6 · 收敛**：Stigmergy 多轮收敛 → `COMPLETE` + 确定性 Board 单测。
 - 随后：M1c-1（server）→ M1c-2（前端接线与 UI）。
 
 ## 待确认决策
@@ -56,7 +57,11 @@
 - [ ] Docker runtime 的镜像来源与构建归属（server 仓内构建 vs 独立镜像）
 - [ ] HITL Gate 的默认范围与配置粒度（三个 Gate 是否可逐项开关；`auto` 是否支持 per-gate）
 - [x] Worker 并发上限的位置与默认值 → 独立 `[worker].max_concurrency`（默认 1，代码校验 `>0`）（M6 定）
-- [ ] Worker 并发上限的**具体上限**（是否需要 `max_concurrency` 上界校验）→ 待定
+- [x] Worker 并发上限的**具体上限** → 固定上界 `MAX_WORKER_CONCURRENCY=16`（I4 定；
+  `max_concurrency` 需 `>0 且 <=16`）
+- [x] 单次调用心跳/超时的配置与策略 → `[worker].heartbeat_interval`（默认 `"15s"`）/
+  `heartbeat_timeout`（默认 `"5m"`，须 `> interval`）/ `heartbeat_on_timeout`
+  （`release` 默认 | `fail`）；引擎代发 `HEARTBEAT`，超时按策略写 `RELEASE` 或 `FAILED`（I4 定）
 - [ ] 关系样例 fixture 来源（新增含多个组织的样例 vs 复用 `copilot_productivity`）
 - [ ] 实体消歧粒度：同名/别名归一的规范化规则（大小写、全称/简称、去空白）
 - [ ] CLI `capabilities install-obscura` 命名：旧 `obscura_kitesurf` 占位样例已被从零构建的
@@ -113,14 +118,29 @@
   `originweave.toml` 会因未知键报错（仓库无提交的 toml，影响小，类比 Phase R 去 `[live]`）；
   `CreateRunRequest` 的 `max_steps`/`max_wall`/`max_cost` 结构不变，但语义改为覆盖 `[worker].budget`，
   需同步 `dashboard.md §4.3` 与 `agent-design.md §2.1/§4`（P1b）。
-  review 遗留（低优先）：`runId = store.root.name` 在 root 为 `.` 时为空、`_session_seq` 每次 `run()`
-  重置（同一 store 多次 run 会覆盖会话）；`WORKER_ID` 硬编码 `worker-1`（I4 并发需改造）；
-  `[worker].tools` 允许重复项。
+  review 遗留（低优先）：`runId = store.root.name` 在 root 为 `.` 时为空；`[worker].tools` 允许重复项；
+  `_session_seq` 每次 `run()` 重置——同一 store 多次 run 仍会覆盖会话、重发 id（未随 I4 处理）。
+  （I4 已把并发下的 session id 改为在 `await` 前按序分配、Explore 用 `worker-{n}` 标签，取代硬编码
+  `WORKER_ID`。）
 
 ## 已完成（近期）
 
+- **M1 I4 · 并发派发 + 心跳/超时**：`engine.py` 重写 `_dispatch`——一轮内按 id 序统一 `EXECUTE`
+  认领（标签 `worker-{n}`），以 `asyncio.Semaphore([worker].max_concurrency)` 并发跑 `_run_explore`
+  （不写黑板；每个 pass 经 `_guarded_run_explore` 包裹，任何异常都转成 `_ExploreOutcome` 提交，
+  不逃逸、不泄漏兄弟任务），`gather` 后**按 Intent id 序提交** `CONCLUDE`/`SESSION`，故完成顺序
+  不影响 Board；首个硬失败写 `FAILED` 并停止提交。`_invoke` 的 session id 改为在 `await` 前按序分配
+  （并发确定）。
+  **心跳/超时（I4b）**：执行期引擎按 `heartbeat_interval` 代写 `HEARTBEAT`，`asyncio.wait_for`
+  按 `heartbeat_timeout` 判定失活（**租约覆盖 search 与 worker 调用**），`heartbeat_on_timeout=release`
+  写 `RELEASE`（Intent 回 `open`，本轮继续）/`=fail` 写 `FAILED`。`config.py` 增 `[worker].heartbeat_interval`（`"15s"`）/
+  `heartbeat_timeout`（`"5m"`，须 `> interval`）/`heartbeat_on_timeout`（`release`|`fail`）、
+  `parse_duration()` 与新上界 `MAX_WORKER_CONCURRENCY=16`；契约同步 `overview/`（`agent-design §2.1/§3.5`、
+  `blackboard-protocol §4.2/§8`、`dashboard §4.6`、`product-overview`）。多轮收敛归 I6。
+  `make lint` + `make test`（209 passed, 1 skipped）全绿，`make replay` 不变。
+
 - **M1 I3 · Explore + search（来源回链）**：新增任务指令 `Explore`（`prompts/explore.txt`）；
-  `engine.py` 增 `_dispatch`/`_explore`——`run()` 变为 Bootstrap → Reason → 单轮派发（open 且
+  `engine.py` 增 `_dispatch`/`_run_explore`（I3 时名为 `_explore`，I4 拆分重命名）——`run()` 变为 Bootstrap → Reason → 单轮派发（open 且
   `type∈{explore,decompose}` 的 Intent 按 id 序执行；`verify` 留待 M2）。explore 型由**引擎**调
   `search`（query = intent question），结果与 intent 一起经 `extra` 注入 worker（红线 4）；产出
   `citation`/`source` Fact（引擎强制 `role=none` 且**至少一条** `Evidence`），decompose 型产出

@@ -67,7 +67,7 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 | `/projects/:projectId` | 项目详情 + run 列表 |
 | `/projects/:projectId/runs/new` | 新建核验（提交后走 `CreateRun`） |
 | `/projects/:projectId/runs/:runId` | 审阅台（三栏：run 列表 / 图与页签 / INSPECTOR） |
-| `/settings` | 设置（主题、Worker provider / 并发上限 / 工具开关；M6） |
+| `/settings` | 设置（主题、Worker provider / 并发上限 / 心跳与超时 / 工具开关；M6） |
 
 ## 4. 冻结 proto 契约（Connect）
 
@@ -138,8 +138,11 @@ goal, max_steps?, max_wall?, max_cost?, auto?
 Settings {
   worker: WorkerSettings {
     provider,                         # local | pi
-    maxConcurrency,                   # 本项目每次 run 的 worker 上限
+    maxConcurrency,                   # 本项目每次 run 的 worker 上限（>0 且 <=16）
     tools: string[]                   # 启用的工具名单（扁平白名单，与 [worker].tools 一致）
+    heartbeatInterval,                # 单次调用的 HEARTBEAT 间隔，如 "15s"（I4）
+    heartbeatTimeout,                 # 调用失活阈值，如 "5m"；须 > interval（I4）
+    heartbeatOnTimeout,               # release | fail（I4）
     budget: { maxSteps, maxWall, maxCost }
   }
 }

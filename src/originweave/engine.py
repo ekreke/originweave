@@ -12,6 +12,8 @@ runs in-process here (``docs/overview/agent-design.md`` section 6).
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -24,7 +26,8 @@ from .events import now_iso
 from .reduce import reduce
 from .store import RunStore
 
-# The in-process dispatcher runs a single worker until M1 I4 adds concurrency.
+# Default worker label for the serial passes (Bootstrap/Reason/Validate). Dispatch
+# hands each concurrent Explore pass a distinct ``worker-{n}`` label instead.
 WORKER_ID = "worker-1"
 
 # Bootstrap has no Intent of its own in the protocol; it is modelled as an ``explore``
@@ -52,6 +55,10 @@ _EXPLORE_FACT_KINDS: frozenset[str] = frozenset({"citation", "source"})
 
 class EngineError(ValueError):
     """Raised when a worker reply or engine input is malformed."""
+
+
+class _ExploreTimeout(Exception):
+    """A Worker call exceeded ``[worker].heartbeat_timeout`` (I4)."""
 
 
 @dataclass
@@ -228,6 +235,26 @@ def _claim_index(decisions: dict[int, IntentDecision], index: int) -> None:
         raise EngineError(f"candidate {index} classified more than once")
 
 
+@dataclass
+class _ExploreOutcome:
+    """Result of one concurrent Explore pass, before the engine commits it.
+
+    Nothing here is written to the blackboard until :meth:`Engine._dispatch` folds
+    every outcome back in Intent id order; that ordering is what keeps a concurrent
+    round's Board deterministic. ``reply`` is ``None`` when the failure happened before
+    (or without) a worker reply (e.g. a search provider error).
+    """
+
+    intent_id: str
+    worker: str
+    facts: list[Fact] = field(default_factory=list)
+    reply: WorkerReply | None = None
+    session_id: str = ""
+    started: str = ""
+    ended: str = ""
+    error: Exception | None = None
+
+
 class Engine:
     """Drive the OODA loop for one run, writing events to ``store``.
 
@@ -253,13 +280,35 @@ class Engine:
         search: SearchProvider,
         prompt: PromptProvider,
         store: RunStore,
+        max_concurrency: int = 1,
+        heartbeat_interval: float = 15.0,
+        heartbeat_timeout: float = 300.0,
+        heartbeat_on_timeout: str = "release",
     ) -> None:
+        if max_concurrency <= 0:
+            raise ValueError(f"max_concurrency must be > 0, got {max_concurrency}")
+        if heartbeat_interval <= 0:
+            raise ValueError(f"heartbeat_interval must be > 0, got {heartbeat_interval}")
+        if heartbeat_timeout <= heartbeat_interval:
+            raise ValueError(
+                "heartbeat_timeout must be > heartbeat_interval, "
+                f"got {heartbeat_timeout} <= {heartbeat_interval}"
+            )
+        if heartbeat_on_timeout not in ("release", "fail"):
+            raise ValueError(
+                f"heartbeat_on_timeout must be 'release' or 'fail'; got {heartbeat_on_timeout!r}"
+            )
         self._worker = worker
         # The engine picks the search provider (agent-design.md red line 4): Explore
         # passes call it and hand the results to the worker as context.
         self._search = search
         self._prompt = prompt
         self._store = store
+        # Upper bound on Explore passes running at once in a dispatch round (I4).
+        self._max_concurrency = max_concurrency
+        self._heartbeat_interval = heartbeat_interval
+        self._heartbeat_timeout = heartbeat_timeout
+        self._heartbeat_on_timeout = heartbeat_on_timeout
         self._fact_seq: dict[str, int] = {}
         self._intent_seq = 0
         self._session_seq = 0
@@ -276,19 +325,30 @@ class Engine:
         board: Board,
         *,
         extra: Mapping[str, Any] | None = None,
+        session_id: str | None = None,
     ) -> tuple[WorkerReply, str, str, str]:
         """Run one worker task in a fresh session, timing it for the snapshot.
 
         The worker returns raw text plus its steps; parsing and all writes stay here
         so the engine remains the sole writer of the blackboard. The session id is
-        allocated at call time so ids follow invocation order even when a later call
-        (Validate) records its snapshot first.
+        allocated *before* the await when the caller did not reserve one, so ids follow
+        submission order even under I4 concurrency (Validate records its snapshot before
+        Reason, but its id is still allocated in invocation order).
         """
+        if session_id is None:
+            session_id = self._next_session_id()
         started = now_iso()
         reply = await self._worker.run(task, template, board, extra=extra)
         ended = now_iso()
+        return reply, started, ended, session_id
+
+    def _next_session_id(self) -> str:
         self._session_seq += 1
-        return reply, started, ended, f"sess_{self._session_seq:03d}"
+        return f"sess_{self._session_seq:03d}"
+
+    def _worker_label(self, index: int) -> str:
+        """Deterministic worker label for the ``index``-th pending Intent (1-based)."""
+        return f"worker-{index + 1}"
 
     def _record_session(
         self,
@@ -299,6 +359,7 @@ class Engine:
         intent_id: str | None,
         started: str,
         ended: str,
+        worker: str = WORKER_ID,
     ) -> None:
         """Persist one worker session: snapshot file first, then the event index.
 
@@ -308,7 +369,7 @@ class Engine:
         session: dict[str, Any] = {
             "id": session_id,
             "runId": self._store.root.name,
-            "worker": WORKER_ID,
+            "worker": worker,
             "task": task,
             "model": self._worker_model,
             "input": reply.input,
@@ -323,14 +384,14 @@ class Engine:
         session_event: dict[str, Any] = {
             "sessionId": session_id,
             "task": task,
-            "worker": WORKER_ID,
+            "worker": worker,
             "ref": f"sessions/{session_id}.json",
         }
         if intent_id is not None:
             session_event["intentId"] = intent_id
         self._store.append_event("SESSION", session_event)
         for step in reply.steps:
-            payload: dict[str, Any] = {"sessionId": session_id, "worker": WORKER_ID}
+            payload: dict[str, Any] = {"sessionId": session_id, "worker": worker}
             payload.update(step.to_dict())
             if intent_id is not None:
                 payload["intentId"] = intent_id
@@ -340,34 +401,39 @@ class Engine:
         self,
         exc: Exception,
         *,
-        reply: WorkerReply,
+        reply: WorkerReply | None,
         session_id: str,
         task: TaskKind,
         intent_id: str | None,
         started: str,
         ended: str,
+        worker: str = WORKER_ID,
     ) -> None:
         """Record the unusable reply as a session, then write the terminal ``FAILED``.
 
         A bad reply / template failure ends the run on the board rather than raising,
         so the failure stays replayable; the raw reply lives in the session snapshot.
+        When the failure happened before a reply (e.g. a search provider error) there is
+        no session to keep, so only ``FAILED`` is written.
         """
-        self._record_session(
-            reply,
-            session_id=session_id,
-            task=task,
-            intent_id=intent_id,
-            started=started,
-            ended=ended,
-        )
+        if reply is not None:
+            self._record_session(
+                reply,
+                session_id=session_id,
+                task=task,
+                intent_id=intent_id,
+                started=started,
+                ended=ended,
+                worker=worker,
+            )
         self._store.append_event("FAILED", {"reason": str(exc)})
 
     async def run(self, *, origin: Fact, goal: Fact) -> Board:
         """Start a run: ``PROJECT``, Bootstrap, one Reason pass, then dispatch.
 
-        Dispatch executes one round of every open Intent the engine can run (id order,
-        one worker at a time until M1 I4 adds concurrency); a multi-round Stigmergy
-        convergence loop is a later slice.
+        Dispatch executes one round of every open Intent the engine can run (Explore
+        passes run concurrently up to ``max_concurrency``, committed in id order); a
+        multi-round Stigmergy convergence loop is a later slice.
         """
         self._fact_seq = {}
         self._intent_seq = 0
@@ -553,12 +619,15 @@ class Engine:
         )
 
     async def _dispatch(self) -> None:
-        """Run one dispatch round: every open Intent the engine can execute, in id order.
+        """Run one dispatch round: every open Intent the engine can execute.
 
         The round works on a snapshot of the board as Reason left it (multi-round
         Stigmergy convergence is a later slice); ``verify`` Intents stay open until M2
-        wires the compare capability. After each pass the board is re-folded so a
-        terminal event written by one pass stops the round deterministically.
+        wires the compare capability. Every pending Intent is claimed up front (id
+        order), then the Explore passes run concurrently, bounded by ``max_concurrency``.
+        Outcomes are committed back in id order, so the Board (fact ids and structural
+        edges) is deterministic even though completion order is not; the round stops
+        committing at the first hard failure.
         """
         board = reduce(self._store.read_events())
         pending = [
@@ -566,90 +635,202 @@ class Engine:
             for intent in board.intents
             if intent.status == "open" and intent.type in DISPATCHABLE_TYPES
         ]
-        for intent in pending:
-            await self._explore(intent)
-            if reduce(self._store.read_events()).status != "running":
-                # A FAILED written by the pass (or any later terminal) ends the round.
-                return
-
-    async def _explore(self, intent: Intent) -> None:
-        """Execute one Intent: claim it, gather search context, conclude its facts.
-
-        The claim (``EXECUTE``) is written before any capability call, so a provider
-        failure is still visible as "claimed, then the run died". For an ``explore``
-        Intent the engine calls ``search`` with the intent's question and passes the
-        results to the worker via ``extra``; the worker itself never touches providers.
-        """
+        if not pending:
+            return
         try:
+            # Fetched once for the whole round; a missing template is a provider
+            # failure, written before any Intent is claimed.
             template = await self._prompt.get("explore")
         except (CapabilityError, FileNotFoundError) as exc:
-            # A missing template is a provider failure: terminal, on the board. It is
-            # fetched before EXECUTE, so an unclaimable intent is never half-claimed.
             self._store.append_event("FAILED", {"reason": str(exc)})
             return
-        board = reduce(self._store.read_events())  # Observe: the current graph
-        self._store.append_event(
-            "EXECUTE",
-            {"intentId": intent.id, "worker": WORKER_ID, "model": self._worker_model},
-        )
-        extra: dict[str, Any] = {
-            "intent": {
-                "id": intent.id,
-                "type": intent.type,
-                "from": intent.from_,
-                "question": intent.question,
-            }
-        }
-        if intent.type == "explore":
-            try:
-                # The query is the intent's auditable question (protocol section 2.2).
-                extra["search"] = await self._search.search(intent.question)
-            except CapabilityError as exc:
-                self._store.append_event("FAILED", {"reason": str(exc)})
-                return
-        try:
-            reply, started, ended, session_id = await self._invoke(
-                "Explore", template, board, extra=extra
+        # Claim each Intent up front, in id order, with a deterministic worker label;
+        # a later provider/worker failure is then auditable as "claimed, then ...".
+        workers = [self._worker_label(index) for index in range(len(pending))]
+        session_ids = [self._next_session_id() for _ in pending]
+        for intent, worker in zip(pending, workers, strict=True):
+            self._store.append_event(
+                "EXECUTE",
+                {"intentId": intent.id, "worker": worker, "model": self._worker_model},
             )
-        except CapabilityError as exc:
-            # A worker/provider failure still ends the run loudly and terminal.
-            self._store.append_event("FAILED", {"reason": str(exc)})
-            return
+        semaphore = asyncio.Semaphore(self._max_concurrency)
+        outcomes = await asyncio.gather(
+            *(
+                self._guarded_run_explore(intent, board, template, worker, session_id, semaphore)
+                for intent, worker, session_id in zip(pending, workers, session_ids, strict=True)
+            )
+        )
+        # Worker replies carry no ids; assign them at commit time, in id order, so the
+        # resulting fact ids never depend on which Explore happened to finish first.
+        for outcome in outcomes:
+            if outcome.error is not None:
+                if (
+                    isinstance(outcome.error, _ExploreTimeout)
+                    and self._heartbeat_on_timeout == "release"
+                ):
+                    # Lease expired: hand the Intent back to the board as ``open`` and
+                    # keep committing the rest of the round (protocol section 8).
+                    self._store.append_event(
+                        "RELEASE",
+                        {"intentId": outcome.intent_id, "reason": str(outcome.error)},
+                    )
+                    continue
+                self._fail(
+                    outcome.error,
+                    reply=outcome.reply,
+                    session_id=outcome.session_id,
+                    task="Explore",
+                    intent_id=outcome.intent_id,
+                    started=outcome.started,
+                    ended=outcome.ended,
+                    worker=outcome.worker,
+                )
+                return
+            for fact in outcome.facts:
+                fact.id = self._next_fact_id(fact.kind)
+            self._store.append_event(
+                "CONCLUDE",
+                {
+                    "intentId": outcome.intent_id,
+                    "facts": [fact.to_dict() for fact in outcome.facts],
+                },
+            )
+            assert outcome.reply is not None  # a success outcome always carries a reply
+            self._record_session(
+                outcome.reply,
+                session_id=outcome.session_id,
+                task="Explore",
+                intent_id=outcome.intent_id,
+                started=outcome.started,
+                ended=outcome.ended,
+                worker=outcome.worker,
+            )
+
+    async def _guarded_run_explore(
+        self,
+        intent: Intent,
+        board: Board,
+        template: PromptTemplate,
+        worker: str,
+        session_id: str,
+        semaphore: asyncio.Semaphore,
+    ) -> _ExploreOutcome:
+        """Run one Explore pass, turning any escaping exception into an outcome.
+
+        A pass must never let an unexpected exception (a provider bug, an ``OSError``,
+        ...) abort ``asyncio.gather`` and leave its siblings running after ``run()``
+        returns -- that would write to the blackboard after the run is over. Whatever
+        escapes becomes a committed terminal failure instead.
+        """
         try:
-            result = parse_result(reply.text)
-            if result.intents:
-                raise EngineError("Explore must not produce intents; direction is Reason's job")
-            if result.complete is not None:
-                raise EngineError("Explore must not judge completion; that is Reason's job")
-            self._check_explored_facts(intent, result.facts)
-        except EngineError as exc:
-            # An unusable Explore reply ends the run; keep the session for the audit.
-            self._fail(
-                exc,
+            return await self._run_explore(intent, board, template, worker, session_id, semaphore)
+        except Exception as exc:
+            return _ExploreOutcome(intent_id=intent.id, worker=worker, error=exc)
+
+    def _timeout_outcome(self, intent: Intent, worker: str) -> _ExploreOutcome:
+        return _ExploreOutcome(
+            intent_id=intent.id,
+            worker=worker,
+            error=_ExploreTimeout(
+                f"intent {intent.id} exceeded heartbeat_timeout ({self._heartbeat_timeout:g}s)"
+            ),
+        )
+
+    async def _run_explore(
+        self,
+        intent: Intent,
+        board: Board,
+        template: PromptTemplate,
+        worker: str,
+        session_id: str,
+        semaphore: asyncio.Semaphore,
+    ) -> _ExploreOutcome:
+        """Execute one Intent without writing anything; return an outcome to commit.
+
+        For an ``explore`` Intent the engine calls ``search`` with the intent's question
+        and passes the results to the worker via ``extra``; the worker itself never
+        touches providers. Every blackboard write happens later, in :meth:`_dispatch`.
+        The heartbeat lease covers the whole pass (search included), so a hung search
+        cannot hold a claimed Intent without a heartbeat or a timeout either.
+        """
+        async with semaphore:
+            extra: dict[str, Any] = {
+                "intent": {
+                    "id": intent.id,
+                    "type": intent.type,
+                    "from": intent.from_,
+                    "question": intent.question,
+                }
+            }
+            heartbeat = asyncio.create_task(self._heartbeat(intent.id))
+            try:
+                if intent.type == "explore":
+                    try:
+                        # The query is the intent's auditable question (protocol 2.2).
+                        extra["search"] = await asyncio.wait_for(
+                            self._search.search(intent.question),
+                            timeout=self._heartbeat_timeout,
+                        )
+                    except TimeoutError:
+                        return self._timeout_outcome(intent, worker)
+                    except CapabilityError as exc:
+                        return _ExploreOutcome(intent_id=intent.id, worker=worker, error=exc)
+                try:
+                    reply, started, ended, _ = await asyncio.wait_for(
+                        self._invoke(
+                            "Explore", template, board, extra=extra, session_id=session_id
+                        ),
+                        timeout=self._heartbeat_timeout,
+                    )
+                except TimeoutError:
+                    # The lease expired; the dispatcher decides release vs. fail.
+                    return self._timeout_outcome(intent, worker)
+                except CapabilityError as exc:
+                    return _ExploreOutcome(intent_id=intent.id, worker=worker, error=exc)
+            finally:
+                heartbeat.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat
+            try:
+                result = parse_result(reply.text)
+                if result.intents:
+                    raise EngineError("Explore must not produce intents; direction is Reason's job")
+                if result.complete is not None:
+                    raise EngineError("Explore must not judge completion; that is Reason's job")
+                self._check_explored_facts(intent, result.facts)
+            except EngineError as exc:
+                # An unusable reply ends the run; keep the session for the audit.
+                return _ExploreOutcome(
+                    intent_id=intent.id,
+                    worker=worker,
+                    reply=reply,
+                    session_id=session_id,
+                    started=started,
+                    ended=ended,
+                    error=exc,
+                )
+            return _ExploreOutcome(
+                intent_id=intent.id,
+                worker=worker,
+                facts=result.facts,
                 reply=reply,
                 session_id=session_id,
-                task="Explore",
-                intent_id=intent.id,
                 started=started,
                 ended=ended,
             )
-            return
 
-        # Worker replies carry no ids; assign deterministic ones before writing back.
-        for fact in result.facts:
-            fact.id = self._next_fact_id(fact.kind)
-        self._store.append_event(
-            "CONCLUDE",
-            {"intentId": intent.id, "facts": [fact.to_dict() for fact in result.facts]},
-        )
-        self._record_session(
-            reply,
-            session_id=session_id,
-            task="Explore",
-            intent_id=intent.id,
-            started=started,
-            ended=ended,
-        )
+    async def _heartbeat(self, intent_id: str) -> None:
+        """Emit ``HEARTBEAT`` for one in-flight Intent until the caller cancels it (I4).
+
+        The engine (the sole writer) is the one keeping the lease alive; a worker never
+        heartbeats. If the call outlives ``heartbeat_timeout`` the caller cancels this
+        task and the dispatcher commits ``RELEASE`` or ``FAILED``.
+        """
+        while True:
+            await asyncio.sleep(self._heartbeat_interval)
+            self._store.append_event(
+                "HEARTBEAT", {"intentId": intent_id}, message=f"{intent_id} heartbeat"
+            )
 
     def _check_explored_facts(self, intent: Intent, facts: list[Fact]) -> None:
         """Check a batch of produced facts against what the Intent type may yield."""

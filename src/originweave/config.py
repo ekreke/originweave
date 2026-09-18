@@ -29,6 +29,19 @@ ALLOWED_WORKER_PROVIDERS: frozenset[str] = frozenset({"local", "pi"})
 ALLOWED_WORKER_TOOLS: frozenset[str] = frozenset(
     {"search", "read", "grep", "find", "ls", "bash", "edit", "write"}
 )
+# What happens when a single Worker call exceeds [worker].heartbeat_timeout (I4).
+ALLOWED_HEARTBEAT_ON_TIMEOUT: frozenset[str] = frozenset({"release", "fail"})
+# Sanity ceiling on [worker].max_concurrency (I4); protects the host from a runaway pool.
+MAX_WORKER_CONCURRENCY = 16
+# Duration units accepted by [worker.budget].max_wall and the [worker].heartbeat_* keys.
+_DURATION_UNITS: dict[str, float] = {
+    "ms": 0.001,
+    "s": 1.0,
+    "m": 60.0,
+    "h": 3600.0,
+    "d": 86400.0,
+}
+_DURATION_RE = re.compile(r"([1-9][0-9]*)(ms|s|m|h|d)")
 
 _TOP_LEVEL_KEYS: frozenset[str] = frozenset({"hitl", "capability", "worker", "run"})
 _TABLE_KEYS: dict[str, frozenset[str]] = {
@@ -37,7 +50,17 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
     "capability.search": frozenset({"provider"}),
     "capability.prompt": frozenset({"provider", "directory"}),
     "capability.model": frozenset({"provider", "model", "base_url"}),
-    "worker": frozenset({"provider", "max_concurrency", "tools", "budget"}),
+    "worker": frozenset(
+        {
+            "provider",
+            "max_concurrency",
+            "tools",
+            "heartbeat_interval",
+            "heartbeat_timeout",
+            "heartbeat_on_timeout",
+            "budget",
+        }
+    ),
     "worker.budget": frozenset({"max_steps", "max_wall", "max_cost"}),
     "run": frozenset({"dir"}),
 }
@@ -45,6 +68,20 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
 
 class ConfigError(ValueError):
     """Raised when a configuration value is missing or invalid."""
+
+
+def parse_duration(text: str, where: str = "duration") -> float:
+    """Parse a positive duration such as ``"10m"`` into seconds.
+
+    The grammar is a positive integer followed by ``ms|s|m|h|d`` (no whitespace).
+    Used by ``[worker.budget].max_wall`` and the heartbeat lease settings (I4).
+    """
+    match = _DURATION_RE.fullmatch(text)
+    if match is None:
+        raise ConfigError(
+            f"{where} must be a positive integer followed by ms, s, m, h, or d; got {text!r}"
+        )
+    return int(match.group(1)) * _DURATION_UNITS[match.group(2)]
 
 
 @dataclass(frozen=True)
@@ -93,6 +130,12 @@ class WorkerConfig:
     max_concurrency: int = 1
     # Pi tool allowlist; empty means "no tools" (M6).
     tools: tuple[str, ...] = ()
+    # Liveness lease for a single Worker call (I4): the engine writes HEARTBEAT every
+    # ``heartbeat_interval`` and treats a call exceeding ``heartbeat_timeout`` as dead,
+    # then either RELEASEs the Intent (``release``) or fails the run (``fail``).
+    heartbeat_interval: str = "15s"
+    heartbeat_timeout: str = "5m"
+    heartbeat_on_timeout: str = "release"  # release | fail
     budget: BudgetConfig = field(default_factory=BudgetConfig)
 
 
@@ -128,6 +171,9 @@ class Config:
                 "provider": self.worker.provider,
                 "max_concurrency": self.worker.max_concurrency,
                 "tools": list(self.worker.tools),
+                "heartbeat_interval": self.worker.heartbeat_interval,
+                "heartbeat_timeout": self.worker.heartbeat_timeout,
+                "heartbeat_on_timeout": self.worker.heartbeat_on_timeout,
                 "budget": {
                     "max_steps": self.worker.budget.max_steps,
                     "max_wall": self.worker.budget.max_wall,
@@ -167,21 +213,36 @@ class Config:
             raise ConfigError(
                 f"worker.max_concurrency must be > 0, got {self.worker.max_concurrency}"
             )
+        if self.worker.max_concurrency > MAX_WORKER_CONCURRENCY:
+            raise ConfigError(
+                f"worker.max_concurrency must be <= {MAX_WORKER_CONCURRENCY}, "
+                f"got {self.worker.max_concurrency}"
+            )
         unknown_tools = sorted(set(self.worker.tools) - ALLOWED_WORKER_TOOLS)
         if unknown_tools:
             raise ConfigError(
                 f"worker.tools: unknown tool(s) {unknown_tools}; "
                 f"allowed: {sorted(ALLOWED_WORKER_TOOLS)}"
             )
+        if self.worker.heartbeat_on_timeout not in ALLOWED_HEARTBEAT_ON_TIMEOUT:
+            raise ConfigError(
+                "worker.heartbeat_on_timeout must be one of "
+                f"{sorted(ALLOWED_HEARTBEAT_ON_TIMEOUT)}; "
+                f"got {self.worker.heartbeat_on_timeout!r}"
+            )
+        interval = parse_duration(self.worker.heartbeat_interval, "worker.heartbeat_interval")
+        timeout = parse_duration(self.worker.heartbeat_timeout, "worker.heartbeat_timeout")
+        if interval >= timeout:
+            raise ConfigError(
+                "worker.heartbeat_interval must be < worker.heartbeat_timeout "
+                f"(got {self.worker.heartbeat_interval} >= {self.worker.heartbeat_timeout})"
+            )
         budget = self.worker.budget
         if budget.max_steps <= 0:
             raise ConfigError(f"worker.budget.max_steps must be > 0, got {budget.max_steps}")
         if budget.max_cost < 0:
             raise ConfigError(f"worker.budget.max_cost must be >= 0, got {budget.max_cost}")
-        if not re.fullmatch(r"[1-9][0-9]*(?:ms|s|m|h|d)", budget.max_wall):
-            raise ConfigError(
-                "worker.budget.max_wall must be a positive integer followed by ms, s, m, h, or d"
-            )
+        parse_duration(budget.max_wall, "worker.budget.max_wall")
 
 
 def _as_mapping(value: Any, where: str) -> Mapping[str, Any]:
@@ -316,6 +377,21 @@ def from_dict(data: Mapping[str, Any]) -> Config:
                 worker.get("tools"),
                 "worker.tools",
                 defaults.worker.tools,
+            ),
+            heartbeat_interval=_as_str(
+                worker.get("heartbeat_interval"),
+                "worker.heartbeat_interval",
+                defaults.worker.heartbeat_interval,
+            ),
+            heartbeat_timeout=_as_str(
+                worker.get("heartbeat_timeout"),
+                "worker.heartbeat_timeout",
+                defaults.worker.heartbeat_timeout,
+            ),
+            heartbeat_on_timeout=_as_str(
+                worker.get("heartbeat_on_timeout"),
+                "worker.heartbeat_on_timeout",
+                defaults.worker.heartbeat_on_timeout,
             ),
             budget=BudgetConfig(
                 max_steps=_as_int(
