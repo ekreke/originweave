@@ -13,9 +13,10 @@
     worker LLM 复用 `[capability.model]`（仅 openai 兼容）。
   - **P2 `PiWorker`**（`capabilities/pi.py`，`pi-py-sdk`，每会话隔离，运行时缺失明确报错，
     Pi turns 计入 `max_steps`，注入 fake 测试）。
-  - P3 proto/server（Settings/Search/Session）；P4 TS 搜索扩展回调 server `Search`；
-    P5 前端 Settings + 会话视图；P6 容器化（并入 M3）。
-  - 依赖：P1/P2 不依赖 server；P3–P5 依赖 **M1c-1**。
+  - P3 proto/server（Settings/Search/Session）；**P4 TS 搜索扩展回调 server `Search`**——加载机制
+    已 spike 验证（见「已完成（近期）」）；P5 前端 Settings + 会话视图；P6 容器化（并入 M3）。
+  - 依赖：P1/P2 不依赖 server；P3–P5 依赖 **M1c-1**。**P2 live 遗留**（配置目录环境变量名硬编码）
+    见「已知风险 / 缺口」，P4 接线前须先修。
 - **M1 迭代切片**（引擎为库层、进程内 Dispatcher；`model`/`search` provider 已就绪）：
   已落地：**I1** Bootstrap、**I2a** `FAILED`/`STOPPED`、**I2** Reason、**I2b** Validate 去重、
   **I3** Explore + search（来源回链 `citation`/`source` + `Evidence`；`decompose`/`explore`
@@ -35,8 +36,10 @@
   - **C2 持久化（已完成）**：`persistence.py`（`Run`/`Project`、`allocate_run_id`、`summarize_run`、
     `ProjectRegistry`）；`store.py` 增 `run.json` IO；`config.py` 增 `[project].dir`（默认 `projects`）。
     `run.json` 只存**静态元数据**（结果一律由 `events.jsonl` 派生）；目录式 `projects/<id>/project.json`。
-  - **下一步 C3**：service 接线（DI providers、`CreateRun{source_text}` 后台调度、只读 RPC、
-    `AddHint`/`SubmitHumanInput`）。
+  - **C3a 只读接线（已完成）**：`server/context.py`（`ServerContext`/`Providers`，`create_app(config/providers/root)`）、
+    `server/convert.py`（领域/事件 → proto）、`service.py` 实现 5 个只读 RPC（`NOT_FOUND`）。
+  - **下一步 C3b**：`CreateRun{source_text}`（分配 id、写 `input/`+`run.json`、后台 asyncio 跑 `Engine.run`、
+    返回 `Run`）、`AddHint`→`HINT`、`SubmitHumanInput`→`resume`。
   - **C4** `originweave ui`（uvicorn + `frontend/dist` + `--run` 只读；端口 8765）+ Makefile/CI/README。
   - 已定：proto 加 `source_text`（`url` 暂不支持）；目录式 projects；`CreateRun` 后台调度；统一端口 `8765`。
 - 随后：M1c-2（前端接线与 UI）。
@@ -93,6 +96,12 @@
 - [ ] CLI `capabilities install-obscura` 命名：旧 `obscura_kitesurf` 占位样例已被从零构建的
       `copilot_productivity` 替换，该命令名（`product-overview.md` §5 冻结契约）语义脱节；
       是否改名留待 M3 决定
+- [ ] **M6 P4** server URL 传递：worker 如何得知 server 地址（env `ORIGINWEAVE_SERVER_URL` 默认
+      `http://127.0.0.1:8765`，vs 落 `[worker]`/`[server]` 配置）；未设置且启用 `search` 时明确报错
+- [ ] **M6 P4** 扩展文件位置与 TS 测试宿主：`runtime/pi-extensions/`（独立于 `frontend/`）；TS 测试
+      用新建 vitest 还是仅在 Python 侧断言「工具已注册/被调用」
+- [ ] **M6 P4** `explore` 检索归属：维持引擎预取（`engine.py` 调 `search` 经 `extra` 注入）还是改由
+      Pi 的 `search` 工具自主检索（影响 Evidence 可审计性与是否双重检索）
 
 ### M6 决策（均已定，2026-09）
 
@@ -143,6 +152,12 @@
   写入/执行面（须 `cwd` 沙箱 + 白名单，默认只读 + 检索走扩展）；Pi 内部轮次需计入 `max_steps`（P2）；
   **`[worker].budget` 目前只是配置，尚未强制执行**（enforcement 归 M3）；
   `sessions/` 原始输入**不得写入任何凭据**；`WORKER_STEP` 需 `text` 截断常量防事件膨胀。
+- **M6 P2 live bug（P4 接线前须修）**：`capabilities/pi.py` 把 Pi 的 agent 配置目录环境变量硬编码为
+  `PI_CODING_AGENT_DIR`，但该变量名由 pi 构建的 `piConfig.name` 决定（`<NAME>_CODING_AGENT_DIR`）。
+  本机安装 `piConfig.name="ekreke"`，实际读 `EKREKE_CODING_AGENT_DIR`。spike 实测：硬编码名下
+  `models.json` 不加载，报 `Unknown provider "originweave-openai"`（P2 测试注入 fake agent，故未暴露）。
+  修法：按 `pi` 二进制推导 `<NAME>_CODING_AGENT_DIR`，或同时设置候选键，并在 `_require_runtime()`
+  加一条真实冒烟。
 - **`[budget]` 退役的迁移影响**：顶层 `[budget]` 迁到 `[worker].budget` 后，含 `[budget]` 的旧
   `originweave.toml` 会因未知键报错（仓库无提交的 toml，影响小，类比 Phase R 去 `[live]`）；
   `CreateRunRequest` 的 `max_steps`/`max_wall`/`max_cost` 结构不变，但语义改为覆盖 `[worker].budget`，
@@ -153,6 +168,27 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M1c-1 C3a · DI + 只读 RPC + proto 映射**：新增 `server/context.py`（`Providers` 与 `ServerContext`，
+  从 config 构建 `build_worker/search/prompt`；`create_app(config/providers/root/service)` 注入）、
+  `server/convert.py`（`Board`/`Run`/`Project`/`Event`/`Hint` 等 → `originweave.v1.*`；`Event.payload`
+  经 `json_format.ParseDict` 落 `Struct`；`Intent.from` 用映射 splat 绕过 Python 关键字）。
+  `service.py` 实现 `ListProjects`/`GetProject`/`ListProjectRuns`/`ListRuns`/`GetRun`
+  （`RunStore`→`reduce()`→`RunDetail`；缺失 → Connect `NOT_FOUND`）。mypy 补 `google.protobuf.*`
+  override（无 stubs）。测试 `tests/test_server.py` 扩展（只读路径 + `root=tmp` 隔离 + 注入）。
+  `make lint` + `make test`（259 passed, 1 skipped）+ fixture `--check` + `make replay` 全绿。
+
+- **M6 P4 · T1 Pi TS 扩展加载 spike（调研，无仓库改动）**：在临时目录（`pi` 0.84.4 + Node，本地
+  stub，零真实模型/网络）验证了 P4 的关键机制——① 仓库外 `.ts` 经 `pi --no-extensions -e <path>`
+  可由 jiti 加载（`--no-extensions` 仅关自动发现，显式 `-e` 仍生效，且无需 `--approve`）；
+  ② `typebox` 与 `@earendil-works/pi-coding-agent` 类型在扩展路径可直接 import，**无需
+  `package.json`/shim**；③ `--tools search` 按精确名启用扩展工具、`--no-tools` 关闭
+  （`getAllTools`/`getActiveTools` 同步反映）；④ 扩展可见 `PiConfig.env` 注入的
+  `ORIGINWEAVE_SERVER_URL`，Node 全局 `fetch` 回调 `POST .../OriginweaveService/Search`
+  （body `{query,numResults}`）成功；⑤ 模型→工具→回调全链路可跑通，stdout 的
+  `tool_execution_start/end`（`toolName:"search"`）正是 `PiWorker._append_step` 消费的
+  `ToolExecutionStartEvent/EndEvent`，**投影逻辑无需改**。免模型验证法（RPC + 扩展命令）可复用为
+  P4 的 CI 测试形态。**顺带定位 P2 live bug**（配置目录环境变量名，见「已知风险 / 缺口」）。
 
 - **M1c-1 C2 · 持久化**：新增 `src/originweave/persistence.py`——`Run`/`Project` 领域模型（对齐 proto）、
   `allocate_run_id`（全局 `run_00N`）、`summarize_run`（静态字段取 `run.json`，其余一律由 `events.jsonl`

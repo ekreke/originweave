@@ -34,11 +34,15 @@
 重放源。Pi 的工具（`[worker].tools`）可配置，检索类工具经 TS 扩展**回调 server `Search` RPC**，
 使 `search` provider 仍可替换（红线 4）。
 
-**PiWorker（M6 P2）** 每次调用均创建 ephemeral Pi RPC session：使用私有临时
-`PI_CODING_AGENT_DIR` 写入 OpenAI-compatible provider 配置，复用 `[capability.model]` 与
-`OPENAI_API_KEY` / `OPENAI_BASE_URL`，不改写用户 `~/.pi`。它要求 `node` 与 `pi` 在 `PATH`，
-缺失时给出安装指引；禁用自动扩展、skills、上下文文件，并只传递 `[worker].tools` 的内建白名单。
-`search` 工具须等 M6 P4 的 TS 扩展；`cwd` 仅是 P2 的工具默认根目录，容器级安全隔离归 M3/P6。
+**PiWorker（M6 P2）** 每次调用均创建 ephemeral Pi RPC session：使用私有临时配置目录写入
+OpenAI-compatible provider 配置，复用 `[capability.model]` 与 `OPENAI_API_KEY` /
+`OPENAI_BASE_URL`，不改写用户 `~/.pi`。该目录通过 Pi 的 agent-dir 环境变量指定，而**变量名由 pi
+构建的 `piConfig.name` 决定**（`<NAME>_CODING_AGENT_DIR`：上游 `pi` 为 `PI_CODING_AGENT_DIR`，
+改名构建会不同），实现须按实际二进制推导而非硬编码（见 `TODO.md` 已知风险）。它要求 `node` 与
+`pi` 在 `PATH`，缺失时给出安装指引；禁用自动扩展发现、skills、上下文文件，并只传递
+`[worker].tools` 的白名单。`search` 工具须等 M6 P4 的 TS 扩展（以
+`pi --no-extensions -e <ext.ts> --tools search` 显式加载）；`cwd` 仅是 P2 的工具默认根目录，
+容器级安全隔离归 M3/P6。
 
 要求：
 
