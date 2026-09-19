@@ -27,7 +27,15 @@
   M1 残留（非本轮）：**verify 型调度**随 M2 `compare`（`SPEC:107`）；**进程内 Dispatcher 接口对齐 M3**
   （`SPEC:114`）；**对样例输入的 fake-provider 确定性 Board 单测**（`SPEC:118`，已有 fake-provider
   确定性测试，尚缺「样例输入」覆盖）。
-- 随后：**M1c-1（server 骨架）** → M1c-2（前端接线与 UI）。
+- **M1c-1 · server 骨架（下一个，分片 C1–C4；进度真相见 `SPEC.md` M1c-1）**：
+  - **C1** Python codegen + Connect app 骨架（依赖/CI 生成 proto；`server/app.py`；ASGI smoke）。
+  - **C2** 持久化：`runs/<id>/run.json` + 目录式 `projects/<id>/project.json`（新配置 `[project].dir`）
+    + `run_00N` 分配 + `summarize_run(events)`。
+  - **C3** service 接线：DI providers、`CreateRun{source_text}`（后台 asyncio 调度、立即返回）、
+    只读 RPC、`AddHint`/`SubmitHumanInput`。
+  - **C4** `originweave ui`（uvicorn + `frontend/dist` + `--run` 只读；端口 8765）+ Makefile/CI/README。
+  - 已定：proto 加 `source_text`（`url` 暂不支持）；目录式 projects；`CreateRun` 后台调度；统一端口 `8765`。
+- 随后：M1c-2（前端接线与 UI）。
 
 ## 待确认决策
 
@@ -36,6 +44,11 @@
 - [x] ~~capability 录制格式~~ → **已撤销**（Phase R：能力改为真实调用，无 cache/录制）
 - [x] run dir 的默认根目录 → server 写 `runs/`（gitignored，`Makefile` 的 `RUNS_DIR`），
   `replay`/`ui` 读已入库的样例目录（`RUN_DIR`）（M0d 定）
+- [x] server 持久化布局 → `runs/<run_id>/run.json` + 目录式 `projects/<project_id>/project.json`，
+  projects 根用新配置 `[project].dir`（默认 `projects`；由 **C2** 落地，当前 `config.py` 尚未接受该键）；
+  `run_00N` 全局分配（M1c-1 定）
+- [x] `CreateRun` 的资料 A 输入 → proto 新增 `CreateRunRequest.source_text`（`source_type="text"`）；
+  `url` 暂不支持（M1c-1 定）
 - [x] 起 run 的入口 → **无 CLI `trace`**，走 server / proto `CreateRun`（契约重排定）
 - [x] proto 方案 → **Connect / buf**，契约 `proto/originweave/v1/*.proto`（契约重排定）
 - [x] 前端 → **React + Vite + `@connectrpc/connect-web`**，直连 proto、无 mock（契约重排定）
@@ -55,7 +68,7 @@
   `VALIDATE` 事件（`events.py` + §5）。
 - [x] 失败/停止如何落盘 → **新增事件 `FAILED` / `STOPPED`（现在加）**：reducer 置 `status=failed|stopped`；
   `paused` 仍无事件，随 M3 可控性。落 **I2a**。
-- [ ] server 监听端口（前端 `transport` 暂用 8787；与 CLI `ui` 的 8765 区分）→ M1c-1 定
+- [x] server 监听端口 → **Connect API 与静态统一 `8765`**（前端 `transport` 默认改指它，属 M1c-2/C4）（M1c-1 定）
 - [ ] Docker runtime 的镜像来源与构建归属（server 仓内构建 vs 独立镜像）
 - [x] HITL Gate A 触发点与语义 → **Bootstrap 之后、Reason 之前**（先确认 main-claim 再拆解；
   非 auto 时即使 Bootstrap 没抽出 main-claim 也照常挂起，不静默绕过）。原协议「decompose 之后确认

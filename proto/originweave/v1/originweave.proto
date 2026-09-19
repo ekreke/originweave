@@ -285,6 +285,8 @@ message CreateRunRequest {
   optional string max_wall = 7; // duration string, e.g. "10m"
   optional double max_cost = 8; // USD
   optional bool auto = 9; // true = skip HITL gates
+  // Document A text; provided when source_type = "text". "url" is not yet supported.
+  optional string source_text = 10;
 }
 
 message CreateRunResponse {

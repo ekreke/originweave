@@ -150,16 +150,41 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 
 目标：把 proto 契约落地为 **Connect Python server**（Starlette + uvicorn + `connect-python`），
 接线 M1 引擎（`agent-design.md` §6 的进程内临时态；容器化归 M3）；`originweave ui` 起服务与静态视图。
+按 **C1–C4** 分片推进，每次迭代一片。
 
-- [ ] Python codegen：`protoc-gen-connect-python` + 根 `buf.gen.yaml` → `src/originweave/gen`（生成物排除 ruff/mypy）
-- [ ] 持久化：`runs/<run_id>/run.json`（`Run` 元数据）+ 目录式 `projects/` 注册表；`events.jsonl` 仍为 board 唯一事实来源
-- [ ] server：只读视图（`ListProjects`/`GetProject`/`ListProjectRuns`/`ListRuns`/`GetRun`）+ `CreateRun` + `AddHint` + `SubmitHumanInput`（`RunStore` → `reduce()` → `RunDetail`）
-- [ ] 接线 M1 引擎（进程内 Dispatcher）；`CreateRun` 分配 `run_00N` 并调用引擎；调度与持久化归 server（红线 2）
-- [ ] `originweave ui`（替换 stub）：Starlette 提供 Connect 端点 + `frontend/dist` 静态
-- [ ] 测试：ASGI 客户端对 service 的读写（注入 fake provider）、`replay` 路径
+### C1 · Python codegen + Connect app 骨架
 
-验收：起 server（测试注入 fake provider）→ `CreateRun` 用 `copilot_productivity` 样例产出 run →
-`GetRun` 返回 `RunDetail`（含 events/facts/intents）→ `AddHint`/`SubmitHumanInput` 落为事件。
+- [ ] 依赖/工具链：`protobuf` / `connect-python`（含 `protoc-gen-connect-python`）/ `starlette` / `uvicorn`；
+      `make proto` 跑通 `buf generate proto` → `src/originweave/gen`（生成物不入库，ruff/mypy 已 exclude）
+- [ ] CI `python` job 先生成 proto（buf-setup + 插件 PATH）再 lint/typecheck/test
+- [ ] `server/app.py`：构造 `OriginweaveService` 的 Connect ASGI app（8 RPC；只读方法最小实现，其余 `UNIMPLEMENTED`）
+- [ ] 测试：ASGI 客户端 smoke（`ListProjects` 空列表等）
+
+### C2 · 持久化（run.json + projects 注册表）
+
+- [ ] `Run` / `Project` 领域模型；`runs/<run_id>/run.json` + 目录式 `projects/<project_id>/project.json`
+      （新配置 `[project].dir`，默认 `projects`）；`events.jsonl` 仍为 board 唯一事实来源
+- [ ] `run_00N` 分配；`summarize_run(events) -> Run`（使无 `run.json` 的样例目录可被只读服务；
+      样例缺 `project_id`/`title`/`source_type`/`analysis`，按目录名/默认值回填）
+- [ ] 测试：run.json 往返、id 分配、由事件派生 Run
+
+### C3 · service 接线（引擎 + 只读 + HITL）
+
+- [ ] DI providers（测试注入 fake）；`CreateRun`：`source_text` → 分配 id、落 `run.json(queued)`、
+      后台 asyncio 任务跑 `Engine.run`、返回 `Run`（调度与持久化归 server，红线 2）
+- [ ] 只读 RPC `ListProjects`/`GetProject`/`ListProjectRuns`/`ListRuns`/`GetRun`
+      （`RunStore` → `reduce()` → `RunDetail`）
+- [ ] `AddHint` → `HINT` 事件；`SubmitHumanInput` → 重建 `Engine` 调 `resume`（I5 已支持 fresh-engine 续号）
+- [ ] 测试：ASGI 客户端注入 fake provider，`CreateRun → GetRun`（events/facts/intents）、
+      `AddHint`/`SubmitHumanInput` 落事件
+
+### C4 · `originweave ui` + 静态 + 端到端
+
+- [ ] `ui`（替换 stub）：uvicorn 起 app、托管 `frontend/dist`（存在时）；`--run <dir>` 单 run 只读；端口统一 `8765`
+- [ ] `Makefile` / `README` / CI 同步；`ui` 冒烟测试；前端 `transport` 默认端口改指 `8765`（前端代码，随 M1c-2）
+
+验收：注入 fake provider 起 server → `CreateRun{source_text}` 产出 run → `GetRun` 返回 `RunDetail`
+（含 events/facts/intents）→ `AddHint`/`SubmitHumanInput` 落为事件。
 
 ---
 

@@ -27,7 +27,7 @@ originweave 的四条硬性原则：
 
 | | 内容 |
 |---|---|
-| 输入 | 资料 A：网页 URL（`sourceType: url`）或纯文本（`sourceType: text`）；以及 `goal`（停止条件/判定标准；`CreateRun` 必填） |
+| 输入 | 资料 A：网页 URL（`sourceType: url`）或纯文本（`sourceType: text`）；以及 `goal`（停止条件/判定标准；`CreateRun` 必填）。**当前仅支持纯文本**（`CreateRun.source_text`；`url` 暂不支持） |
 | 产物 | ① 溯源 DAG（Fact/Intent 节点 + 边 + 证据）② 偏差记分卡（deviation 列表）③ report（verdict + summary + findings + sources）④ append-only 事件时间线 ⑤ 实体-关系图（可选，`CreateRun.analysis=relation\|both`） |
 
 ## 4. 领域模型（冻结契约）
@@ -237,6 +237,7 @@ originweave mcp [--run <dir>]
   （架构红线 2），不在 CLI 内跑重任务。
 - `analysis`（`provenance|relation|both`）、预算（`max_steps`/`max_wall`/`max_cost`）与
   `auto`（跳过 HITL Gate）是 `CreateRunRequest` 的字段（或配置 `[hitl].auto`），不是 CLI flag。
+  资料 A 正文经 `CreateRunRequest.source_text` 传入（`source_type="text"`；`url` 暂不支持）。
 
 实现状态：`init`（生成 `originweave.toml`，已存在需 `--force`）、`capabilities list`
 （M0b）与 `replay`（M0c，只读重放）已实现；`ui` / `mcp` / `capabilities install-obscura`

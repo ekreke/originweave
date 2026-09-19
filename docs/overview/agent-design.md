@@ -79,10 +79,16 @@ max_wall = "10m"        # 正整数 + ms|s|m|h|d
 max_cost = 2.0
 [run]
 dir = "runs"
+[project]
+dir = "projects"        # 目录式 project 注册表根（M1c-1）
 ```
 
 - `heartbeat_*` 是**单次调用**的租约（liveness），`[worker.budget].max_wall` 是**会话总预算**
   （M3 执行 → `STOPPED`）；两者语义不同。`release` 忠于协议 §8「超时自动释放」，`fail` 则终止 run。
+- **持久化（M1c-1）**：`[run].dir` 下每次 run 一个目录（`events.jsonl` 为唯一事实来源，另有
+  `run.json` 元数据与 `sessions/`）；`[project].dir` 是**目录式 project 注册表**根
+  （`projects/<project_id>/project.json`）。`run_00N` 全局分配。**注意**：`[project]` 计划随
+  M1c-1 **C2** 落地，当前 `config.py` 尚未接受该键（现在写入会报未知键错误）。
 - **HITL（M1 I5）**：`[hitl].auto=false`（默认）时 server 以 `auto=False` 构造 `Engine`，run 在
   Bootstrap 后停在 **Gate A**（`REQUEST_HUMAN{gate:"confirm-claim"}`，run → `awaiting_human`），
   由 `Engine.resume(decision, text?, targets?)` 写 `HUMAN_INPUT` 后继续（`approve`/`edit` 继续
@@ -184,7 +190,8 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 
 ```text
 <run-dir>/
-├── events.jsonl        # append-only，每行一个 Event
+├── events.jsonl        # append-only，每行一个 Event（board 唯一事实来源）
+├── run.json            # Run 元数据（M1c-1；可空/可由事件重建）
 ├── input/              # 资料 A 快照（URL 抓取或文本）
 ├── sources/            # 来源快照（可回链的原文/存档）
 ├── sessions/           # 会话快照：一次 Worker 调用的原始输入/输出 + 步骤链（M6）

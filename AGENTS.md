@@ -30,8 +30,10 @@
   `heartbeat_on_timeout=release|fail` 写 `RELEASE`/`FAILED`。**I5 HITL 已落地**：`Engine(auto=...)`
   非 auto 时 `run` 在 Bootstrap 后写 `REQUEST_HUMAN{gate:"confirm-claim"}` 停在 Gate A，
   `Engine.resume(decision, text?, targets?)` 写 `HUMAN_INPUT` 继续（`reject`→`STOPPED`）或
-  `run(auto=True)` 跳过。**I6 收敛已落地**：`_continue` 多轮 Reason→dispatch，仅在产生新 Fact 时再
+   `run(auto=True)` 跳过。**I6 收敛已落地**：`_continue` 多轮 Reason→dispatch，仅在产生新 Fact 时再
   Reason，至 `COMPLETE`／死胡同（保持 `running`）；`Engine(max_rounds=10)` 为安全阀。
+  **server 未实现**：起 run 走 server/proto 归 **M1c-1（分片 C1–C4，见 `SPEC.md`）**；`CreateRun`
+  经 `source_text` 收资料 A；server 落地后 `make proto` 是 `lint`/`test` 的前置（生成物不入库）。
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
   `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
 - **stub（打印 “not implemented yet”、返回 0）**：`ui` / `mcp` / `capabilities install-obscura`。
@@ -51,7 +53,7 @@
 - `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出、**勿手改**）：前端 TS 由
   `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，落到 `frontend/src/gen/`），
   server Python 归 M1c-1（根 `buf.gen.yaml`）。
-- **前端（`fronten*d/`，M1b 脚手架）**：React + Vite + TS + React Flow + Connect；目前是
+- **前端（`frontend/`，M1b 脚手架）**：React + Vite + TS + React Flow + Connect；目前是
   **无数据空壳**（不接 mock），真实数据接线与 DAG/Gate UI 归 **M1c-2**。
 - **M6（进行中，见 `SPEC.md` M6）**：把执行体抽为可插拔 **`Worker`**（`[worker].provider = local | pi`）；
   **P2 `PiWorker` 已落地**，经固定 `pi-py-sdk` 驱动官方 TS agent 运行时（运行时需 **Node + `pi` 二进制**，
@@ -67,6 +69,8 @@ make install                # uv sync
 make test                   # pytest（addopts=-q）
 make lint                   # ruff check src tests scripts + mypy src（mypy strict，只查 src）
 make fmt                    # ruff format src tests scripts
+make proto                  # buf generate proto -> src/originweave/gen（M1c-1；需 buf + protoc-gen-connect-python）
+make fixtures               # 重生成样例事件 events.jsonl（scripts/build_sample_fixtures.py，另有 --check 校验）
 make cloc                   # 仅统计 src/originweave 逻辑行数
 uv run pytest tests/test_config.py::test_default_values   # 跑单个测试
 ```
@@ -103,12 +107,16 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   <=16)、`tools`(Pi 工具白名单)、`heartbeat_interval`(默认 `"15s"`)/`heartbeat_timeout`(默认 `"5m"`，
   须 `> interval`)/`heartbeat_on_timeout`(`release`\|`fail`)、`budget`（`max_steps` / `max_wall` /
   `max_cost`）；时长均为正整数加 `ms|s|m|h|d`（`config.parse_duration`）。Pi 的 model/base_url 复用
-  `[capability.model]`。顶层 `[budget]` 已退役，旧配置会报错。
+  `[capability.model]`。顶层 `[budget]` 已退役，旧配置会报错。**M1c-1（计划，C2 落地）** 顶层
+  `[project]`：`dir`(目录式 project 注册表根，默认 `"projects"`)；`[run].dir`(run 根，默认 `"runs"`)
+  已存在。**注意 `[project]` 尚未被 `config.py` 接受**（现在写入会报未知键错误）。
 - **HITL 开关**：`[hitl].auto` 或 `CreateRunRequest.auto` 只控制 Gate（默认人工介入）。
 - **凭据只从环境变量读**，不写入配置，且**多为可选**：`EXA_API_KEY` / `PARALLEL_API_KEY`
   （search 免费端点默认免 key）、`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、
   `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
 - **能力为真实调用**（Phase R 已移除 `[live]`/cache/录制回放）：测试注入 fake provider，不打真网。
+- **测试与工具链**：pytest `asyncio_mode = "auto"`（`pyproject.toml`），async 测试**不加**
+  `@pytest.mark.asyncio`；ruff `line-length = 100`（非默认 88），mypy strict **只查 `src`**。
 - **事件字段名是契约**：`Event{id,at,type,message,tone,payload}`；reducer 只消费 `type`+`payload`，
   `message`/`tone` 仅展示。已实现 16 种类型（M1 增 `FAILED`/`STOPPED` → `status=failed|stopped`；
   M6 增 `SESSION`/`WORKER_STEP`，reducer 忽略、Board 不变）；`ENTITY`/`RELATION` 属 M5。见
@@ -118,7 +126,8 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   语义边（`main-chain`/`dependency`/`goal-derived`）必须显式写进事件 payload，结构边由 reducer 派生。
 - **实体-关系图（M5）走同一 reducer**：事件 `ENTITY`/`RELATION`、模型 `Entity`/`Relation`/`EntityGraph`，
   契约见 `blackboard-protocol.md` §2.6/§5；仅当 `Run.analysis` 含 `relation` 时启用。
-- `runs/` 与 `*.jsonl` 不入库（`.gitignore` 已就绪）；运行产物不要提交。
+- `runs/` 与 `*.jsonl` 不入库（`.gitignore` 已就绪；`examples/**/*.jsonl` 例外放行，样例事件入库）；
+  运行产物不要提交。
 - 布局：src layout，包在 `src/originweave/`；测试 `tests/`；样例 `examples/`；proto 契约
   `proto/`（M1b）；前端 `frontend/`（M1b 脚手架、M1c-2 接线）；CI 在 `.github/workflows/ci.yml`
   （3 个 job：`python` ruff → mypy → pytest；`proto` `buf lint`；`frontend` gen → typecheck →

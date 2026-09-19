@@ -2,10 +2,12 @@
 
 给定资料 A，定位其核心说法的真实源头，判定 A 相对源头的偏差，输出**可审计的溯源 DAG + 偏差记分卡**（每项结论带来源 URL + 逐字引用，可回链、可重放）。
 
-> 当前处于 **M1b（前端脚手架）**：脚手架、配置/capability 层、事件日志与 `replay`，
-> `examples/copilot_productivity/` 样例，以及 `proto/` 契约与 `frontend/` 界面壳均已就绪
-> （前端为无数据空壳）。**CLI 无 `trace`**：起 run 走 server / proto API（M1c-1），`ui` / `mcp` 仍为占位。
-> 版本与里程碑见 `milestones.md`。
+> 当前 **M1 主体（I1–I6，库层）已完成** —— Bootstrap/Reason/Validate/Explore pass + Stigmergy 收敛、
+> 并发 Worker/心跳、HITL Gate A；**M6（可插拔 Worker）** 的 `PiWorker`（P2）已落地（M1 残留：
+> Dispatcher 接口对齐 M3、`verify` 型调度随 M2、样例输入的确定性单测）。
+> **下一步 M1c-1（Connect server，分片 C1–C4）**：起 run 走 server / proto API（`CreateRun`，经
+> `source_text` 收资料 A），故 **CLI 无 `trace`**：`ui` / `mcp` 仍为占位。`frontend/` 为 M1b 脚手架、
+> **无数据空壳**（接线归 M1c-2）。版本与里程碑见 `milestones.md`。
 
 ## 快速开始
 
