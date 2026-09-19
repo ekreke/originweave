@@ -33,10 +33,11 @@ class _FakeModel:
 
     async def complete(self, messages: Sequence[ChatMessage]) -> str:
         self.calls.append(list(messages))
-        # Consume queued replies in order, then keep returning the last one.
-        if len(self._replies) > 1:
+        # Consume queued replies in order. Once exhausted, return a no-op Reason so the
+        # Stigmergy loop (I6) terminates instead of re-running the last scripted reply.
+        if self._replies:
             return self._replies.pop(0)
-        return self._replies[0]
+        return NO_REASON
 
 
 class _FakeSearch:
@@ -138,6 +139,10 @@ def _reason(*intents: dict[str, object]) -> str:
 
 def _validate(*keep: int, drop: list[dict[str, object]] | None = None) -> str:
     return json.dumps({"keep": list(keep), "drop": drop or []})
+
+
+def _complete(verdict: str) -> str:
+    return json.dumps({"facts": [], "intents": [], "complete": {"verdict": verdict}})
 
 
 def _explore_reply(*facts: dict[str, object]) -> str:
@@ -862,6 +867,7 @@ async def test_explore_records_session_and_event_order(tmp_path: Path) -> None:
         prompt=_FakePrompt(),
         store=store,
         auto=True,
+        max_rounds=1,  # this test pins the single-dispatch event order
     )
     await engine.run(origin=_origin(), goal=_goal())
 
@@ -925,6 +931,7 @@ def _concurrency_scenario(
         store=store,
         auto=True,
         max_concurrency=max_concurrency,
+        max_rounds=1,  # these tests pin a single dispatch round
     )
     return engine, model
 
@@ -1006,6 +1013,7 @@ async def test_heartbeat_is_emitted_while_worker_runs(tmp_path: Path) -> None:
         auto=True,
         heartbeat_interval=0.01,
         heartbeat_timeout=5.0,
+        max_rounds=1,  # pin the single slow Explore pass under test
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
@@ -1013,6 +1021,7 @@ async def test_heartbeat_is_emitted_while_worker_runs(tmp_path: Path) -> None:
     assert heartbeats  # the engine kept the lease alive during the slow call
     assert {event.payload["intentId"] for event in heartbeats} == {"i2"}
     assert board.intents[1].status == "done"
+    assert board.status == "running"
 
 
 async def test_heartbeat_timeout_releases_intent(tmp_path: Path) -> None:
@@ -1035,7 +1044,8 @@ async def test_heartbeat_timeout_releases_intent(tmp_path: Path) -> None:
     assert not any(event.type == "FAILED" for event in events)
     assert board.status == "running"
     intent = board.intents[1]
-    assert intent.status == "open"  # handed back for a later round (I6)
+    # Released back to open; I6 does not retry it because this round added no facts.
+    assert intent.status == "open"
     assert intent.claimedBy is None
 
 
@@ -1137,6 +1147,8 @@ def test_engine_rejects_bad_heartbeat_settings(tmp_path: Path) -> None:
         build(heartbeat_interval=1.0, heartbeat_timeout=1.0)
     with pytest.raises(ValueError):
         build(heartbeat_on_timeout="explode")
+    with pytest.raises(ValueError):
+        build(max_rounds=0)
 
 
 async def test_gate_a_suspends_run_after_bootstrap(tmp_path: Path) -> None:
@@ -1387,6 +1399,158 @@ async def test_replay_reproduces_human_input(tmp_path: Path) -> None:
     assert replayed.decisions[0].gate == "confirm-claim"
     assert replayed.decisions[0].decision == "approve"
     assert render_canonical(replayed) == render_canonical(board)
+
+
+async def test_stigmergy_runs_multiple_rounds_until_complete(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("Core claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+        _reason({"type": "explore", "from": "f2", "question": "Source f2."}),
+        _validate(0),
+        _explore_reply(_source_fact("Primary source")),
+        _complete("部分偏差"),
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "completed"
+    assert board.verdict == "部分偏差"
+    assert [fact.id for fact in board.facts] == ["f1", "f2", "s1"]
+    assert [(i.id, i.status) for i in board.intents] == [
+        ("i1", "done"),
+        ("i2", "done"),
+        ("i3", "done"),
+    ]
+    # Each Reason round is recorded with only the facts added since the last one.
+    triggers = [
+        event.payload["triggerFacts"]
+        for event in store.read_events()
+        if event.type == "REASON" and event.payload["phase"] == "start"
+    ]
+    assert triggers == [["f1"], ["f2"], ["s1"]]
+
+
+async def test_stigmergy_stops_at_dead_end(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("Core claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+        NO_REASON,  # the next round offers no direction
+    ).run(origin=_origin(), goal=_goal())
+
+    # Reason added facts, but round 2 proposes nothing: the loop stops (no terminal).
+    assert board.status == "running"
+    assert [intent.status for intent in board.intents] == ["done", "done"]
+    starts = [
+        event
+        for event in store.read_events()
+        if event.type == "REASON" and event.payload["phase"] == "start"
+    ]
+    assert len(starts) == 2
+
+
+async def test_stigmergy_dedups_intents_across_rounds(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("Core claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1 again."}),
+        _validate(drop=[{"index": 0, "duplicateOf": "i2", "reason": "already done"}]),
+    ).run(origin=_origin(), goal=_goal())
+
+    dropped = board.intents[2]
+    assert board.status == "running"
+    assert dropped.id == "i3"
+    assert dropped.status == "dropped"
+    assert dropped.duplicateOf == "i2"
+
+
+async def test_stigmergy_respects_max_rounds(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = Engine(
+        worker=LocalWorker(
+            model=_FakeModel(
+                _bootstrap("Core claim"),
+                _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+                _validate(0),
+                _explore_reply(_sub_claim("Sub claim")),
+                _complete("should never be reached"),
+            )
+        ),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
+        max_rounds=1,
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    # One productive round happened, then the safety valve stopped the loop.
+    assert board.status == "running"
+    assert [intent.id for intent in board.intents] == ["i1", "i2"]
+    starts = [
+        event
+        for event in store.read_events()
+        if event.type == "REASON" and event.payload["phase"] == "start"
+    ]
+    assert len(starts) == 1
+
+
+async def test_stigmergy_is_deterministic(tmp_path: Path) -> None:
+    replies = (
+        _bootstrap("Core claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+        _reason({"type": "explore", "from": "f2", "question": "Source f2."}),
+        _validate(0),
+        _explore_reply(_source_fact("Primary source")),
+        _complete("done"),
+    )
+    first = await _engine(RunStore(tmp_path / "a"), *replies).run(origin=_origin(), goal=_goal())
+    second = await _engine(RunStore(tmp_path / "b"), *replies).run(origin=_origin(), goal=_goal())
+    assert [(f.id, f.kind, f.role) for f in first.facts] == [
+        (f.id, f.kind, f.role) for f in second.facts
+    ]
+    assert [(i.id, i.type, i.status, i.producedFacts) for i in first.intents] == [
+        (i.id, i.type, i.status, i.producedFacts) for i in second.intents
+    ]
+    assert [(e.source, e.target, e.relation) for e in first.edges] == [
+        (e.source, e.target, e.relation) for e in second.edges
+    ]
+
+
+async def test_stigmergy_reason_error_after_a_productive_round_fails_run(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    bad_reason = json.dumps(
+        {"facts": [{"label": "x", "kind": "fact", "role": "none"}], "intents": [], "complete": None}
+    )
+    board = await _engine(
+        store,
+        _bootstrap("Core claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+        bad_reason,  # round 2: Reason illegally emits facts
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    events = store.read_events()
+    assert events[-1].type == "FAILED"
+    triggers = [
+        event.payload["triggerFacts"]
+        for event in events
+        if event.type == "REASON" and event.payload["phase"] == "start"
+    ]
+    assert triggers == [["f1"], ["f2"]]
 
 
 async def test_bootstrap_bad_reply_fails_run(tmp_path: Path) -> None:

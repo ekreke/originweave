@@ -109,7 +109,7 @@ API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）�
 - [x] 抽象论点拆解：`Intent(decompose)` → `sub-claim` — `engine.py`（`_run_explore` 派发分支）+ `prompts/explore.txt`
 - [x] 来源回链：`citation` / `source` 节点与 `Evidence{quote,sourceTitle,url,locator}` 登记 — `engine.py`（explore 分支调 `search`，结果经 `extra` 注入 worker）+ `prompts/explore.txt`
 - [x] 多 Worker asyncio 任务并发认领 Intent + 心跳/超时释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按 Intent id 序确定性提交，保证 Board 确定 — `engine.py` `_dispatch`/`_run_explore`/`_heartbeat`、`config.py` `[worker].heartbeat_*`/`max_concurrency<=16`（I4）
-- [ ] Stigmergy：新 Fact 触发新一轮 Reason（去重）
+- [x] Stigmergy：新 Fact 触发新一轮 Reason（去重）— `engine.py` `_continue`（多轮循环；死胡同/`max_rounds` 停止；`REASON.triggerFacts` 只记新增 facts）（I6）
 - [x] Reason 产出 Intent 的去重：`Validate` pass（复用 `model`，纯 LLM 语义判重、无 L1 预筛，比对含 `done`/`dropped` 及批内候选）→ 重复项写 `status=dropped` 留痕（`Intent.duplicateOf`）— `engine.py` + `prompts/validate.txt`
 - [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回（唯一写入者）
 - [x] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1c-2）— `engine.py` `run`（Bootstrap 后写 `REQUEST_HUMAN{gate:"confirm-claim"}`）/`resume`（`approve|edit|reject`；reject→`STOPPED`）

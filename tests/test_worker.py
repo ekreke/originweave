@@ -43,9 +43,10 @@ class _FakeModel:
 
     async def complete(self, messages: Sequence[ChatMessage]) -> str:
         self.calls.append(list(messages))
-        if len(self._replies) > 1:
+        # Once scripted replies run out, a no-op Reason lets the I6 loop terminate.
+        if self._replies:
             return self._replies.pop(0)
-        return self._replies[0]
+        return json.dumps({"facts": [], "intents": [], "complete": None})
 
 
 class _FakeSearch:

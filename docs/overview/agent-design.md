@@ -151,6 +151,9 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 - **心跳/超时释放（I4）**：执行期间引擎按 `[worker].heartbeat_interval` 写 `HEARTBEAT`；调用超过
   `[worker].heartbeat_timeout` 时按 `heartbeat_on_timeout` 写 `RELEASE`（Intent 回 `open`）或
   `FAILED`（终止 run）。心跳由引擎（唯一写入者）代发，Worker 不自行认领/心跳（红线 5）。
+- **收敛（I6，Stigmergy）**：每个 dispatch 轮产生新 Fact 后，对新增 facts 再跑一次 Reason，循环至
+  Reason 判定 `COMPLETE`、死胡同（无可派发 Intent）或本轮无新 Fact。`Engine(max_rounds=…)` 为安全阀
+  （命中保持 `running`）；真正的预算 `STOPPED` 归 M3。
 - **Dispatcher**：调度与容器生命周期，是协议的唯一写入者；Worker 不直接认领
   Intent、不发心跳，只接收 prompt 并返回结构化结果。
 

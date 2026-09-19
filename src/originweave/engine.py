@@ -294,6 +294,7 @@ class Engine:
         heartbeat_timeout: float = 300.0,
         heartbeat_on_timeout: str = "release",
         auto: bool = False,
+        max_rounds: int = 10,
     ) -> None:
         if max_concurrency <= 0:
             raise ValueError(f"max_concurrency must be > 0, got {max_concurrency}")
@@ -308,6 +309,8 @@ class Engine:
             raise ValueError(
                 f"heartbeat_on_timeout must be 'release' or 'fail'; got {heartbeat_on_timeout!r}"
             )
+        if max_rounds <= 0:
+            raise ValueError(f"max_rounds must be > 0, got {max_rounds}")
         self._worker = worker
         # The engine picks the search provider (agent-design.md red line 4): Explore
         # passes call it and hand the results to the worker as context.
@@ -322,6 +325,8 @@ class Engine:
         # HITL: when false the engine pauses at Gate A for human confirmation. The
         # product default ([hitl].auto=false) is passed by the server (M1c-1).
         self._auto = auto
+        # Safety valve on the Stigmergy loop (I6); see ``_continue``.
+        self._max_rounds = max_rounds
         self._fact_seq: dict[str, int] = {}
         self._intent_seq = 0
         self._session_seq = 0
@@ -449,9 +454,10 @@ class Engine:
         board; call :meth:`resume` with the human decision to continue. ``auto=True``
         (constructor or per-run override, wired from ``[hitl].auto``) skips the gate.
 
-        Dispatch executes one round of every open Intent the engine can run (Explore
-        passes run concurrently up to ``max_concurrency``, committed in id order); a
-        multi-round Stigmergy convergence loop is a later slice.
+        Dispatch runs the Stigmergy loop (I6): Reason proposes directions, Explore passes
+        run concurrently up to ``max_concurrency`` and are committed in id order, then a
+        new round of Reason runs on the new facts -- until Reason completes the run or
+        there is no runnable direction.
         """
         self._fact_seq = {}
         self._intent_seq = 0
@@ -546,15 +552,47 @@ class Engine:
         )
 
     async def _continue(self) -> Board:
-        """Run Reason and one dispatch round, stopping early on any terminal state."""
-        await self._reason()
-        board = reduce(self._store.read_events())
-        if board.status != "running":
-            # Reason failed / judged the goal met: nothing left to dispatch.
-            return board
-        await self._dispatch()
-        # The board is always folded from the event log, never mutated in place.
-        return reduce(self._store.read_events())
+        """Run the Stigmergy loop: Reason, dispatch, then Reason again on new facts (I6).
+
+        Each round re-reasons only when the previous dispatch added facts, so the run
+        converges to ``COMPLETE`` (Reason judges the goal met) or stops at a dead-end (no
+        runnable open Intent, e.g. only ``verify`` left for M2). ``max_rounds`` is a safety
+        valve; hitting it leaves the run ``running`` (board intact, no terminal event), as
+        does a dead-end. The board is always folded from the event log, never mutated.
+        """
+        reasoned: set[str] = set()
+        rounds = 0
+        while True:
+            before = reduce(self._store.read_events())
+            # ``reasoned`` starts empty on entry (including resume). Gate A precedes the
+            # loop, so the first pass legitimately triggers on every fact on the board.
+            new_facts = [fact.id for fact in before.facts if fact.id not in reasoned]
+            reasoned.update(new_facts)
+            await self._reason(trigger_facts=new_facts)
+            board = reduce(self._store.read_events())
+            if board.status != "running":
+                # Reason failed the run or judged the goal met (COMPLETE).
+                return board
+            pending = [
+                intent
+                for intent in board.intents
+                if intent.status == "open" and intent.type in DISPATCHABLE_TYPES
+            ]
+            if not pending:
+                # Dead-end: Reason offered no runnable direction.
+                return board
+            await self._dispatch()
+            board = reduce(self._store.read_events())
+            if board.status != "running":
+                return board
+            if len(board.facts) == len(before.facts):
+                # No new facts -> nothing to reason about next round; stop. Facts are
+                # append-only. (M5's extract/relate rounds will need entities/relations
+                # in this progress check too.)
+                return board
+            rounds += 1
+            if rounds >= self._max_rounds:
+                return board
 
     async def _bootstrap(self) -> None:
         try:
@@ -613,14 +651,15 @@ class Engine:
             ended=ended,
         )
 
-    async def _reason(self) -> None:
+    async def _reason(self, *, trigger_facts: Sequence[str]) -> None:
         """Run one Reason pass, then Validate its candidates before writing them.
 
         Reason never produces facts (that is Explore's job), and every proposed Intent
         must point at an existing fact id or ``origin``. Validate decides which
         candidates are new; duplicates are still written, but as ``dropped`` Intents, so
-        the "considered but not taken" branch stays auditable. Multi-round Stigmergy
-        convergence is a later concern; this is a single pass.
+        the "considered but not taken" branch stays auditable. ``trigger_facts`` are the
+        facts added since the previous Reason pass (all findings on the first pass); they
+        are recorded in the ``REASON`` events so the Stigmergy loop is auditable (I6).
         """
         try:
             template = await self._prompt.get("reason")
@@ -629,8 +668,7 @@ class Engine:
             self._store.append_event("FAILED", {"reason": str(exc)})
             return
         board = reduce(self._store.read_events())  # Observe: the current graph
-        # The findings already on the board are what triggered this Reason pass.
-        triggers = [fact.id for fact in board.facts]
+        triggers = list(trigger_facts)
         self._store.append_event(
             "REASON", {"phase": "start", "triggerFacts": triggers}, message="Reason: start"
         )
@@ -724,8 +762,8 @@ class Engine:
     async def _dispatch(self) -> None:
         """Run one dispatch round: every open Intent the engine can execute.
 
-        The round works on a snapshot of the board as Reason left it (multi-round
-        Stigmergy convergence is a later slice); ``verify`` Intents stay open until M2
+        The round works on a snapshot of the board as Reason left it (a later Reason
+        round handles the facts it produces, I6); ``verify`` Intents stay open until M2
         wires the compare capability. Every pending Intent is claimed up front (id
         order), then the Explore passes run concurrently, bounded by ``max_concurrency``.
         Outcomes are committed back in id order, so the Board (fact ids and structural

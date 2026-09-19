@@ -19,13 +19,15 @@
 - **M1 迭代切片**（引擎为库层、进程内 Dispatcher；`model`/`search` provider 已就绪）：
   已落地：**I1** Bootstrap、**I2a** `FAILED`/`STOPPED`、**I2** Reason、**I2b** Validate 去重、
   **I3** Explore + search（来源回链 `citation`/`source` + `Evidence`；`decompose`/`explore`
-  派发分支，`verify` 留待 M2；单轮派发，`engine.py`、`prompts/explore.txt`）、
+  派发分支，`verify` 留待 M2；`engine.py`、`prompts/explore.txt`）、
   **I4** 并发派发 + 心跳/超时（`engine.py` `_dispatch`/`_run_explore`/`_heartbeat`；
   `[worker].heartbeat_{interval,timeout,on_timeout}`、`max_concurrency<=16`）、
-  **I5** HITL Gate A（`engine.py` `run`/`resume`；`REQUEST_HUMAN`/`HUMAN_INPUT`，`auto` 跳过）。
-  待做：
-  1. **I6 · 收敛**：Stigmergy 多轮收敛 → `COMPLETE` + 确定性 Board 单测。
-- 随后：M1c-1（server）→ M1c-2（前端接线与 UI）。
+  **I5** HITL Gate A（`engine.py` `run`/`resume`；`REQUEST_HUMAN`/`HUMAN_INPUT`，`auto` 跳过）、
+  **I6** Stigmergy 多轮收敛（`engine.py` `_continue`；`triggerFacts`=新增 facts；`max_rounds` 安全阀）。
+  M1 残留（非本轮）：**verify 型调度**随 M2 `compare`（`SPEC:107`）；**进程内 Dispatcher 接口对齐 M3**
+  （`SPEC:114`）；**对样例输入的 fake-provider 确定性 Board 单测**（`SPEC:118`，已有 fake-provider
+  确定性测试，尚缺「样例输入」覆盖）。
+- 随后：**M1c-1（server 骨架）** → M1c-2（前端接线与 UI）。
 
 ## 待确认决策
 
@@ -59,6 +61,9 @@
   非 auto 时即使 Bootstrap 没抽出 main-claim 也照常挂起，不静默绕过）。原协议「decompose 之后确认
   拆解树」改为后续 Gate/切片再评估；`edit` 目前仅记录（`text`/`targets` 入 `HUMAN_INPUT`），
   修改 Fact 需契约新增「事实取代」事件（I5 定）
+- [x] Stigmergy 收敛语义（I6 定）→ 终止于 `COMPLETE` / 死胡同（无可派发 Intent）/ 本轮无新 Fact；
+  死胡同与安全阀命中均保持 `running`（不写终态）；`REASON.triggerFacts` = 自上次 Reason 的新增 facts；
+  安全阀 `Engine(max_rounds=…)` 默认 **10**，真正预算 `STOPPED` 归 M3
 - [ ] HITL Gate 的默认范围与配置粒度（三个 Gate 是否可逐项开关；`auto` 是否支持 per-gate）→
   本轮（I5）维持**全局 `[hitl].auto`**；per-gate 开关待 Gate B/C（M2/M3）再评估
 - [x] Worker 并发上限的位置与默认值 → 独立 `[worker].max_concurrency`（默认 1，代码校验 `>0`）（M6 定）
@@ -93,6 +98,9 @@
 
 ## 已知风险 / 缺口
 
+- **I6 收敛只按「新 Fact」触发重跑**：被 `RELEASE` 退回 `open` 的 Intent 不会单独重派（无新 Fact 时
+  循环即停）；完整的 Intent 重试/调度归 M3。进度判据目前只看 `facts`，M5 引入 `entities`/`relations`
+  后需一并纳入。
 - 能力调用**不再可复现**：live run（真实 model/search）两次结论可能不同；「可重放」仅靠
   `events.jsonl` 事件日志成立。
 - 测试/CI 不打真网 → provider 测试**必须注入 fake**（`httpx.MockTransport`）；live 冒烟需凭据，CI 跳过。
@@ -129,6 +137,14 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M1 I6 · Stigmergy 多轮收敛**：`engine.py` `_continue` 改为循环——每轮 Reason→dispatch 后，若产生了
+  **新 Fact** 就对新增 facts 再跑 Reason（`REASON.start.triggerFacts` 只记自上次以来的新增 facts），
+  直至 Reason 写 `COMPLETE`（→ `completed`）、死胡同（无可派发的 `open` Intent，如仅 `verify`）或本轮
+  无新 Fact。新增 `Engine(max_rounds=…，默认 10)` 安全阀，命中/死胡同均保持 `running`（无终态事件；
+  真正预算 `STOPPED` 归 M3）。确定性：跨轮 id 续号、每轮按 id 序提交、`triggerFacts` 确定。
+  契约同步 `blackboard-protocol §4.2/§4.4`、`agent-design §3.5`。`make lint` + `make test`
+  （229 passed, 1 skipped）全绿，`make replay` 不变。
 
 - **M1 I5 · HITL Gate A（挂起/恢复）**：`engine.py` 增 `auto`（默认 `False`，产品默认人工介入）与
   `GATE_A="confirm-claim"`。`run(origin, goal, auto=None)` 在 Bootstrap 后、Reason 之前，非 auto 时

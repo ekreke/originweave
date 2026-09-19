@@ -227,6 +227,14 @@ worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` �
 整个 pass（含 `search` 与 worker 调用）超过 `[worker].heartbeat_timeout` 即判定失活，按
 `heartbeat_on_timeout` 写 `RELEASE`（Intent 回 `open`，本轮其余继续）或 `FAILED`（终止 run）。
 
+**收敛（I6）**：派发轮结束后，若产生了新 Fact，则对**新增 facts** 再跑一次 Reason（`REASON.start` 的
+`triggerFacts` 只记自上次 Reason 以来的新增 facts），如此循环（Stigmergy）。循环终止于：Reason 写
+`COMPLETE`（→ `completed`）／Reason 未产出可派发的 `open` Intent（死胡同，如仅剩 `verify`，run 保持
+`running`）／本轮未新增 Fact（无进展）。`Engine(max_rounds=…)` 是安全阀，命中后同样保持 `running`，
+不写终态事件（真正的预算执行 → `STOPPED` 归 M3）。**注意**：被 `RELEASE` 退回 `open` 的 Intent 只有
+在后续某轮因其他新 Fact 触发 Reason 时才会被重新派发；本轮若再无新 Fact，循环即停（完整的重试/调度
+归 M3）。
+
 ### 4.3 一道题的完整生命周期
 ```text
 0 init      : 黑板仅 origin(资料 A) 与 goal(停止条件) 两个特殊 Fact
@@ -244,7 +252,8 @@ worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` �
 
 `analysis` 含 `relation`（或 `both`）时，同一循环改为处理 `extract`（抽实体）与 `relate`
 （判关系）两类 Intent，产出写入 `entities` / `relations` 而非 `facts`；事件溯源、
-心跳释放、Stigmergy 与 Gate 机制不变。
+心跳释放、Stigmergy 与 Gate 机制不变。（M1 I6 的「本轮是否产生新 Fact」进度判据目前只看 `facts`；
+待 M5 引入 `entities`/`relations` 后，判据一并纳入。）
 
 ### 4.4 走查示例：一次 Bootstrap + Reason + 单轮派发（M1 I3）
 
@@ -311,10 +320,10 @@ edges    origin → i1 (spawns)
 
 要点：**Worker 不写协议、不起 id**；**引擎是唯一写入者**且只负责「取指令 → 读图 → 调能力 →
 解析 → 发 id → 写事件」这条流水线；Reason 只能产 `open` 候选 Intent（生命周期字段由引擎重建），
-且 `complete` 与 `intents` 互斥；派发为**单轮**（在 Reason 留下的快照上取 `open` 且
-`type∈{explore,decompose}` 的 Intent，按 id 序执行，`verify` 保持 `open`），任一 pass 写 `FAILED`
-即确定性中止本轮，新 Fact 引发的新一轮 Reason 归 I6；**所有"事实"都在 append-only 事件日志里**，
-Board 永远由 `reduce` 折出，故可重放。
+且 `complete` 与 `intents` 互斥；派发在 Reason 留下的快照上取 `open` 且
+`type∈{explore,decompose}` 的 Intent，按 id 序执行，`verify` 保持 `open`；任一 pass 写 `FAILED`
+即确定性中止。示例为单轮快照；真实运行时每轮 dispatch 产生新 Fact 后会再跑 Reason（I6 收敛），
+见 §4.2。**所有"事实"都在 append-only 事件日志里**，Board 永远由 `reduce` 折出，故可重放。
 
 ## 5. 事件协议（冻结）
 
@@ -412,7 +421,8 @@ Worker A 写入新 Fact  →  图变化（环境更新）  →  Worker B 下一�
   随 M3 可控性引入。
 - **Intent 心跳与超时（I4）**：执行中引擎按 `[worker].heartbeat_interval` 写 `HEARTBEAT`；
   超过 `[worker].heartbeat_timeout` 判定 Worker 失活，不再永久占住 Intent：`heartbeat_on_timeout=release`
-  写 `RELEASE` 把 Intent 退回 `open`（供后续轮次/重试），`=fail` 写 `FAILED` 终止 run。两值均为
+  写 `RELEASE` 把 Intent 退回 `open`（后续轮次若因新 Fact 触发 Reason 才会重派；完整重试/调度归 M3），
+  `=fail` 写 `FAILED` 终止 run。两值均为
   `[worker]` 时长配置（默认 `15s` / `5m`，且须 `interval < timeout`）。
 - **完整因果链永久保留**：包含所有死胡同（`dropped` Intent）。
 - **可重放**：`replay` 只读、不触网、复现含人工输入在内的全部结论。

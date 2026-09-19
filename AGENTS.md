@@ -20,17 +20,18 @@
 - 已实现：`originweave init`（写 `originweave.toml`，已存在需 `--force`）、
   `originweave capabilities list`、配置加载/校验、capability 注册表，
   事件日志 → 黑板 reducer → `originweave replay <run-dir>`（只读、不触网），
-  以及 **M1 库层 OODA 引擎的 Bootstrap / Reason / Validate / Explore pass**（I1–I3：
+  以及 **M1 库层 OODA 引擎的 Bootstrap / Reason / Validate / Explore pass + Stigmergy 收敛**（I1–I6：
   `src/originweave/engine.py`、`prompts/{bootstrap,reason,validate,explore}.txt`）。
 - **引擎是库层**：`Engine` 是黑板的**唯一写入者**（事件经 `RunStore.append_event`），
   进程内 Dispatcher 是 M3 容器化前的临时态。**不经 CLI / server 暴露**（server 归 M1c-1）；
-  Explore 派发为**单轮**（`verify` 型 Intent 留待 M2 `compare`）。**I4 并发已落地**：一轮内先按
+  `verify` 型 Intent 留待 M2 `compare`，派发时保持 `open`。**I4 并发已落地**：一轮内先按
   id 序 `EXECUTE` 认领，再受 `[worker].max_concurrency`（<=16）并发执行、**按 id 序提交**（Board
   确定）；执行期引擎代发 `HEARTBEAT`，超过 `[worker].heartbeat_timeout` 按
   `heartbeat_on_timeout=release|fail` 写 `RELEASE`/`FAILED`。**I5 HITL 已落地**：`Engine(auto=...)`
   非 auto 时 `run` 在 Bootstrap 后写 `REQUEST_HUMAN{gate:"confirm-claim"}` 停在 Gate A，
   `Engine.resume(decision, text?, targets?)` 写 `HUMAN_INPUT` 继续（`reject`→`STOPPED`）或
-  `run(auto=True)` 跳过。多轮 Stigmergy 收敛（I6）为后续 M1 切片（见 `docs/1.0/TODO.md`「下一个任务」）。
+  `run(auto=True)` 跳过。**I6 收敛已落地**：`_continue` 多轮 Reason→dispatch，仅在产生新 Fact 时再
+  Reason，至 `COMPLETE`／死胡同（保持 `running`）；`Engine(max_rounds=10)` 为安全阀。
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
   `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
 - **stub（打印 “not implemented yet”、返回 0）**：`ui` / `mcp` / `capabilities install-obscura`。
