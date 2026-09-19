@@ -154,11 +154,11 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 
 ### C1 · Python codegen + Connect app 骨架
 
-- [ ] 依赖/工具链：`protobuf` / `connect-python`（含 `protoc-gen-connect-python`）/ `starlette` / `uvicorn`；
-      `make proto` 跑通 `buf generate proto` → `src/originweave/gen`（生成物不入库，ruff/mypy 已 exclude）
-- [ ] CI `python` job 先生成 proto（buf-setup + 插件 PATH）再 lint/typecheck/test
-- [ ] `server/app.py`：构造 `OriginweaveService` 的 Connect ASGI app（8 RPC；只读方法最小实现，其余 `UNIMPLEMENTED`）
-- [ ] 测试：ASGI 客户端 smoke（`ListProjects` 空列表等）
+- [x] 依赖/工具链：`protobuf` / `connect-python`（含 `protoc-gen-connect-python`）/ `starlette` / `uvicorn`；
+      `make proto` 跑通 `buf generate proto` → `src/originweave/v1`（import `originweave.v1.*`；生成物不入库，ruff/mypy 已 exclude）
+- [x] CI `python` job 先生成 proto（buf-setup + 插件 PATH）再 lint/typecheck/test
+- [x] `server/app.py`：构造 `OriginweaveService` 的 Connect ASGI app（8 RPC；本轮仅 `ListProjects` 最小实现，其余继承 `UNIMPLEMENTED`）— `server/app.py`/`server/service.py`
+- [x] 测试：ASGI 客户端 smoke（`ListProjects` 空列表等）— `tests/test_server.py`
 
 ### C2 · 持久化（run.json + projects 注册表）
 

@@ -27,12 +27,15 @@
   M1 残留（非本轮）：**verify 型调度**随 M2 `compare`（`SPEC:107`）；**进程内 Dispatcher 接口对齐 M3**
   （`SPEC:114`）；**对样例输入的 fake-provider 确定性 Board 单测**（`SPEC:118`，已有 fake-provider
   确定性测试，尚缺「样例输入」覆盖）。
-- **M1c-1 · server 骨架（下一个，分片 C1–C4；进度真相见 `SPEC.md` M1c-1）**：
-  - **C1** Python codegen + Connect app 骨架（依赖/CI 生成 proto；`server/app.py`；ASGI smoke）。
-  - **C2** 持久化：`runs/<id>/run.json` + 目录式 `projects/<id>/project.json`（新配置 `[project].dir`）
+- **M1c-1 · server 骨架（进度真相见 `SPEC.md` M1c-1）**：
+  - **C1 codegen + Connect app 骨架（已完成）**：依赖 `connect-python`/`protoc-gen-connect-python`/`protobuf`/
+    `starlette`/`uvicorn`；`buf generate proto` → **`src/originweave/v1`**（`originweave.v1.*`，不入库）；
+    `server/app.py`/`server/service.py`（`create_app`，`ListProjects` 空表，其余继承 `UNIMPLEMENTED`）；
+    CI python job 先生成；`tests/test_server.py` ASGI smoke。
+  - **下一步 C2**：持久化 `runs/<id>/run.json` + 目录式 `projects/<id>/project.json`（新配置 `[project].dir`）
     + `run_00N` 分配 + `summarize_run(events)`。
-  - **C3** service 接线：DI providers、`CreateRun{source_text}`（后台 asyncio 调度、立即返回）、
-    只读 RPC、`AddHint`/`SubmitHumanInput`。
+  - **C3** service 接线：DI providers、`CreateRun{source_text}`（后台 asyncio 调度、立即返回）、只读 RPC、
+    `AddHint`/`SubmitHumanInput`。
   - **C4** `originweave ui`（uvicorn + `frontend/dist` + `--run` 只读；端口 8765）+ Makefile/CI/README。
   - 已定：proto 加 `source_text`（`url` 暂不支持）；目录式 projects；`CreateRun` 后台调度；统一端口 `8765`。
 - 随后：M1c-2（前端接线与 UI）。
@@ -150,6 +153,19 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M1c-1 C1 · Python codegen + Connect app 骨架**：依赖加 `connect-python==0.9.0`、
+  `protoc-gen-connect-python==0.9.0`、`protobuf`、`starlette`、`uvicorn`；`make proto` 带 `.venv/bin` PATH
+  跑 `buf generate proto`。**生成物落在 `src/originweave/v1`（`originweave.v1.*`）**——proto 文件路径决定
+  模块名，而 `protoc-gen-connect-python` 硬编码 `import originweave.v1.originweave_pb2`，故 `out: src`
+  （原计划的 `gen/` 目录与包名 `originweave` 冲突），sync `.gitignore`/ruff/mypy。新增
+  `server/app.py`（`create_app`：Starlette 挂载 Connect ASGI app）与 `server/service.py`
+  （`Service(OriginweaveService)`：`list_projects` 返回空表，其余继承 `UNIMPLEMENTED`）；mypy override
+  `originweave.v1.*`（`follow_imports=skip`）；`protobuf>=7.36.1`（匹配 gencode）；hatch
+  `artifacts` 强制把生成树打进 wheel（否则 server 包在安装后损坏）。CI python job 加 buf-setup +
+  `make proto`（三个 job 的 buf 统一 `1.70.0`）。测试 `tests/test_server.py`（ASGI smoke + 注入 +
+  未实现 501，无 gen 时 `importorskip`）。`buf lint proto` + `make lint` + `make test`
+  （232 passed, 1 skipped）全绿，wheel 内含 `originweave/v1/*`。
 
 - **M1 I6 · Stigmergy 多轮收敛**：`engine.py` `_continue` 改为循环——每轮 Reason→dispatch 后，若产生了
   **新 Fact** 就对新增 facts 再跑 Reason（`REASON.start.triggerFacts` 只记自上次以来的新增 facts），

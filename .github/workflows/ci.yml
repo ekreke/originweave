@@ -25,6 +25,13 @@ jobs:
       - name: Install
         run: uv sync --frozen || uv sync
 
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: "1.70.0"
+
+      - name: Generate Python proto/Connect code
+        run: make proto
+
       - name: Lint
         run: uv run ruff check src tests scripts
 
@@ -41,7 +48,7 @@ jobs:
 
       - uses: bufbuild/buf-setup-action@v1
         with:
-          version: "1.72.0"
+          version: "1.70.0"
 
       - name: Lint proto
         run: buf lint proto
@@ -63,7 +70,7 @@ jobs:
 
       - uses: bufbuild/buf-setup-action@v1
         with:
-          version: "1.72.0"
+          version: "1.70.0"
 
       - name: Install
         run: pnpm --dir frontend install --frozen-lockfile

@@ -30,8 +30,8 @@ demo: ## End-to-end sample (server + frontend; lands in M4, not wired yet)
 fixtures: ## Regenerate the committed sample fixtures (events.jsonl)
 	$(UV) run python scripts/build_sample_fixtures.py
 
-proto: ## Generate Python from proto/ (server; M1c. Requires buf + protoc-gen-connect-python)
-	buf generate proto
+proto: install ## Generate Python from proto/ (server; M1c. Requires buf + protoc-gen-connect-python)
+	PATH="$(CURDIR)/.venv/bin:$$PATH" buf generate proto
 
 frontend-install: ## pnpm install in frontend/
 	pnpm --dir frontend install
@@ -81,5 +81,5 @@ cloc: ## Count logical lines under src/originweave (excludes tests/fixtures/gene
 
 clean: ## Remove caches and temporary runs
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov build dist runs
-	rm -rf frontend/dist frontend/node_modules frontend/src/gen src/originweave/gen
+	rm -rf frontend/dist frontend/node_modules frontend/src/gen src/originweave/v1
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

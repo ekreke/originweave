@@ -16,7 +16,7 @@ runs/
 *.jsonl
 !examples/**/*.jsonl
 # generated proto code (build artifact; run `buf generate proto`)
-src/originweave/gen/
+src/originweave/v1/
 frontend/src/gen/
 .DS_Store
 .idea/

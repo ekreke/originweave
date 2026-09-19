@@ -19,9 +19,13 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
+    "connect-python==0.9.0",
     "httpx>=0.27",
     "pi-py-sdk==0.2.1",
+    "protobuf>=7.36.1",
+    "starlette>=0.40",
     "tomli-w>=1.2.0",
+    "uvicorn>=0.30",
 ]
 
 [project.scripts]
@@ -30,10 +34,16 @@ originweave = "originweave.cli:main"
 [dependency-groups]
 dev = [
     "mypy>=1.11",
+    "protoc-gen-connect-python==0.9.0",
     "pytest>=8.2",
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
 ]
+
+[tool.hatch.build]
+# The generated proto/Connect tree is gitignored, so hatchling would exclude it from
+# the wheel/sdist; force-include it (it must be generated with `make proto` first).
+artifacts = ["src/originweave/v1/*.py"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/originweave"]
@@ -42,7 +52,7 @@ packages = ["src/originweave"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = ["src/originweave/gen"]
+extend-exclude = ["src/originweave/v1"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -54,8 +64,16 @@ known-first-party = ["originweave"]
 python_version = "3.11"
 strict = true
 files = ["src"]
-exclude = ["src/originweave/gen"]
+exclude = ["src/originweave/v1"]
 warn_unused_configs = true
+
+# Generated proto/Connect code is a build artifact; don't analyze it in strict mode.
+# `follow_imports = "skip"` is required (not `ignore_errors`): protobuf `_pb2` builds
+# message classes dynamically, so they have no static types for mypy to use.
+[[tool.mypy.overrides]]
+module = "originweave.v1.*"
+follow_imports = "skip"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -77,7 +77,7 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 
 代码生成：
 - **TypeScript（前端，M1b）**：`pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，本地 `protoc-gen-es`）→ `frontend/src/gen`
-- **Python（server，M1c-1）**：`buf generate proto`（根 `buf.gen.yaml`，`protoc_builtin: python` + `protoc-gen-connect-python`）→ `src/originweave/gen`
+- **Python（server，M1c-1）**：`buf generate proto`（根 `buf.gen.yaml`，`protoc_builtin: python` + `protoc-gen-connect-python`）→ `src/originweave/v1`（import `originweave.v1.*`）
 
 生成物均为构建产物：不入库，且排除 ruff/mypy。
 

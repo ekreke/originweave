@@ -5,9 +5,10 @@
 > 当前 **M1 主体（I1–I6，库层）已完成** —— Bootstrap/Reason/Validate/Explore pass + Stigmergy 收敛、
 > 并发 Worker/心跳、HITL Gate A；**M6（可插拔 Worker）** 的 `PiWorker`（P2）已落地（M1 残留：
 > Dispatcher 接口对齐 M3、`verify` 型调度随 M2、样例输入的确定性单测）。
-> **下一步 M1c-1（Connect server，分片 C1–C4）**：起 run 走 server / proto API（`CreateRun`，经
-> `source_text` 收资料 A），故 **CLI 无 `trace`**：`ui` / `mcp` 仍为占位。`frontend/` 为 M1b 脚手架、
-> **无数据空壳**（接线归 M1c-2）。版本与里程碑见 `milestones.md`。
+> **下一步 M1c-1（Connect server）**：**C1（codegen + Connect app 骨架）已落地**，C2–C4（持久化 /
+> `CreateRun` 接线 / `ui`）待做；起 run 走 server / proto API（`CreateRun`，经 `source_text` 收资料 A），
+> 故 **CLI 无 `trace`**：`ui` / `mcp` 仍为占位。`frontend/` 为 M1b 脚手架、**无数据空壳**（接线归 M1c-2）。
+> 版本与里程碑见 `milestones.md`。
 
 ## 快速开始
 

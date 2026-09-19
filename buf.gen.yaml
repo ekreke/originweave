@@ -8,7 +8,14 @@
 #   protoc-gen-connect-python  -> Connect Python plugin
 #
 # Run from the repo root:
-#   buf generate proto
+#   make proto            # buf generate proto with .venv/bin on PATH
+#
+# Output lands at `src/originweave/v1/` (importable as `originweave.v1.*`). The
+# proto file path (`originweave/v1/originweave.proto`) determines the generated
+# module path, and `protoc-gen-connect-python` hardcodes
+# `import originweave.v1.originweave_pb2`; so the generated tree must sit under a
+# `sys.path` root. Our src layout puts `src/` on the path and the package is
+# already named `originweave`, hence `out: src`.
 #
 # Generated code is a build artifact: not committed, excluded from ruff/mypy
 # (see pyproject.toml) and from git (see .gitignore).
@@ -20,6 +27,6 @@ inputs:
 
 plugins:
   - protoc_builtin: python
-    out: src/originweave/gen
+    out: src
   - local: protoc-gen-connect-python
-    out: src/originweave/gen
+    out: src
