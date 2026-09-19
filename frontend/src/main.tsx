@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom'
 import '@xyflow/react/dist/style.css'
 import '@/styles/tokens.css'
 import '@/styles/base.css'
+import '@/styles/presentation.css'
 
 import { App } from '@/App'
 import { ThemeProvider } from '@/theme/ThemeProvider'

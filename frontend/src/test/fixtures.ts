@@ -1,0 +1,278 @@
+import { create } from '@bufbuild/protobuf'
+
+import {
+  BudgetSchema,
+  EdgeSchema,
+  EventSchema,
+  EvidenceSchema,
+  FactSchema,
+  IntentCountsSchema,
+  IntentSchema,
+  RunDetailSchema,
+  RunSchema,
+  StepsSchema,
+  Vec2Schema,
+  type Edge,
+  type Event,
+  type Evidence,
+  type Fact,
+  type Intent,
+  type Run,
+  type RunDetail,
+} from '@/gen/originweave/v1/originweave_pb'
+
+// Deterministic proto fixtures for the presentation layer. They stand in for the
+// server's RunDetail payload in tests only; the app itself never uses mock data.
+
+export function vec2(x = 0, y = 0) {
+  return create(Vec2Schema, { x, y })
+}
+
+export function counts(open = 0, done = 0) {
+  return create(IntentCountsSchema, { open, done })
+}
+
+export function steps(current = 0, total = 0) {
+  return create(StepsSchema, { current, total })
+}
+
+export function budget(tokens = 0n, cost = 0, elapsed = '0s') {
+  return create(BudgetSchema, { tokens, cost, elapsed })
+}
+
+export function evidence(overrides: Partial<Evidence> = {}): Evidence {
+  return create(EvidenceSchema, {
+    id: 'ev1',
+    quote: 'verbatim quote from the source',
+    sourceTitle: 'GitHub Labs',
+    url: 'https://example.com/source',
+    locator: 'p.1',
+    ...overrides,
+  })
+}
+
+export function fact(overrides: Partial<Fact> = {}): Fact {
+  return create(FactSchema, {
+    id: 'f0',
+    label: 'a fact',
+    subtitle: '',
+    kind: 'fact',
+    role: 'none',
+    status: 'open',
+    confidence: 0,
+    note: '',
+    position: vec2(),
+    evidence: [],
+    ...overrides,
+  })
+}
+
+export function intent(overrides: Partial<Intent> = {}): Intent {
+  return create(IntentSchema, {
+    id: 'i0',
+    type: 'explore',
+    status: 'open',
+    from: 'origin',
+    question: '',
+    producedFacts: [],
+    createdAt: '2026-09-19T00:00:00Z',
+    ...overrides,
+  })
+}
+
+export function edge(overrides: Partial<Edge> = {}): Edge {
+  return create(EdgeSchema, {
+    id: 'e0',
+    source: 'a',
+    target: 'b',
+    relation: 'main-chain',
+    note: '',
+    ...overrides,
+  })
+}
+
+export function event(overrides: Partial<Event> = {}): Event {
+  return create(EventSchema, {
+    id: '1',
+    at: '2026-09-19T00:00:00Z',
+    type: 'PROJECT',
+    message: '',
+    tone: 'info',
+    payload: {},
+    ...overrides,
+  })
+}
+
+export function run(overrides: Partial<Run> = {}): Run {
+  return create(RunSchema, {
+    id: 'run_001',
+    projectId: 'copilot-productivity',
+    title: 'a run',
+    sourceType: 'text',
+    analysis: 'provenance',
+    status: 'running',
+    goal: '',
+    facts: 0,
+    deviations: 0,
+    entities: 0,
+    relations: 0,
+    intents: counts(),
+    confidence: 0,
+    steps: steps(),
+    budget: budget(),
+    createdAt: '',
+    updatedAt: '',
+    ...overrides,
+  })
+}
+
+// A representative provenance DAG: origin/goal anchors, a main claim with
+// evidence, a citation and source, a deviation, plus intents covering all status
+// variants and edges covering every relation type.
+export function sampleRunDetail(): RunDetail {
+  const origin = fact({
+    id: 'origin',
+    kind: 'origin',
+    label: '资料 A',
+    status: 'verified',
+    position: vec2(0, 0),
+  })
+  const goal = fact({
+    id: 'goal',
+    kind: 'goal',
+    label: '核验目标',
+    status: 'verified',
+    position: vec2(0, -160),
+  })
+  const f1 = fact({
+    id: 'f1',
+    kind: 'fact',
+    role: 'main-claim',
+    label: 'Copilot 提升 55% 生产率',
+    status: 'verified',
+    confidence: 0.9,
+    position: vec2(0, 160),
+    evidence: [evidence({ id: 'ev1' })],
+  })
+  const c1 = fact({
+    id: 'c1',
+    kind: 'citation',
+    label: '引用来源',
+    status: 'open',
+    position: vec2(0, 320),
+  })
+  const s1 = fact({
+    id: 's1',
+    kind: 'source',
+    label: 'GitHub 实验室',
+    status: 'verified',
+    position: vec2(0, 480),
+  })
+  const d1 = fact({
+    id: 'd1',
+    kind: 'deviation',
+    label: '以偏概全',
+    status: 'flagged',
+    confidence: 0.6,
+    position: vec2(320, 160),
+  })
+
+  const i1 = intent({
+    id: 'i1',
+    type: 'decompose',
+    status: 'done',
+    from: 'f1',
+    question: '拆解核心论点',
+    producedFacts: ['f1'],
+    claimedBy: 'worker-1',
+  })
+  const i2 = intent({
+    id: 'i2',
+    type: 'explore',
+    status: 'open',
+    from: 'f1',
+    question: '55% 来自哪里？',
+  })
+  const i3 = intent({
+    id: 'i3',
+    type: 'verify',
+    status: 'dropped',
+    from: 'f1',
+    question: '重复问题',
+    duplicateOf: 'i2',
+  })
+  const i4 = intent({
+    id: 'i4',
+    type: 'explore',
+    status: 'awaiting_human',
+    from: 'c1',
+    question: '等待人工裁决',
+  })
+
+  return create(RunDetailSchema, {
+    run: run({
+      id: 'run_009',
+      title: 'Copilot 生产力核验',
+      status: 'awaiting_human',
+      facts: 4,
+      deviations: 1,
+      intents: counts(2, 1),
+      steps: steps(3, 8),
+    }),
+    origin,
+    goal,
+    facts: [f1, c1, s1, d1],
+    intents: [i1, i2, i3, i4],
+    edges: [
+      edge({ id: 'e1', source: 'origin', target: 'f1', relation: 'main-chain' }),
+      edge({ id: 'e2', source: 'goal', target: 'f1', relation: 'goal-derived' }),
+      edge({ id: 'e3', source: 'f1', target: 'c1', relation: 'dependency' }),
+      edge({ id: 'e4', source: 'f1', target: 'd1', relation: 'decomposes' }),
+      edge({ id: 'e5', source: 'f1', target: 'i2', relation: 'spawns' }),
+      edge({ id: 'e6', source: 'i2', target: 'c1', relation: 'resolves' }),
+    ],
+    events: [
+      event({ id: '1', type: 'PROJECT', message: 'run created', tone: 'info' }),
+      event({ id: '2', type: 'REASON', message: 'reasoned about the claim', tone: 'success' }),
+      event({
+        id: '3',
+        type: 'REQUEST_HUMAN',
+        message: 'Gate A: confirm the claim',
+        tone: 'warning',
+      }),
+      event({ id: '4', type: 'FAILED', message: 'worker crashed', tone: 'danger' }),
+    ],
+    waitingFor: { gate: 'confirm-claim', question: '确认核心论点？' },
+  })
+}
+
+export function sampleRuns(): Run[] {
+  return [
+    run({
+      id: 'run_009',
+      title: 'Copilot 生产力核验',
+      status: 'awaiting_human',
+      facts: 4,
+      deviations: 1,
+      confidence: 0.72,
+      steps: steps(3, 8),
+    }),
+    run({
+      id: 'run_008',
+      title: '已完成核验',
+      status: 'completed',
+      facts: 6,
+      deviations: 2,
+      confidence: 0.88,
+      steps: steps(8, 8),
+    }),
+    run({
+      id: 'run_007',
+      title: '暂停中的核验',
+      status: 'paused',
+      facts: 2,
+      confidence: 0.5,
+      steps: steps(2, 6),
+    }),
+  ]
+}
