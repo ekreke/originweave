@@ -171,11 +171,20 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 
 ### C3 · service 接线（引擎 + 只读 + HITL）
 
-- [ ] DI providers（测试注入 fake）；`CreateRun`：`source_text` → 分配 id、写资料 A 到 `input/`、
-      落 `run.json`（**静态元数据**；返回的 `Run` 由事件派生、初始 `queued`）、后台 asyncio 任务跑
-      `Engine.run`、返回 `Run`（调度与持久化归 server，红线 2）
-- [ ] 只读 RPC `ListProjects`/`GetProject`/`ListProjectRuns`/`ListRuns`/`GetRun`
-      （`RunStore` → `reduce()` → `RunDetail`）
+按 **C3a / C3b** 分片。
+
+#### C3a · DI + 只读 RPC + proto 映射
+
+- [x] DI：`create_app(config/providers/root)` + `ServerContext`/`Providers`（测试注入 fake）；
+      `server/convert.py` 领域/事件 → proto 映射 — `server/context.py`、`server/convert.py`
+- [x] 只读 RPC `ListProjects`/`GetProject`/`ListProjectRuns`/`ListRuns`/`GetRun`
+      （`RunStore` → `reduce()` → `RunDetail`；缺失 → `NOT_FOUND`）— `server/service.py`
+- [x] 测试：ASGI 客户端注入（只读路径，`root=tmp` 隔离）— `tests/test_server.py`
+
+#### C3b · CreateRun + 后台调度 + AddHint/SubmitHumanInput
+
+- [ ] `CreateRun{source_text}`：分配 id、写资料 A 到 `input/`、落 `run.json`（**静态元数据**；
+      返回的 `Run` 由事件派生、初始 `queued`）、后台 asyncio 任务跑 `Engine.run`、返回 `Run`
 - [ ] `AddHint` → `HINT` 事件；`SubmitHumanInput` → 重建 `Engine` 调 `resume`（I5 已支持 fresh-engine 续号）
 - [ ] 测试：ASGI 客户端注入 fake provider，`CreateRun → GetRun`（events/facts/intents）、
       `AddHint`/`SubmitHumanInput` 落事件
@@ -195,16 +204,21 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 目标：把 proto 契约类型渲染为 **props 驱动**的展示组件，**不依赖 server**；真实数据接线归
 M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 
-- [ ] 前置 `pnpm --dir frontend gen`（生成物不入库）
-- [ ] 图映射纯函数：`RunDetail` → React Flow nodes/edges；Fact 按 `kind` 形状+颜色双编码、
+- [x] 前置 `pnpm --dir frontend gen`（生成物不入库）— `frontend/buf.gen.yaml`
+- [x] 图映射纯函数：`RunDetail` → React Flow nodes/edges；Fact 按 `kind` 形状+颜色双编码、
       Intent 问号徽标按 `status`、边按 `relation` 线型（视觉契约见 `dashboard.md` §2）；
-      布局用 proto `Fact.position`
-- [ ] `GraphCanvas` props 化（nodes/edges/选中回调）+ 自定义节点渲染；无数据保留空画布
-- [ ] 页签展示组件：FACTS / INTENTS / EVENTS（props 驱动，无数据时保留现有空态）
-- [ ] INSPECTOR 展示：节点详情 + 证据逐字引用（`quote + sourceTitle + locator`）+ Intent 计数
-- [ ] RunList 卡片：状态徽标、计数、`awaiting_human` 警示高亮
-- [ ] HITL Gate 卡片展示（gate/question）；决策按钮回调以 props 注入（提交归 M1c-2b）
-- [ ] 组件/映射测试：proto 消息 fixture 驱动（Vitest）
+      布局用 proto `Fact.position` — `frontend/src/graph/mapping.ts`
+- [x] `GraphCanvas` props 化（nodes/edges/选中回调）+ 自定义节点渲染；无数据保留空画布 —
+      `frontend/src/graph/GraphCanvas.tsx`、`frontend/src/graph/nodes.tsx`
+- [x] 页签展示组件：FACTS / INTENTS / EVENTS（props 驱动，无数据时保留现有空态）—
+      `frontend/src/tabs/{Facts,Intents,Events}Tab.tsx`
+- [x] INSPECTOR 展示：节点详情 + 证据逐字引用（`quote + sourceTitle + locator`）+ Intent 计数 —
+      `frontend/src/layout/Inspector.tsx`
+- [x] RunList 卡片：状态徽标、计数、`awaiting_human` 警示高亮 — `frontend/src/layout/RunList.tsx`
+- [x] HITL Gate 卡片展示（gate/question）；决策按钮回调以 props 注入（提交归 M1c-2b）—
+      `frontend/src/layout/Inspector.tsx`
+- [x] 组件/映射测试：proto 消息 fixture 驱动（Vitest）— `frontend/src/graph/mapping.test.ts`、
+      `frontend/src/{graph/GraphCanvas,tabs/tabs,layout/layout}.test.tsx`、`frontend/src/test/fixtures.ts`
 
 约束：不碰 `api/`、不加数据依赖、路由仍空态；fixture 只进测试文件（不接 mock 红线）。
 验收：`make frontend-gen` 后 `typecheck`/`lint`/`test`/`build` 全绿；组件零 RPC 调用。

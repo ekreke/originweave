@@ -193,6 +193,11 @@ class Project:
         )
 
 
+def is_run_id(name: str) -> bool:
+    """True if ``name`` looks like a run directory id (``run_<digits>``)."""
+    return _RUN_ID_RE.fullmatch(name) is not None
+
+
 def allocate_run_id(runs_dir: Path) -> str:
     """Return the next global ``run_00N`` id by scanning ``runs_dir``."""
     highest = 0
@@ -356,5 +361,6 @@ __all__ = [
     "Run",
     "Steps",
     "allocate_run_id",
+    "is_run_id",
     "summarize_run",
 ]

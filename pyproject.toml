@@ -75,6 +75,11 @@ module = "originweave.v1.*"
 follow_imports = "skip"
 ignore_missing_imports = true
 
+# protobuf ships no type stubs (and we only touch Struct/ParseDict entry points).
+[[tool.mypy.overrides]]
+module = "google.protobuf.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
