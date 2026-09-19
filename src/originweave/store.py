@@ -52,6 +52,10 @@ class RunStore:
     def report_path(self) -> Path:
         return self._root / "report.md"
 
+    @property
+    def run_json_path(self) -> Path:
+        return self._root / "run.json"
+
     def init_layout(self) -> None:
         """Create the run directory and its sub-directories."""
         self._root.mkdir(parents=True, exist_ok=True)
@@ -129,6 +133,32 @@ class RunStore:
             handle.write(json.dumps(session, sort_keys=True, ensure_ascii=False, indent=2))
             handle.write("\n")
         return path
+
+    def read_run_meta(self) -> dict[str, Any] | None:
+        """Read ``run.json`` (static run metadata) or ``None`` when it is absent.
+
+        This file only holds launch/static fields (project, title, source_type,
+        analysis, goal, budget overrides, ...); the board and its counts are always
+        derived from ``events.jsonl``. Raises :class:`BlackboardError` on malformed
+        content, mirroring :meth:`read_events`.
+        """
+        if not self.run_json_path.is_file():
+            return None
+        try:
+            data = json.loads(self.run_json_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise BlackboardError(f"{self.run_json_path}: invalid JSON: {exc}") from exc
+        if not isinstance(data, dict):
+            raise BlackboardError(f"{self.run_json_path}: run metadata must be a JSON object")
+        return data
+
+    def write_run_meta(self, meta: Mapping[str, Any]) -> Path:
+        """Write ``run.json`` (static run metadata); overwrite, not an event."""
+        self._root.mkdir(parents=True, exist_ok=True)
+        with self.run_json_path.open("w", encoding="utf-8") as handle:
+            handle.write(json.dumps(dict(meta), sort_keys=True, ensure_ascii=False, indent=2))
+            handle.write("\n")
+        return self.run_json_path
 
 
 __all__ = ["RunStore"]

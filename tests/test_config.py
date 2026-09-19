@@ -264,3 +264,20 @@ def test_load_rejects_removed_live_table(tmp_path: Path) -> None:
     path.write_text("[live]\nenabled = false\n", encoding="utf-8")
     with pytest.raises(config.ConfigError):
         config.load(path)
+
+
+def test_project_dir_default_and_override(tmp_path: Path) -> None:
+    assert config.Config().project.dir == "projects"
+    assert config.Config().to_dict()["project"] == {"dir": "projects"}
+
+    path = tmp_path / "originweave.toml"
+    path.write_text('[project]\ndir = "proj"\n', encoding="utf-8")
+    assert config.load(path).project.dir == "proj"
+
+
+def test_load_rejects_unknown_project_key(tmp_path: Path) -> None:
+    path = tmp_path / "originweave.toml"
+    path.write_text("[project]\nroot = 'x'\n", encoding="utf-8")
+    with pytest.raises(config.ConfigError) as excinfo:
+        config.load(path)
+    assert "root" in str(excinfo.value)

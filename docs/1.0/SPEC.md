@@ -128,7 +128,7 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 
 目标：初始化 `frontend/`（React + Vite + TS + Connect），交付**无数据、无 mock**的界面壳
 （三栏布局 / 路由 / 页签空态 / React Flow 空画布）。仅依赖已就绪的 `proto/`，
-**可与 M1 并行、可先做**；真实数据接线归 M1c-2。
+**可与 M1 并行、可先做**；真实数据接线归 M1c-2b。
 
 - [x] proto 契约 `proto/originweave/v1/*.proto`（Phase 0 落地；消息取自 `product-overview.md` 第 4 节）
 - [x] `proto/buf.yaml` + `buf.gen.yaml` 骨架（Phase 0 落地）
@@ -162,16 +162,18 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 
 ### C2 · 持久化（run.json + projects 注册表）
 
-- [ ] `Run` / `Project` 领域模型；`runs/<run_id>/run.json` + 目录式 `projects/<project_id>/project.json`
-      （新配置 `[project].dir`，默认 `projects`）；`events.jsonl` 仍为 board 唯一事实来源
-- [ ] `run_00N` 分配；`summarize_run(events) -> Run`（使无 `run.json` 的样例目录可被只读服务；
-      样例缺 `project_id`/`title`/`source_type`/`analysis`，按目录名/默认值回填）
-- [ ] 测试：run.json 往返、id 分配、由事件派生 Run
+- [x] `Run` / `Project` 领域模型；`runs/<run_id>/run.json` + 目录式 `projects/<project_id>/project.json`
+      （新配置 `[project].dir`，默认 `projects`）；`events.jsonl` 仍为 board 唯一事实来源 —
+      `persistence.py`、`store.py`（run.json IO）、`config.py`（`[project]`）
+- [x] `run_00N` 分配；`summarize_run(...) -> Run`（使无 `run.json` 的样例目录可被只读服务；
+      样例缺 `project_id`/`title`/`source_type`/`analysis`，按目录名/默认值回填）— `persistence.py`
+- [x] 测试：run.json 往返、id 分配、由事件派生 Run — `tests/test_persistence.py`
 
 ### C3 · service 接线（引擎 + 只读 + HITL）
 
-- [ ] DI providers（测试注入 fake）；`CreateRun`：`source_text` → 分配 id、落 `run.json(queued)`、
-      后台 asyncio 任务跑 `Engine.run`、返回 `Run`（调度与持久化归 server，红线 2）
+- [ ] DI providers（测试注入 fake）；`CreateRun`：`source_text` → 分配 id、写资料 A 到 `input/`、
+      落 `run.json`（**静态元数据**；返回的 `Run` 由事件派生、初始 `queued`）、后台 asyncio 任务跑
+      `Engine.run`、返回 `Run`（调度与持久化归 server，红线 2）
 - [ ] 只读 RPC `ListProjects`/`GetProject`/`ListProjectRuns`/`ListRuns`/`GetRun`
       （`RunStore` → `reduce()` → `RunDetail`）
 - [ ] `AddHint` → `HINT` 事件；`SubmitHumanInput` → 重建 `Engine` 调 `resume`（I5 已支持 fresh-engine 续号）
@@ -188,18 +190,38 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 
 ---
 
-## M1c-2 · 前端接线与 UI
+## M1c-2a · 前端展示层（fixture 驱动，可先做）
 
-目标：前端改为读取真实数据（**不接 mock**），渲染 DAG 并在 HITL Gate 处提供人工介入。
+目标：把 proto 契约类型渲染为 **props 驱动**的展示组件，**不依赖 server**；真实数据接线归
+M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
+
+- [ ] 前置 `pnpm --dir frontend gen`（生成物不入库）
+- [ ] 图映射纯函数：`RunDetail` → React Flow nodes/edges；Fact 按 `kind` 形状+颜色双编码、
+      Intent 问号徽标按 `status`、边按 `relation` 线型（视觉契约见 `dashboard.md` §2）；
+      布局用 proto `Fact.position`
+- [ ] `GraphCanvas` props 化（nodes/edges/选中回调）+ 自定义节点渲染；无数据保留空画布
+- [ ] 页签展示组件：FACTS / INTENTS / EVENTS（props 驱动，无数据时保留现有空态）
+- [ ] INSPECTOR 展示：节点详情 + 证据逐字引用（`quote + sourceTitle + locator`）+ Intent 计数
+- [ ] RunList 卡片：状态徽标、计数、`awaiting_human` 警示高亮
+- [ ] HITL Gate 卡片展示（gate/question）；决策按钮回调以 props 注入（提交归 M1c-2b）
+- [ ] 组件/映射测试：proto 消息 fixture 驱动（Vitest）
+
+约束：不碰 `api/`、不加数据依赖、路由仍空态；fixture 只进测试文件（不接 mock 红线）。
+验收：`make frontend-gen` 后 `typecheck`/`lint`/`test`/`build` 全绿；组件零 RPC 调用。
+
+---
+
+## M1c-2b · 前端接线与 UI（依赖 M1c-1 C3/C4 + M1c-2a）
+
+目标：前端改为读取真实数据（**不接 mock**），在 HITL Gate 处提供人工介入。
 
 - [ ] Connect 数据层：React Query hooks（`listProjects`/`listProjectRuns`/`getRun`/`createRun`/`addHint`/`submitHumanInput`）+ 轮询刷新 `awaiting_human`
-- [ ] React Flow 节点/边：Fact 按 `kind`（形状+颜色）、Intent 按 `status`、边按 `relation`；布局用 proto `Fact.position`
-- [ ] INSPECTOR：节点详情 + 证据逐字引用（`quote + sourceTitle + locator`）+ Intent 计数 + Hints 输入
+- [ ] 页签 GRAPH / FACTS / INTENTS / EVENTS 绑定真实数据（RELATIONS/ENTITIES 归 M5）
+- [ ] INSPECTOR 接线：Hints 输入（`AddHint`）+ 选中状态与图联动
 - [ ] HITL UI：`awaiting_human` → Gate A/B/C 面板（approve/edit/reject）→ `submitHumanInput`；Replay 步进（前端按 `events[]`）
-- [ ] 页签 FACTS / INTENTS / EVENTS 绑定真实数据（RELATIONS/ENTITIES 归 M5）
-- [ ] 顶栏 / RunList：状态徽标、预算、操作、`awaiting_human` 高亮
-- [ ] 端到端：起 server → 建 run → 前端看到 DAG → Gate 处人工介入（测试以 fake provider 驱动）
-- [ ] 测试：组件测试（proto 消息 fixture）+ 冒烟
+- [ ] 新建核验表单（`CreateRun`：`source_text`/`goal`/`auto` 等）+ 顶栏操作与预算徽标
+- [ ] `transport` 默认端口改指 `8765`（随 C4）
+- [ ] 端到端：起 server → 建 run → 前端看到 DAG → Gate 处人工介入（测试以 fake provider 驱动）+ 冒烟
 
 验收：从前端发起一次核验（样例），看到由抽象论点拆解出的 DAG，可在 Gate 处人工介入；
 架构红线未被突破（前端不编排、server 拥有调度）。
@@ -249,7 +271,7 @@ Hint 注入、Gate C 行为均可观测。
 
 ## M4 · 端到端、Deployment 与文档回归
 
-目标：端到端闭环、server 容器化部署，以及文档/契约一致性回归（server 与前端已在 M1c-1 / M1c-2 落地）。
+目标：端到端闭环、server 容器化部署，以及文档/契约一致性回归（server 与前端已在 M1c-1 / M1c-2a/2b 落地）。
 
 - [ ] 端到端 `make demo`：资料 A → 抽象论点 → DAG → 记分卡 → 前端可见 → `replay` 可复现
 - [ ] server 运行于 Docker（Deployment 层）

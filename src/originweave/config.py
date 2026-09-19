@@ -43,7 +43,7 @@ _DURATION_UNITS: dict[str, float] = {
 }
 _DURATION_RE = re.compile(r"([1-9][0-9]*)(ms|s|m|h|d)")
 
-_TOP_LEVEL_KEYS: frozenset[str] = frozenset({"hitl", "capability", "worker", "run"})
+_TOP_LEVEL_KEYS: frozenset[str] = frozenset({"hitl", "capability", "worker", "run", "project"})
 _TABLE_KEYS: dict[str, frozenset[str]] = {
     "hitl": frozenset({"auto"}),
     "capability": frozenset({"search", "prompt", "model"}),
@@ -63,6 +63,7 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
     ),
     "worker.budget": frozenset({"max_steps", "max_wall", "max_cost"}),
     "run": frozenset({"dir"}),
+    "project": frozenset({"dir"}),
 }
 
 
@@ -145,11 +146,17 @@ class RunConfig:
 
 
 @dataclass(frozen=True)
+class ProjectConfig:
+    dir: str = "projects"
+
+
+@dataclass(frozen=True)
 class Config:
     hitl: HitlConfig = field(default_factory=HitlConfig)
     capability: CapabilityConfig = field(default_factory=CapabilityConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)
     run: RunConfig = field(default_factory=RunConfig)
+    project: ProjectConfig = field(default_factory=ProjectConfig)
 
     def to_dict(self) -> dict[str, Any]:
         """Render the config as a plain dict suitable for TOML serialisation."""
@@ -181,6 +188,7 @@ class Config:
                 },
             },
             "run": {"dir": self.run.dir},
+            "project": {"dir": self.project.dir},
         }
 
     def validate(self) -> None:
@@ -243,6 +251,10 @@ class Config:
         if budget.max_cost < 0:
             raise ConfigError(f"worker.budget.max_cost must be >= 0, got {budget.max_cost}")
         parse_duration(budget.max_wall, "worker.budget.max_wall")
+        if not self.run.dir:
+            raise ConfigError("run.dir must be a non-empty string")
+        if not self.project.dir:
+            raise ConfigError("project.dir must be a non-empty string")
 
 
 def _as_mapping(value: Any, where: str) -> Mapping[str, Any]:
@@ -312,6 +324,7 @@ def from_dict(data: Mapping[str, Any]) -> Config:
     worker = _as_mapping(data.get("worker"), "worker")
     worker_budget = _as_mapping(worker.get("budget"), "worker.budget")
     run = _as_mapping(data.get("run"), "run")
+    project = _as_mapping(data.get("project"), "project")
 
     _check_keys(hitl, "hitl", _TABLE_KEYS["hitl"])
     _check_keys(capability, "capability", _TABLE_KEYS["capability"])
@@ -321,6 +334,7 @@ def from_dict(data: Mapping[str, Any]) -> Config:
     _check_keys(worker, "worker", _TABLE_KEYS["worker"])
     _check_keys(worker_budget, "worker.budget", _TABLE_KEYS["worker.budget"])
     _check_keys(run, "run", _TABLE_KEYS["run"])
+    _check_keys(project, "project", _TABLE_KEYS["project"])
 
     return Config(
         hitl=HitlConfig(auto=_as_bool(hitl.get("auto"), "hitl.auto", defaults.hitl.auto)),
@@ -412,6 +426,7 @@ def from_dict(data: Mapping[str, Any]) -> Config:
             ),
         ),
         run=RunConfig(dir=_as_str(run.get("dir"), "run.dir", defaults.run.dir)),
+        project=ProjectConfig(dir=_as_str(project.get("dir"), "project.dir", defaults.project.dir)),
     )
 
 

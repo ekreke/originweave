@@ -17,7 +17,7 @@
 - **完成/checkpoint 前必须先派遣一个 subagent review 本次改动**（read-only：审 `git diff`、
   契约一致性、bug、测试质量与架构红线），按其结论修复后再提交；review 未做不得进入 checkpoint。
 
-## 当前实现状态（别假设业务逻辑已存在）
+## 当前实现状态
 
 - 已实现：`originweave init`（写 `originweave.toml`，已存在需 `--force`）、
   `originweave capabilities list`、配置加载/校验、capability 注册表，
@@ -37,7 +37,9 @@
   **server（M1c-1）部分落地**：**C1** codegen + Connect app 骨架已落地——`make proto`
   （需 buf + `protoc-gen-connect-python`）生成 `src/originweave/v1`（`originweave.v1.*`，不入库，
   ruff/mypy exclude）；`server/app.py` 的 `create_app` 挂载 Connect ASGI app，`ListProjects` 空表、
-  其余 `UNIMPLEMENTED`。**C2–C4（持久化 / CreateRun 接线 / `ui`）待做**；起 run 仍走
+  其余 `UNIMPLEMENTED`。**C2** 持久化已落地——`persistence.py`（`Run`/`Project`/`summarize_run`/
+  `allocate_run_id`/`ProjectRegistry`），`run.json`（静态元数据）+ `projects/<id>/project.json`，
+  配置 `[project].dir`。**C3–C4（CreateRun 接线 / `ui`）待做**；起 run 仍走
   server/proto（`CreateRun` 经 `source_text` 收资料 A）。**`make proto` 是 `make lint`/`test` 的前置**
   （无 gen 时 server 测试 `importorskip` 跳过）。
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
@@ -113,9 +115,9 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   <=16)、`tools`(Pi 工具白名单)、`heartbeat_interval`(默认 `"15s"`)/`heartbeat_timeout`(默认 `"5m"`，
   须 `> interval`)/`heartbeat_on_timeout`(`release`\|`fail`)、`budget`（`max_steps` / `max_wall` /
   `max_cost`）；时长均为正整数加 `ms|s|m|h|d`（`config.parse_duration`）。Pi 的 model/base_url 复用
-  `[capability.model]`。顶层 `[budget]` 已退役，旧配置会报错。**M1c-1（计划，C2 落地）** 顶层
-  `[project]`：`dir`(目录式 project 注册表根，默认 `"projects"`)；`[run].dir`(run 根，默认 `"runs"`)
-  已存在。**注意 `[project]` 尚未被 `config.py` 接受**（现在写入会报未知键错误）。
+  `[capability.model]`。顶层 `[budget]` 已退役，旧配置会报错。**M1c-1** 顶层 `[project]`：
+  `dir`(目录式 project 注册表根，默认 `"projects"`)；`[run].dir`(run 根，默认 `"runs"`)。
+  `run.json` 只存该 run 的**静态/输入元数据**，结果（status/计数）一律由 `events.jsonl` 派生。
 - **HITL 开关**：`[hitl].auto` 或 `CreateRunRequest.auto` 只控制 Gate（默认人工介入）。
 - **凭据只从环境变量读**，不写入配置，且**多为可选**：`EXA_API_KEY` / `PARALLEL_API_KEY`
   （search 免费端点默认免 key）、`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、
