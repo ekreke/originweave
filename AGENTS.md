@@ -16,6 +16,8 @@
   checkpoint），每次迭代只推进一个子任务。
 - **完成/checkpoint 前必须先派遣一个 subagent review 本次改动**（read-only：审 `git diff`、
   契约一致性、bug、测试质量与架构红线），按其结论修复后再提交；review 未做不得进入 checkpoint。
+- **未经用户明确指示，不得 `git commit` / `git push`**：实现、测试、文档修改均**不构成**提交授权；
+  只有用户明确说「提交」/「推送」（或等价指令）时才执行。
 
 ## 当前实现状态
 
@@ -39,7 +41,10 @@
   ruff/mypy exclude）；`server/app.py` 的 `create_app` 挂载 Connect ASGI app，`ListProjects` 空表、
   其余 `UNIMPLEMENTED`。**C2** 持久化已落地——`persistence.py`（`Run`/`Project`/`summarize_run`/
   `allocate_run_id`/`ProjectRegistry`），`run.json`（静态元数据）+ `projects/<id>/project.json`，
-  配置 `[project].dir`。**C3–C4（CreateRun 接线 / `ui`）待做**；起 run 仍走
+  配置 `[project].dir`。**C3a** 只读接线已落地——`server/context.py`（`ServerContext`/`Providers`，
+  `create_app(config/providers/root)` 注入）、`server/convert.py`（→ `originweave.v1.*`），
+  `service.py` 实现 `ListProjects`/`GetProject`/`ListProjectRuns`/`ListRuns`/`GetRun`。
+  **C3b–C4（CreateRun 接线 / `ui`）待做**；起 run 仍走
   server/proto（`CreateRun` 经 `source_text` 收资料 A）。**`make proto` 是 `make lint`/`test` 的前置**
   （无 gen 时 server 测试 `importorskip` 跳过）。
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
@@ -65,10 +70,11 @@
   **无数据空壳**（不接 mock），真实数据接线与 DAG/Gate UI 归 **M1c-2**。
 - **M6（进行中，见 `SPEC.md` M6）**：把执行体抽为可插拔 **`Worker`**（`[worker].provider = local | pi`）；
   **P2 `PiWorker` 已落地**，经固定 `pi-py-sdk` 驱动官方 TS agent 运行时（运行时需 **Node + `pi` 二进制**，
-  仅 CI 之外）。
+  仅 CI 之外；**live 有配置目录环境变量名 bug，见「约定与坑」**）。
   每次 Worker 调用 = 一个**隔离会话**，原始输入/输出 + 步骤链落 run dir `sessions/<id>.json`，
   并由 `SESSION`/`WORKER_STEP` 事件索引（reducer 忽略，Board 不变）。检索类工具由 **TS 扩展回调
-  server `Search` RPC*（provider 选择留 Python）。P1/P2 不依赖 server；P3–P5 依赖 M1c-1；P6 并入 M3。
+  server `Search` RPC**（provider 选择留 Python）；**P4 的 TS 扩展加载机制已 spike 验证**（见 TODO）。
+  P1/P2 不依赖 server；P3–P5 依赖 M1c-1；P6 并入 M3。
 
 ## 常用命令
 
@@ -123,6 +129,13 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   （search 免费端点默认免 key）、`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、
   `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
 - **能力为真实调用**（Phase R 已移除 `[live]`/cache/录制回放）：测试注入 fake provider，不打真网。
+- **Pi 运行时（M6）**：`pi` 的 agent 配置目录环境变量名由该构建的 `piConfig.name` 决定
+  （`<NAME>_CODING_AGENT_DIR`）。本机安装 `piConfig.name="ekreke"`，读的是
+  `EKREKE_CODING_AGENT_DIR`；`capabilities/pi.py` 目前硬编码 `PI_CODING_AGENT_DIR`，会导致
+  provider 配置不加载（`Unknown provider "originweave-openai"`）——**P2 遗留，P4 前须修**（按二进制推导
+  或同时设置候选键）。扩展加载：`pi --no-extensions -e <ext.ts>` 仍需显式 `-e`（`--no-extensions`
+  只关自动发现）；`--tools <name>` 按精确名同时约束内建与扩展工具；`typebox`/pi 类型在仓库外路径可
+  直接 import，无需 shim。
 - **测试与工具链**：pytest `asyncio_mode = "auto"`（`pyproject.toml`），async 测试**不加**
   `@pytest.mark.asyncio`；ruff `line-length = 100`（非默认 88），mypy strict **只查 `src`**。
 - **事件字段名是契约**：`Event{id,at,type,message,tone,payload}`；reducer 只消费 `type`+`payload`，
