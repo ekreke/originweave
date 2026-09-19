@@ -14,6 +14,8 @@
   `docs/overview/*` 与 `proto/`；改代码时若动到契约，必须同步改对应文档。
 - 本仓库按 `dev-workflow` 流水线推进（progress-tracker → implement → testing-stage →
   checkpoint），每次迭代只推进一个子任务。
+- **完成/checkpoint 前必须先派遣一个 subagent review 本次改动**（read-only：审 `git diff`、
+  契约一致性、bug、测试质量与架构红线），按其结论修复后再提交；review 未做不得进入 checkpoint。
 
 ## 当前实现状态（别假设业务逻辑已存在）
 
@@ -32,8 +34,12 @@
   `Engine.resume(decision, text?, targets?)` 写 `HUMAN_INPUT` 继续（`reject`→`STOPPED`）或
    `run(auto=True)` 跳过。**I6 收敛已落地**：`_continue` 多轮 Reason→dispatch，仅在产生新 Fact 时再
   Reason，至 `COMPLETE`／死胡同（保持 `running`）；`Engine(max_rounds=10)` 为安全阀。
-  **server 未实现**：起 run 走 server/proto 归 **M1c-1（分片 C1–C4，见 `SPEC.md`）**；`CreateRun`
-  经 `source_text` 收资料 A；server 落地后 `make proto` 是 `lint`/`test` 的前置（生成物不入库）。
+  **server（M1c-1）部分落地**：**C1** codegen + Connect app 骨架已落地——`make proto`
+  （需 buf + `protoc-gen-connect-python`）生成 `src/originweave/v1`（`originweave.v1.*`，不入库，
+  ruff/mypy exclude）；`server/app.py` 的 `create_app` 挂载 Connect ASGI app，`ListProjects` 空表、
+  其余 `UNIMPLEMENTED`。**C2–C4（持久化 / CreateRun 接线 / `ui`）待做**；起 run 仍走
+  server/proto（`CreateRun` 经 `source_text` 收资料 A）。**`make proto` 是 `make lint`/`test` 的前置**
+  （无 gen 时 server 测试 `importorskip` 跳过）。
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
   `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
 - **stub（打印 “not implemented yet”、返回 0）**：`ui` / `mcp` / `capabilities install-obscura`。
@@ -52,7 +58,7 @@
   `[capability.prompt].directory` 读 `<name>.txt|.md`；新增任务指令要同时加模板文件。
 - `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出、**勿手改**）：前端 TS 由
   `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，落到 `frontend/src/gen/`），
-  server Python 归 M1c-1（根 `buf.gen.yaml`）。
+  server Python 由 `make proto`（根 `buf.gen.yaml`，落到 `src/originweave/v1` → `originweave.v1.*`）。
 - **前端（`frontend/`，M1b 脚手架）**：React + Vite + TS + React Flow + Connect；目前是
   **无数据空壳**（不接 mock），真实数据接线与 DAG/Gate UI 归 **M1c-2**。
 - **M6（进行中，见 `SPEC.md` M6）**：把执行体抽为可插拔 **`Worker`**（`[worker].provider = local | pi`）；
@@ -69,7 +75,7 @@ make install                # uv sync
 make test                   # pytest（addopts=-q）
 make lint                   # ruff check src tests scripts + mypy src（mypy strict，只查 src）
 make fmt                    # ruff format src tests scripts
-make proto                  # buf generate proto -> src/originweave/gen（M1c-1；需 buf + protoc-gen-connect-python）
+make proto                  # buf generate proto -> src/originweave/v1（M1c-1；需 buf + protoc-gen-connect-python）
 make fixtures               # 重生成样例事件 events.jsonl（scripts/build_sample_fixtures.py，另有 --check 校验）
 make cloc                   # 仅统计 src/originweave 逻辑行数
 uv run pytest tests/test_config.py::test_default_values   # 跑单个测试
