@@ -71,8 +71,10 @@
 - `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出、**勿手改**）：前端 TS 由
   `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，落到 `frontend/src/gen/`），
   server Python 由 `make proto`（根 `buf.gen.yaml`，落到 `src/originweave/v1` → `originweave.v1.*`）。
-- **前端（`frontend/`，M1b 脚手架）**：React + Vite + TS + React Flow + Connect；目前是
-  **无数据空壳**（不接 mock），真实数据接线与 DAG/Gate UI 归 **M1c-2**。
+- **前端（`frontend/`，M1b 脚手架 + M1c-2b 接线）**：React + Vite + TS + React Flow + Connect；
+  **2b-1 只读接线已落地**（`@tanstack/react-query`；`api/{queryClient,hooks}.ts`；`Overview`/`Project`/
+  `AppShell`/`Console` 读真实数据；`transport` 默认同源）；**不接 mock**（fixture 仅测试用）。
+  INSPECTOR 交互 / HITL Gate UI / 新建核验表单 / 端到端归 **2b-2–2b-5**。
 - **M6（进行中，见 `SPEC.md` M6）**：把执行体抽为可插拔 **`Worker`**（`[worker].provider = local | pi`）；
   **P2 `PiWorker` 已落地**，经固定 `pi-py-sdk` 驱动官方 TS agent 运行时（运行时需 **Node + `pi` 二进制**，
   仅 CI 之外；**live 有配置目录环境变量名 bug，见「约定与坑」**）。

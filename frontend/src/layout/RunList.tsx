@@ -1,8 +1,40 @@
 import type { Run } from '@/gen/originweave/v1/originweave_pb'
 
-// Presentation-only run list. Without data it keeps the M1b empty state; wiring
-// to the server lands in M1c-2b.
-export function RunList({ runs }: { runs?: Run[] }) {
+// Presentation-only run list; the caller supplies data (and its loading/error
+// state) from the server.
+export function RunList({
+  runs,
+  loading,
+  error,
+}: {
+  runs?: Run[]
+  loading?: boolean
+  error?: boolean
+}) {
+  if (loading) {
+    return (
+      <div className="col" aria-label="run list">
+        <div className="panel-hd">
+          <h2>Runs</h2>
+          <span className="cnt">…</span>
+        </div>
+        <div className="empty">加载 run 中…</div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="col" aria-label="run list">
+        <div className="panel-hd">
+          <h2>Runs</h2>
+          <span className="cnt">—</span>
+        </div>
+        <div className="empty">无法加载 run。</div>
+      </div>
+    )
+  }
+
   if (!runs || runs.length === 0) {
     return (
       <div className="col" aria-label="run list">
@@ -10,7 +42,7 @@ export function RunList({ runs }: { runs?: Run[] }) {
           <h2>Runs</h2>
           <span className="cnt">0</span>
         </div>
-        <div className="empty">尚无 run。数据由 server 提供（M1c）。</div>
+        <div className="empty">尚无 run。</div>
       </div>
     )
   }

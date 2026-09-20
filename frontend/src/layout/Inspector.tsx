@@ -143,7 +143,7 @@ export function Inspector({ selection, intents, waitingFor, onDecision }: Inspec
         </div>
       ) : null}
 
-      {isEmpty ? <div className="empty">无选中项。数据由 server 提供（M1c）。</div> : null}
+      {isEmpty ? <div className="empty">无选中项。</div> : null}
     </div>
   )
 }

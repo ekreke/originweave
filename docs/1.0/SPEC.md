@@ -241,12 +241,14 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 
 ### 2b-1 · 数据层 + 只读接线
 
-- [ ] 依赖 `@tanstack/react-query`；`QueryClientProvider`（`main.tsx`）；hooks
-      `listProjects`/`listProjectRuns`/`getRun`；`awaiting_human` 轮询刷新 — `frontend/src/api/`
-- [ ] 真实数据接入只读视图：`Overview`（项目列表）、`Project`（run 列表）、`AppShell`
-      （项目导航）、`Console`（`RunList` + 页签 GRAPH/FACTS/INTENTS/EVENTS + `Inspector` 计数）；
+- [x] 依赖 `@tanstack/react-query`；`QueryClientProvider`（`main.tsx`）；hooks
+      `useProjects`/`useProjectRuns`/`useRun`；`awaiting_human` 轮询刷新 — `frontend/src/api/`
+      （`hooks.ts`/`queryClient.ts`；`awaitingPollInterval` 纯函数可测）
+- [x] 真实数据接入只读视图：`Overview`（项目列表）、`Project`（run 列表）、`AppShell`
+      （项目导航 + 连接指示）、`Console`（`RunList` + 页签 GRAPH/FACTS/INTENTS/EVENTS + `Inspector` 计数）；
       loading/error/`NOT_FOUND` 与空态保留 — `frontend/src/{routes,layout,tabs}/`
-- [ ] 测试：Vitest（mock `@/api/client`，测试专属；生产不接 mock）— `frontend/src/**/*.test.tsx`
+- [x] 测试：Vitest（mock `@/api/client`，测试专属；生产不接 mock）— `frontend/src/App.test.tsx`、
+      `frontend/src/routes/routes.test.tsx`、`frontend/src/api/hooks.test.ts`、`frontend/src/test/providers.tsx`
 
 ### 2b-2 · INSPECTOR 交互（选中联动 + Hints）
 

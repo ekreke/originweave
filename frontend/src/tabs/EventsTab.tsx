@@ -1,7 +1,7 @@
 import type { Event } from '@/gen/originweave/v1/originweave_pb'
 
-// Presentation-only event timeline, coloured by tone. Without data it keeps the
-// M1b empty state; wiring to the server lands in M1c-2b.
+// Presentation-only event timeline, coloured by tone; the caller supplies the
+// events from the server.
 export function EventsTab({ events }: { events?: Event[] }) {
   if (!events || events.length === 0) {
     return (
@@ -10,7 +10,7 @@ export function EventsTab({ events }: { events?: Event[] }) {
           <h2>EVENTS</h2>
           <span className="cnt">append-only 时间线</span>
         </div>
-        <div className="empty">暂无事件。数据由 server 提供（M1c）。</div>
+        <div className="empty">暂无事件。</div>
       </div>
     )
   }

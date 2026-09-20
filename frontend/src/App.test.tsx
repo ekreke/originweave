@@ -1,21 +1,29 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '@/App'
-import { ThemeProvider } from '@/theme/ThemeProvider'
+import { AppProviders } from '@/test/providers'
+
+const mocks = vi.hoisted(() => ({
+  listProjects: vi.fn(),
+  listProjectRuns: vi.fn(),
+  getRun: vi.fn(),
+}))
+
+vi.mock('@/api/client', () => ({ client: mocks }))
 
 function renderAt(path: string) {
   return render(
-    <ThemeProvider>
-      <MemoryRouter initialEntries={[path]}>
-        <App />
-      </MemoryRouter>
-    </ThemeProvider>,
+    <AppProviders path={path}>
+      <App />
+    </AppProviders>,
   )
 }
 
 beforeEach(() => {
+  mocks.listProjects.mockReset().mockResolvedValue({ projects: [] })
+  mocks.listProjectRuns.mockReset().mockResolvedValue({ runs: [] })
+  mocks.getRun.mockReset().mockResolvedValue({})
   localStorage.clear()
   document.documentElement.classList.remove('dark')
 })
@@ -45,5 +53,12 @@ describe('app shell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Theme/ }))
     expect(document.documentElement).toHaveClass('dark')
+  })
+
+  it('shows OFFLINE when ListProjects fails', async () => {
+    mocks.listProjects.mockRejectedValue(new Error('server down'))
+    renderAt('/')
+    expect(await screen.findByText('OFFLINE')).toBeInTheDocument()
+    expect(screen.getByText(/无法连接 server/)).toBeInTheDocument()
   })
 })

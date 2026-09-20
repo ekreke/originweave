@@ -8,8 +8,8 @@
 > **M1c-1（Connect server）**：**C1–C4 已落地**——proto codegen + Connect app、持久化、只读 + 写
 > RPC（`CreateRun`/`AddHint`/`SubmitHumanInput`）、`originweave ui`（只读 API + 静态托管，端口 8765）。
 > 起 run 走 server / proto API（`CreateRun`，经 `source_text` 收资料 A），故 **CLI 无 `trace`**；
-> `mcp` 仍为占位。`frontend/` 为 M1b 脚手架、**无数据空壳**（接线归 M1c-2）。版本与里程碑见
-> `milestones.md`。
+> `mcp` 仍为占位。`frontend/` 已完成 **2b-1 只读接线**（React Query 读真实数据；HITL/新建表单归
+> 2b-2–2b-5）。版本与里程碑见 `milestones.md`。
 
 ## 快速开始
 

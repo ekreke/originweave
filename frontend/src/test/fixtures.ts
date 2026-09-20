@@ -8,6 +8,7 @@ import {
   FactSchema,
   IntentCountsSchema,
   IntentSchema,
+  ProjectSchema,
   RunDetailSchema,
   RunSchema,
   StepsSchema,
@@ -17,6 +18,7 @@ import {
   type Evidence,
   type Fact,
   type Intent,
+  type Project,
   type Run,
   type RunDetail,
 } from '@/gen/originweave/v1/originweave_pb'
@@ -122,6 +124,18 @@ export function run(overrides: Partial<Run> = {}): Run {
     budget: budget(),
     createdAt: '',
     updatedAt: '',
+    ...overrides,
+  })
+}
+
+export function project(overrides: Partial<Project> = {}): Project {
+  return create(ProjectSchema, {
+    id: 'p1',
+    name: 'A project',
+    description: '',
+    runCount: 0,
+    updatedAt: '',
+    accent: '',
     ...overrides,
   })
 }
@@ -244,6 +258,13 @@ export function sampleRunDetail(): RunDetail {
     ],
     waitingFor: { gate: 'confirm-claim', question: '确认核心论点？' },
   })
+}
+
+export function sampleProjects(): Project[] {
+  return [
+    project({ id: 'copilot-productivity', name: 'Copilot 生产力', runCount: 3 }),
+    project({ id: 'sample', name: 'Sample', runCount: 1 }),
+  ]
 }
 
 export function sampleRuns(): Run[] {

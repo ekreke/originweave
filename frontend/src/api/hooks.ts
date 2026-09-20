@@ -22,14 +22,17 @@ export function useProjectRuns(projectId: string | undefined) {
 
 // A run awaiting a human decision keeps polling so the Gate/Continue state appears
 // without a manual refresh; every other status polls nothing.
-const AWAITING_POLL_MS = 2_000
+export const AWAITING_POLL_MS = 2_000
+
+export function awaitingPollInterval(status: string | undefined): number | false {
+  return status === 'awaiting_human' ? AWAITING_POLL_MS : false
+}
 
 export function useRun(runId: string | undefined) {
   return useQuery({
     queryKey: ['run', runId],
     enabled: Boolean(runId),
     queryFn: async () => (await client.getRun({ runId: runId ?? '' })).runDetail,
-    refetchInterval: (query) =>
-      query.state.data?.run?.status === 'awaiting_human' ? AWAITING_POLL_MS : false,
+    refetchInterval: (query) => awaitingPollInterval(query.state.data?.run?.status),
   })
 }

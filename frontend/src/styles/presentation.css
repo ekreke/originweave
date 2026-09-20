@@ -396,3 +396,9 @@
   border-color: rgb(var(--c-warn));
   box-shadow: 0 0 0 1px rgb(var(--c-warn) / 0.35);
 }
+
+/* ---------------------------------------------------------------- connection */
+
+.live-off {
+  color: rgb(var(--c-danger));
+}

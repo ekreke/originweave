@@ -15,7 +15,7 @@ export interface GraphCanvasProps {
 
 // Presentation-only canvas: nodes/edges are supplied by the caller (mapped from
 // RunDetail) and positions come from the server. Without data it stays an empty
-// canvas. Data fetching/wiring lands in M1c-2b.
+// canvas.
 export function GraphCanvas({
   nodes = EMPTY_NODES,
   edges = EMPTY_EDGES,

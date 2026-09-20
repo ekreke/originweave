@@ -1,13 +1,12 @@
 import { NavLink, Outlet } from 'react-router-dom'
 
+import { useProjects } from '@/api/hooks'
 import { useTheme } from '@/theme/theme'
-
-// Sample project id used for the placeholder navigation until projects come
-// from the server (M1c).
-const SAMPLE_PROJECT = 'copilot-productivity'
 
 export function AppShell() {
   const { theme, toggle } = useTheme()
+  const { data: projects, isError, isSuccess } = useProjects()
+  const connection = isError ? 'OFFLINE' : isSuccess ? 'LIVE' : 'SYNC'
 
   return (
     <div className="shell">
@@ -17,12 +16,17 @@ export function AppShell() {
         </div>
         <nav className="nav" aria-label="main">
           <NavLink to="/">总览</NavLink>
-          <NavLink to={`/projects/${SAMPLE_PROJECT}`}>项目</NavLink>
-          <NavLink to={`/projects/${SAMPLE_PROJECT}/runs/new`}>新建核验</NavLink>
+          {(projects ?? []).map((project) => (
+            <NavLink key={project.id} to={`/projects/${project.id}`}>
+              {project.name || project.id}
+            </NavLink>
+          ))}
           <NavLink to="/settings">设置</NavLink>
         </nav>
         <div className="tools">
-          <span className="live">OFFLINE</span>
+          <span className={`live ${isError ? 'live-off' : ''}`} title="server connection">
+            {connection}
+          </span>
           <button className="btn" type="button" onClick={toggle}>
             {theme === 'dark' ? '☀ Theme' : '☾ Theme'}
           </button>

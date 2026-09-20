@@ -1,7 +1,6 @@
 import type { Fact } from '@/gen/originweave/v1/originweave_pb'
 
-// Presentation-only table. Without data it keeps the M1b empty state; wiring to
-// the server lands in M1c-2b.
+// Presentation-only table; the caller supplies data from the server.
 export function FactsTab({ facts }: { facts?: Fact[] }) {
   if (!facts || facts.length === 0) {
     return (
@@ -10,7 +9,7 @@ export function FactsTab({ facts }: { facts?: Fact[] }) {
           <h2>FACTS</h2>
           <span className="cnt">ID · Kind · Statement · Conf. · Evidence</span>
         </div>
-        <div className="empty">暂无事实节点。数据由 server 提供（M1c）。</div>
+        <div className="empty">暂无事实节点。</div>
       </div>
     )
   }

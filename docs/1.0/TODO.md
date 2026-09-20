@@ -7,8 +7,8 @@
 
 - **M2 · 偏差记分卡（已完成）**（进度真相见 `SPEC.md` M2；详情见「已完成（近期）」）：
   verify 派发 + compare pass + deviation 记分 + 严格 `COMPLETE` + `report.md` + Gate B。
-  **下一步**：**M1c-2b** 前端接线（已拆为 `SPEC.md` 的 **2b-1–2b-5**，先做 **2b-1** 数据层 + 只读接线）。
-  其后 M3（容器化 runtime）；M6 P3（Settings/Search/Session proto）可并行规划。
+  **下一步**：**M1c-2b** 前端接线（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 已完成**，下一步 **2b-2**
+  INSPECTOR 选中联动 + Hints）。其后 M3（容器化 runtime）；M6 P3（Settings/Search/Session proto）可并行规划。
 - **M6 · Pi Worker、可配置工具与会话**（用户新增；进度真相见 `SPEC.md` M6）。计划 P0–P6：
   - **P0 契约/文档（已完成）**、**P1 Worker 抽象 + 会话 + 事件（已完成）**：`capabilities/worker.py`、
     `Engine(worker=...)`、`[worker]` 配置、`SESSION`/`WORKER_STEP` 事件、run dir `sessions/`。
@@ -51,9 +51,10 @@
     （`index.html` 回退），lifespan 收尾 `scheduler.drain()`；`cli._cmd_ui` 起 uvicorn（`frontend/dist`
     存在即托管），`--run <dir>` 单 run 只读（`ServerContext.pinned_run`）。前端 `transport` 默认
     端口改 8765。Makefile/README/docs 同步。
-  - **下一步 M1c-2b**（已拆为 `SPEC.md` 的 **2b-1–2b-5**，本轮先做 **2b-1**）：
-    **2b-1** 数据层 + 只读接线（React Query、`QueryClientProvider`、hooks、`Overview`/`Project`/
-    `AppShell`/`Console` 接真实数据 + `awaiting_human` 轮询）；**2b-2** INSPECTOR 选中联动 + Hints；
+  - **下一步 M1c-2b**（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 已完成**，下一步 **2b-2**）：
+    **2b-1**（已完成）数据层 + 只读接线（`@tanstack/react-query`、`QueryClientProvider`、`api/hooks.ts`
+    的 `useProjects`/`useProjectRuns`/`useRun`、`Overview`/`Project`/`AppShell`/`Console` 接真实数据 +
+    `awaiting_human` 轮询、`transport` 默认同源）；**2b-2** INSPECTOR 选中联动 + Hints；
     **2b-3** HITL UI（Gate A/B → `submitHumanInput`）+ Replay 步进；**2b-4** 新建核验表单 + 顶栏；
     **2b-5** 端到端 + 冒烟 + CI/文档。**M6 P3**（Settings/Search/Session proto + RPC）亦依赖 M1c-1，可并行规划。
   - 已定：proto 加 `source_text`（`url` 暂不支持）；目录式 projects；`CreateRun` 后台调度；统一端口 `8765`。
@@ -191,6 +192,17 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M1c-2b 2b-1 · 数据层 + 只读接线**：前端加 `@tanstack/react-query`（`api/queryClient.ts` +
+  `main.tsx` 的 `QueryClientProvider`），`api/hooks.ts` 提供 `useProjects`/`useProjectRuns`/`useRun`
+  （`awaiting_human` 轮询，判据抽为纯函数 `awaitingPollInterval`）；`Overview`（项目列表）、
+  `Project`（run 列表）、`AppShell`（项目导航 + LIVE/OFFLINE）、`Console`（`RunList` + 四页签 +
+  `Inspector` 计数）接真实数据，保留 loading/error/`NOT_FOUND`/空态（`Console` 区分 `Code.NotFound`
+  与连接错误；`RunList` 增 `loading`/`error` 三态）。`transport` 默认改**同源**
+  （`window.location.origin`，免 CORS；`VITE_API_BASE` 覆盖 dev）。测试：`test/providers.tsx`
+  （独立 QueryClient、禁 retry）+ `App.test.tsx`/`routes.test.tsx`/`api/hooks.test.ts`（mock
+  `@/api/client`，断言 RPC 入参、NOT_FOUND/错误、LIVE/OFFLINE）。文档同步 `dashboard.md §1`、
+  `AGENTS.md`、`README.md`、`SPEC.md`（2b-1 勾选）。前端 `typecheck`/`lint`/`test`(32)/`build`/`format:check` 全绿。
 
 - **M2 · 偏差记分卡（路线 B）**：库层新增 `src/originweave/report.py`（`Deviation`/`Report`、
   `parse_severity`、`derive_report`、`render_report`）；`engine.py` —— **verify 型 Intent 派发**

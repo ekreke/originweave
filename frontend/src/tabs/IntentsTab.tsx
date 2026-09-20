@@ -1,7 +1,6 @@
 import type { Intent } from '@/gen/originweave/v1/originweave_pb'
 
-// Presentation-only table. Without data it keeps the M1b empty state; wiring to
-// the server lands in M1c-2b.
+// Presentation-only table; the caller supplies data from the server.
 export function IntentsTab({ intents }: { intents?: Intent[] }) {
   if (!intents || intents.length === 0) {
     return (
@@ -10,7 +9,7 @@ export function IntentsTab({ intents }: { intents?: Intent[] }) {
           <h2>INTENTS</h2>
           <span className="cnt">ID · Type · Question · Status · From</span>
         </div>
-        <div className="empty">暂无 Intent。数据由 server 提供（M1c）。</div>
+        <div className="empty">暂无 Intent。</div>
       </div>
     )
   }

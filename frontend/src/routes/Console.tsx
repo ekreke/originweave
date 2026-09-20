@@ -1,6 +1,8 @@
+import { Code, ConnectError } from '@connectrpc/connect'
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 
+import { useProjectRuns, useRun } from '@/api/hooks'
 import { Inspector } from '@/layout/Inspector'
 import { RunList } from '@/layout/RunList'
 import { EventsTab } from '@/tabs/EventsTab'
@@ -12,26 +14,63 @@ const TABS = ['GRAPH', 'FACTS', 'INTENTS', 'EVENTS'] as const
 
 type Tab = (typeof TABS)[number]
 
-function renderTab(tab: Tab) {
-  switch (tab) {
-    case 'GRAPH':
-      return <GraphTab />
-    case 'FACTS':
-      return <FactsTab />
-    case 'INTENTS':
-      return <IntentsTab />
-    case 'EVENTS':
-      return <EventsTab />
-  }
+function NotFound() {
+  return (
+    <section className="col" aria-label="run console">
+      <div className="empty">找不到该 run。它可能已被删除或从未创建。</div>
+    </section>
+  )
 }
 
 export function Console() {
-  const { runId } = useParams()
+  const { projectId, runId } = useParams()
   const [tab, setTab] = useState<Tab>('GRAPH')
+  const run = useRun(runId)
+  const runs = useProjectRuns(projectId)
+  const detail = run.data
+
+  const notFound = run.error instanceof ConnectError && run.error.code === Code.NotFound
+
+  if (notFound) {
+    return (
+      <div className="console">
+        <RunList runs={runs.data} loading={runs.isLoading} error={runs.isError} />
+        <NotFound />
+        <Inspector />
+      </div>
+    )
+  }
+
+  if (run.isError) {
+    return (
+      <div className="console">
+        <RunList runs={runs.data} loading={runs.isLoading} error={runs.isError} />
+        <section className="col" aria-label="run console">
+          <div className="empty">无法加载 run：{run.error.message}</div>
+        </section>
+        <Inspector />
+      </div>
+    )
+  }
+
+  function renderTab() {
+    switch (tab) {
+      case 'GRAPH':
+        return <GraphTab detail={detail} />
+      case 'FACTS':
+        return <FactsTab facts={detail?.facts} />
+      case 'INTENTS':
+        return <IntentsTab intents={detail?.intents} />
+      case 'EVENTS':
+        return <EventsTab events={detail?.events} />
+    }
+  }
+
+  const status = detail?.run?.status ?? (run.isLoading ? '…' : '—')
 
   return (
     <div className="console">
-      <RunList />
+      <RunList runs={runs.data} loading={runs.isLoading} error={runs.isError} />
       <section className="col" aria-label="run console">
         <div className="tabs" role="tablist">
           {TABS.map((name) => (
@@ -49,12 +88,12 @@ export function Console() {
         </div>
         <div className="center-body">
           <div className="cnt mono" style={{ padding: '6px 12px' }}>
-            run: {runId ?? '—'} · 只读视图（M1b 空态）
+            run: {runId ?? '—'} · {status}
           </div>
-          {renderTab(tab)}
+          {renderTab()}
         </div>
       </section>
-      <Inspector />
+      <Inspector intents={detail?.intents} waitingFor={detail?.waitingFor} />
     </div>
   )
 }
