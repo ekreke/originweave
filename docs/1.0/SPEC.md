@@ -111,7 +111,9 @@ API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）�
 - [x] 多 Worker asyncio 任务并发认领 Intent + 心跳/超时释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按 Intent id 序确定性提交，保证 Board 确定 — `engine.py` `_dispatch`/`_run_explore`/`_heartbeat`、`config.py` `[worker].heartbeat_*`/`max_concurrency<=16`（I4）
 - [x] Stigmergy：新 Fact 触发新一轮 Reason（去重）— `engine.py` `_continue`（多轮循环；死胡同/`max_rounds` 停止；`REASON.triggerFacts` 只记新增 facts）（I6）
 - [x] Reason 产出 Intent 的去重：`Validate` pass（复用 `model`，纯 LLM 语义判重、无 L1 预筛，比对含 `done`/`dropped` 及批内候选）→ 重复项写 `status=dropped` 留痕（`Intent.duplicateOf`）— `engine.py` + `prompts/validate.txt`
-- [ ] 进程内 Dispatcher（接口与 M3 的容器 Dispatcher 一致）：任务派发与协议写回（唯一写入者）
+- [x] Worker 执行后端可切换（`[worker].execution = in-process | container`）；Engine/Dispatcher 始终在
+      server 侧编排，保持协议唯一写入者 — `server/context.py`（`worker_for`/`ContainerManager`）、
+      `runtime/container.py`（M3a）
 - [x] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1c-2）— `engine.py` `run`（Bootstrap 后写 `REQUEST_HUMAN{gate:"confirm-claim"}`）/`resume`（`approve|edit|reject`；reject→`STOPPED`）
 - [x] 自动路径：`[hitl].auto=true`（或 M1c-1 的 `CreateRunRequest.auto`）跳过 Gate — `Engine(auto=...)` + `run(auto=...)`
 - [x] 失败/停止事件：`FAILED` / `STOPPED` → `status=failed|stopped`（`events.py`/`reduce.py`；`paused` 随 M3）
@@ -157,7 +159,7 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 - [x] 依赖/工具链：`protobuf` / `connect-python`（含 `protoc-gen-connect-python`）/ `starlette` / `uvicorn`；
       `make proto` 跑通 `buf generate proto` → `src/originweave/v1`（import `originweave.v1.*`；生成物不入库，ruff/mypy 已 exclude）
 - [x] CI `python` job 先生成 proto（buf-setup + 插件 PATH）再 lint/typecheck/test
-- [x] `server/app.py`：构造 `OriginweaveService` 的 Connect ASGI app（8 RPC；本轮仅 `ListProjects` 最小实现，其余继承 `UNIMPLEMENTED`）— `server/app.py`/`server/service.py`
+- [x] `server/app.py`：构造 `OriginweaveService` 的 Connect ASGI app（初始 8 RPC；现 12 RPC，均已实现，见 `dashboard.md §4.1`）— `server/app.py`/`server/service.py`
 - [x] 测试：ASGI 客户端 smoke（`ListProjects` 空列表等）— `tests/test_server.py`
 
 ### C2 · 持久化（run.json + projects 注册表）
@@ -370,7 +372,7 @@ Hint 注入、Gate C 行为均可观测。
 
 - [x] 领域模型：`Entity` / `Relation` / `EntityGraph`（`src/originweave/blackboard.py`），字段与 `product-overview.md` 第 4 节一致 — `blackboard.py`（`Entity`/`Relation`/`EntityGraph` + `Board.entities/relations`）
 - [x] 关系本体：预定义正向类型 + `other`（反向标签由渲染层派生，不建反向型）— `blackboard.py` `RELATION_TYPES`/`RelationType`（渲染端反向标签归 M5d）
-- [x] 事件 `ENTITY` / `RELATION` writer + reducer 分支（纯 fold，追加式）— `events.py`（`ENTITY`/`RELATION`）+ `reduce.py`（`ENTITY` 按 id upsert、`RELATION` 追加）
+- [x] 事件 `ENTITY` / `RELATION` writer + reducer 分支（纯 fold；事件追加式，`ENTITY` 按 id upsert）— `events.py`（`ENTITY`/`RELATION`）+ `reduce.py`（`ENTITY` 按 id upsert、`RELATION` 追加）
 - [ ] Intent 类型 `extract`（实体抽取）/ `relate`（关系判别），复用 OODA 与 Dispatcher
 - [ ] 实体消歧/合并：按规范化名称归并同名实体，`aliases` 累积（保证重放确定性）
 - [ ] server `CreateRun(analysis=relation|both)` 触发关系图抽取（测试注入 fake provider）
@@ -438,7 +440,9 @@ Worker 调用 = 一个**隔离会话**，历史以会话为单位保留**原始�
       步骤链）+ EVENTS 按 worker 过滤 — `frontend/src/routes/Settings.tsx`（+ `settingsModel.ts`）、
       `api/hooks.ts`（`useSettings`/`useUpdateSettings`，全量 worker 块）、`layout/Inspector.tsx`
       （`SessionView`；任务会话另列）、`tabs/{EventsTab.tsx,events.ts}`（worker 过滤）、`routes/Console.tsx`
-- [ ] P6 容器化（并入 M3）：runtime 镜像内置 Node + `pi` + TS 扩展；会话 `cwd` 沙箱
+- [x] P6 容器化（由 M3a 落地）：runtime 镜像内置 Node + `pi` + TS 扩展（包内资源）；会话 `cwd` 沙箱
+      （`docker run -w <run_dir> -v <run_dir>`）— `Dockerfile.runtime`、`make image`、`runtime/container.py`。
+      备注：容器模式下 `search` 工具被过滤，检索仍由引擎在 host 侧预取（M3a 取舍）
 
 验收：`[worker].provider="pi"`（默认）时，一次 run 的每个节点产生隔离会话（`sessions/*.json` 含原始
 输入/输出与步骤链），`WORKER_STEP` 事件可按 worker 复原执行链路；worker 的 LLM 由 `[capability.model]`
