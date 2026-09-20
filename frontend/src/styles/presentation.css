@@ -12,6 +12,14 @@
   color: rgb(var(--c-muted));
 }
 
+.status-queued,
+.status-paused,
+.status-stopped,
+.status-open {
+  color: rgb(var(--c-muted));
+  border-color: rgb(var(--c-hairline));
+}
+
 .status-running,
 .status-review,
 .status-claimed {
@@ -507,4 +515,58 @@
 .event-current {
   outline: 1px solid rgb(var(--c-accent));
   outline-offset: -1px;
+}
+
+/* ------------------------------------------------------- new run + run meta */
+
+.new-run {
+  display: grid;
+  gap: 12px;
+  max-width: 680px;
+  padding: 16px;
+}
+
+.new-run textarea {
+  resize: vertical;
+  font: inherit;
+}
+
+.new-run .inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.budget-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.form-error {
+  margin: 0;
+  font-size: 11px;
+  color: rgb(var(--c-danger));
+}
+
+.run-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 12px;
+  overflow: hidden;
+}
+
+.run-meta .run-id {
+  flex: none;
+  font-size: 11.5px;
+}
+
+.run-meta .budget {
+  font-size: 11px;
+  color: rgb(var(--c-muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

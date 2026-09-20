@@ -272,9 +272,11 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 
 ### 2b-4 · 新建核验表单 + 顶栏
 
-- [ ] 新建核验表单（`CreateRun`：`source_text`/`title`/`goal`/`auto`）→ 导航到 Console —
-      `frontend/src/routes/NewRun.tsx`
-- [ ] 顶栏：run 状态/预算徽标与连通性（LIVE/OFFLINE）指示 — `frontend/src/layout/AppShell.tsx`
+- [x] 新建核验表单（`CreateRun`：`source_text`/`title`/`goal`/`auto`，含可选预算覆盖）→ 导航到
+      Console；失败行内报错 — `frontend/src/routes/NewRun.tsx`、`frontend/src/api/hooks.ts`（`useCreateRun`）
+- [x] 顶栏：run 状态/预算徽标（`status` + `steps`/`tok`/`cost`/`intents`，置于 Console 中栏 header）
+      与连通性（LIVE/OFFLINE，`AppShell`，2b-1 已落地）指示 — `frontend/src/routes/Console.tsx`、
+      `frontend/src/layout/AppShell.tsx`、`frontend/src/styles/presentation.css`
 
 ### 2b-5 · 端到端与冒烟
 

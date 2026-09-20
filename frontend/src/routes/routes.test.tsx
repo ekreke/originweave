@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getRun: vi.fn(),
   addHint: vi.fn(),
   submitHumanInput: vi.fn(),
+  createRun: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({ client: mocks }))
@@ -30,6 +31,7 @@ beforeEach(() => {
   mocks.getRun.mockReset().mockResolvedValue({ runDetail: sampleRunDetail() })
   mocks.addHint.mockReset().mockResolvedValue({ hint: undefined })
   mocks.submitHumanInput.mockReset().mockResolvedValue({ run: { id: 'run_009' } })
+  mocks.createRun.mockReset().mockResolvedValue({ run: { id: 'run_009' } })
 })
 
 describe('overview', () => {
@@ -190,5 +192,61 @@ describe('replay stepper', () => {
 
     expect(screen.queryByTestId('fact-node-f1')).not.toBeInTheDocument()
     expect(screen.getByTestId('fact-node-origin')).toBeInTheDocument()
+  })
+})
+
+describe('run header badges', () => {
+  it('shows the run status and budget summary', async () => {
+    const { container } = renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('确认核心论点？')
+
+    const budget = container.querySelector('.run-meta .budget')?.textContent ?? ''
+    expect(budget).toContain('steps 3/8')
+    expect(budget).toContain('intents 2/1')
+    expect(budget).toContain('tok 0')
+    expect(budget).toContain('cost 0.00')
+    expect(container.querySelector('.run-meta .status-badge')?.textContent).toBe('awaiting_human')
+  })
+})
+
+describe('new run', () => {
+  it('submits CreateRun and navigates to the console', async () => {
+    renderAt('/projects/copilot-productivity/runs/new')
+
+    fireEvent.change(screen.getByLabelText('source text'), { target: { value: 'doc A' } })
+    fireEvent.change(screen.getByLabelText('goal'), { target: { value: 'judge the claim' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建并进入审阅台' }))
+
+    await waitFor(() =>
+      expect(mocks.createRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'copilot-productivity',
+          sourceType: 'text',
+          sourceText: 'doc A',
+          goal: 'judge the claim',
+          analysis: 'provenance',
+        }),
+      ),
+    )
+    // Navigation lands on the console, which loads the (new) run.
+    expect(await screen.findByText('确认核心论点？')).toBeInTheDocument()
+  })
+
+  it('keeps submit disabled until source text and goal are provided', () => {
+    renderAt('/projects/copilot-productivity/runs/new')
+
+    expect(screen.getByRole('button', { name: '创建并进入审阅台' })).toBeDisabled()
+    expect(mocks.createRun).not.toHaveBeenCalled()
+  })
+
+  it('shows an inline error when CreateRun fails', async () => {
+    mocks.createRun.mockRejectedValue(new Error('project not found'))
+    renderAt('/projects/copilot-productivity/runs/new')
+
+    fireEvent.change(screen.getByLabelText('source text'), { target: { value: 'doc A' } })
+    fireEvent.change(screen.getByLabelText('goal'), { target: { value: 'g' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建并进入审阅台' }))
+
+    expect(await screen.findByText('project not found')).toBeInTheDocument()
   })
 })

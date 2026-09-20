@@ -117,7 +117,14 @@ export function Console() {
     }
   }
 
-  const status = detail?.run?.status ?? (run.isLoading ? '…' : '—')
+  const runStatus = detail?.run?.status
+  const statusLabel = runStatus ?? (run.isLoading ? '…' : '—')
+  const budgetSummary = detail?.run
+    ? `steps ${detail.run.steps?.current ?? 0}/${detail.run.steps?.total ?? 0}` +
+      ` · tok ${String(detail.run.budget?.tokens ?? 0n)}` +
+      ` · cost ${(detail.run.budget?.cost ?? 0).toFixed(2)}` +
+      ` · intents ${detail.run.intents?.open ?? 0}/${detail.run.intents?.done ?? 0}`
+    : ''
 
   return (
     <div className="console">
@@ -139,8 +146,14 @@ export function Console() {
         </div>
         <div className="center-body">
           <div className="run-head">
-            <div className="cnt mono" style={{ padding: '6px 12px' }}>
-              run: {runId ?? '—'} · {status}
+            <div className="run-meta">
+              <span className="mono run-id">{runId ?? '—'}</span>
+              {runStatus ? (
+                <span className={`status-badge status-${runStatus}`}>{runStatus}</span>
+              ) : (
+                <span className="cnt mono">{statusLabel}</span>
+              )}
+              {budgetSummary ? <span className="budget mono">{budgetSummary}</span> : null}
             </div>
             <div className="replay" role="group" aria-label="replay">
               <button

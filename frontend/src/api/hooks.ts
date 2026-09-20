@@ -50,6 +50,44 @@ export function useAddHint(runId: string | undefined) {
   })
 }
 
+export interface CreateRunInput {
+  projectId: string
+  sourceText: string
+  goal: string
+  title?: string
+  auto?: boolean
+  maxSteps?: number
+  maxWall?: string
+  maxCost?: number
+}
+
+// Starting a run spins up a background engine on the server; the returned Run is
+// already readable (its status depends on HITL). Refresh the run/project lists after.
+export function useCreateRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: CreateRunInput) => {
+      const response = await client.createRun({
+        projectId: input.projectId,
+        sourceType: 'text',
+        sourceText: input.sourceText,
+        goal: input.goal,
+        analysis: 'provenance',
+        ...(input.title ? { title: input.title } : {}),
+        ...(input.auto !== undefined ? { auto: input.auto } : {}),
+        ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),
+        ...(input.maxWall ? { maxWall: input.maxWall } : {}),
+        ...(input.maxCost !== undefined ? { maxCost: input.maxCost } : {}),
+      })
+      return response.run
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+      void queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
 export interface GateSubmission {
   gate: string
   decision: string

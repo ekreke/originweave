@@ -7,10 +7,15 @@ import {
   AWAITING_POLL_MS,
   awaitingPollInterval,
   useAddHint,
+  useCreateRun,
   useSubmitHumanInput,
 } from '@/api/hooks'
 
-const mocks = vi.hoisted(() => ({ addHint: vi.fn(), submitHumanInput: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  addHint: vi.fn(),
+  submitHumanInput: vi.fn(),
+  createRun: vi.fn(),
+}))
 
 vi.mock('@/api/client', () => ({ client: mocks }))
 
@@ -84,5 +89,59 @@ describe('useSubmitHumanInput', () => {
     result.current.mutate({ gate: 'arbitrate', decision: 'approve' })
 
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['run', 'run_001'] }))
+  })
+})
+
+describe('useCreateRun', () => {
+  beforeEach(() => {
+    mocks.createRun.mockReset().mockResolvedValue({ run: { id: 'run_007' } })
+  })
+
+  it('maps the form input to a text/provenance CreateRunRequest', async () => {
+    const { result } = renderHook(() => useCreateRun(), { wrapper })
+
+    result.current.mutate({ projectId: 'p', sourceText: 'doc A', goal: 'g', auto: false })
+
+    await waitFor(() =>
+      expect(mocks.createRun).toHaveBeenCalledWith({
+        projectId: 'p',
+        sourceType: 'text',
+        sourceText: 'doc A',
+        goal: 'g',
+        analysis: 'provenance',
+        auto: false,
+      }),
+    )
+  })
+
+  it('includes budget overrides only when provided', async () => {
+    const { result } = renderHook(() => useCreateRun(), { wrapper })
+
+    result.current.mutate({
+      projectId: 'p',
+      sourceText: 'doc A',
+      goal: 'g',
+      maxSteps: 7,
+      maxWall: '10m',
+      maxCost: 1.5,
+    })
+
+    await waitFor(() =>
+      expect(mocks.createRun).toHaveBeenCalledWith(
+        expect.objectContaining({ maxSteps: 7, maxWall: '10m', maxCost: 1.5 }),
+      ),
+    )
+  })
+
+  it('refreshes the run and project lists after creating', async () => {
+    const { result } = renderHook(() => useCreateRun(), { wrapper })
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+
+    result.current.mutate({ projectId: 'p', sourceText: 'd', goal: 'g' })
+
+    await waitFor(() => {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['runs'] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['projects'] })
+    })
   })
 })
