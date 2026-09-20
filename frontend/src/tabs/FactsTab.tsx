@@ -1,7 +1,8 @@
 import type { Fact } from '@/gen/originweave/v1/originweave_pb'
 
-// Presentation-only table; the caller supplies data from the server.
-export function FactsTab({ facts }: { facts?: Fact[] }) {
+// Presentation-only table; the caller supplies data from the server. Clicking a row
+// reports the fact id so the console can drive the Inspector selection.
+export function FactsTab({ facts, onSelect }: { facts?: Fact[]; onSelect?: (id: string) => void }) {
   if (!facts || facts.length === 0) {
     return (
       <div>
@@ -32,7 +33,7 @@ export function FactsTab({ facts }: { facts?: Fact[] }) {
         </thead>
         <tbody>
           {facts.map((f) => (
-            <tr key={f.id}>
+            <tr key={f.id} className="selectable-row" onClick={() => onSelect?.(f.id)}>
               <td className="mono">{f.id}</td>
               <td>
                 <span className={`kind-swatch kind-${f.kind}`} />

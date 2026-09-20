@@ -1,8 +1,10 @@
-import type { Fact, Intent, WaitingFor } from '@/gen/originweave/v1/originweave_pb'
+import { useState } from 'react'
 
-// Presentation-only inspector: node detail, verbatim evidence, intent counts and
-// the HITL gate card. Gate decisions are surfaced via `onDecision`; submitting
-// them over RPC lands in M1c-2b.
+import type { Fact, Hint, Intent, WaitingFor } from '@/gen/originweave/v1/originweave_pb'
+
+// Presentation-only inspector: node detail, verbatim evidence, intent counts, the
+// Hints input and the HITL gate card. Gate decisions are surfaced via `onDecision`
+// and hints via `onAddHint`; submitting them over RPC is the console's job.
 
 export type InspectorSelection = { type: 'fact'; fact: Fact } | { type: 'intent'; intent: Intent }
 
@@ -11,8 +13,77 @@ export type GateDecision = 'approve' | 'edit' | 'reject'
 export interface InspectorProps {
   selection?: InspectorSelection | null
   intents?: Intent[]
+  hints?: Hint[]
   waitingFor?: WaitingFor
   onDecision?: (decision: GateDecision) => void
+  onAddHint?: (text: string) => void | Promise<void>
+}
+
+// A non-blocking Hint input: submit reports the text upward and clears it only after
+// the write resolves (a failure keeps the text so the user can retry). Without an
+// `onAddHint` handler the control stays disabled (read-only contexts).
+function HintsPanel({
+  hints,
+  onAddHint,
+}: {
+  hints?: Hint[]
+  onAddHint?: (text: string) => void | Promise<void>
+}) {
+  const [text, setText] = useState('')
+  const [pending, setPending] = useState(false)
+  const submit = async () => {
+    const value = text.trim()
+    if (!value || !onAddHint || pending) return
+    setPending(true)
+    try {
+      await onAddHint(value)
+      setText('')
+    } catch {
+      // Keep the text so the user can retry after a failed write.
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <div className="hints">
+      <h4>Hints</h4>
+      {hints && hints.length > 0 ? (
+        <ul className="hints-list">
+          {hints.map((hint) => (
+            <li key={hint.id}>
+              <span className="hint-author mono">{hint.author}</span>
+              <span className="hint-text">{hint.text}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="cnt">暂无 Hints。</p>
+      )}
+      <div className="hint-form">
+        <input
+          className="btn"
+          aria-label="hint input"
+          placeholder="写一条 Hint…"
+          value={text}
+          disabled={!onAddHint || pending}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            // Ignore Enter while an IME composition is in progress (Chinese input).
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) void submit()
+          }}
+        />
+        <button
+          className="btn"
+          type="button"
+          disabled={!onAddHint || pending || !text.trim()}
+          onClick={() => void submit()}
+        >
+          提交
+        </button>
+      </div>
+    </div>
+  )
 }
 
 const STATUS_ORDER = ['open', 'claimed', 'done', 'dropped', 'awaiting_human'] as const
@@ -96,7 +167,14 @@ function IntentDetail({ intent }: { intent: Intent }) {
   )
 }
 
-export function Inspector({ selection, intents, waitingFor, onDecision }: InspectorProps) {
+export function Inspector({
+  selection,
+  intents,
+  hints,
+  waitingFor,
+  onDecision,
+  onAddHint,
+}: InspectorProps) {
   const counts = intents && intents.length > 0 ? countByStatus(intents) : null
   const isEmpty = !waitingFor && !selection && !counts
 
@@ -142,6 +220,8 @@ export function Inspector({ selection, intents, waitingFor, onDecision }: Inspec
           </ul>
         </div>
       ) : null}
+
+      <HintsPanel hints={hints} onAddHint={onAddHint} />
 
       {isEmpty ? <div className="empty">无选中项。</div> : null}
     </div>

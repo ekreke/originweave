@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { client } from './client'
 
@@ -34,5 +34,18 @@ export function useRun(runId: string | undefined) {
     enabled: Boolean(runId),
     queryFn: async () => (await client.getRun({ runId: runId ?? '' })).runDetail,
     refetchInterval: (query) => awaitingPollInterval(query.state.data?.run?.status),
+  })
+}
+
+// Writing a Hint is non-blocking (the server appends a HINT event and the run keeps
+// going). Refetch the run so the new hint appears in the Inspector right away.
+export function useAddHint(runId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (text: string) => {
+      if (!runId) throw new Error('cannot add a hint without a run id')
+      return client.addHint({ runId, text })
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['run', runId] }),
   })
 }

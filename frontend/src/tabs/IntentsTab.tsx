@@ -1,7 +1,14 @@
 import type { Intent } from '@/gen/originweave/v1/originweave_pb'
 
-// Presentation-only table; the caller supplies data from the server.
-export function IntentsTab({ intents }: { intents?: Intent[] }) {
+// Presentation-only table; the caller supplies data from the server. Clicking a row
+// reports the intent id so the console can drive the Inspector selection.
+export function IntentsTab({
+  intents,
+  onSelect,
+}: {
+  intents?: Intent[]
+  onSelect?: (id: string) => void
+}) {
   if (!intents || intents.length === 0) {
     return (
       <div>
@@ -32,7 +39,11 @@ export function IntentsTab({ intents }: { intents?: Intent[] }) {
         </thead>
         <tbody>
           {intents.map((it) => (
-            <tr key={it.id} className={it.status === 'dropped' ? 'row-dropped' : undefined}>
+            <tr
+              key={it.id}
+              className={`selectable-row${it.status === 'dropped' ? ' row-dropped' : ''}`}
+              onClick={() => onSelect?.(it.id)}
+            >
               <td className="mono">{it.id}</td>
               <td>{it.type}</td>
               <td>

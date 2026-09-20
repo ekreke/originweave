@@ -1,5 +1,5 @@
 import { Code, ConnectError } from '@connectrpc/connect'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '@/App'
@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   listProjects: vi.fn(),
   listProjectRuns: vi.fn(),
   getRun: vi.fn(),
+  addHint: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({ client: mocks }))
@@ -26,6 +27,9 @@ beforeEach(() => {
   mocks.listProjects.mockReset().mockResolvedValue({ projects: sampleProjects() })
   mocks.listProjectRuns.mockReset().mockResolvedValue({ runs: sampleRuns() })
   mocks.getRun.mockReset().mockResolvedValue({ runDetail: sampleRunDetail() })
+  mocks.addHint
+    .mockReset()
+    .mockResolvedValue({ hint: { id: 'h1', text: 'x', author: 'human', createdAt: '' } })
 })
 
 describe('overview', () => {
@@ -80,5 +84,40 @@ describe('console', () => {
     mocks.getRun.mockRejectedValue(new Error('boom'))
     renderAt('/projects/copilot-productivity/runs/run_009')
     expect(await screen.findByText(/无法加载 run/)).toBeInTheDocument()
+  })
+})
+
+describe('inspector selection and hints', () => {
+  it('shows a fact detail with verbatim evidence when a FACTS row is clicked', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('Copilot 提升 55% 生产率')
+
+    fireEvent.click(screen.getByRole('tab', { name: 'FACTS' }))
+    fireEvent.click(screen.getByText('Copilot 提升 55% 生产率'))
+
+    expect(await screen.findByText('verbatim quote from the source')).toBeInTheDocument()
+  })
+
+  it('shows an intent detail when an INTENTS row is clicked', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('Copilot 提升 55% 生产率')
+
+    fireEvent.click(screen.getByRole('tab', { name: 'INTENTS' }))
+    fireEvent.click(screen.getByText('拆解核心论点'))
+
+    // The Inspector's intent detail is the only place showing claimedBy.
+    expect(await screen.findByText('worker-1')).toBeInTheDocument()
+  })
+
+  it('submits a Hint through AddHint', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('Copilot 提升 55% 生产率')
+
+    fireEvent.change(screen.getByLabelText('hint input'), { target: { value: 'check it' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+
+    await waitFor(() =>
+      expect(mocks.addHint).toHaveBeenCalledWith({ runId: 'run_009', text: 'check it' }),
+    )
   })
 })

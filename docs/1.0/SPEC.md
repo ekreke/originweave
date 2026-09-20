@@ -252,9 +252,11 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 
 ### 2b-2 · INSPECTOR 交互（选中联动 + Hints）
 
-- [ ] 选中状态与图联动：`GraphCanvas` `onSelect` / 页签选择 → `Inspector` 详情 —
-      `frontend/src/routes/Console.tsx`、`frontend/src/layout/Inspector.tsx`
-- [ ] Hints 输入（`AddHint` mutation + refetch，非阻塞）— `frontend/src/layout/Inspector.tsx`
+- [x] 选中状态与图联动：`GraphCanvas` `onSelect` / 页签（FACTS/INTENTS 行）选择 → `Inspector`
+      详情；含 `origin`/`goal` 锚点 — `frontend/src/routes/Console.tsx`（`resolveSelection`）、
+      `frontend/src/layout/Inspector.tsx`、`frontend/src/tabs/{Facts,Intents}Tab.tsx`
+- [x] Hints 输入（`AddHint` mutation + invalidate refetch，非阻塞；IME 组合态守卫、失败保留文本、
+      pending 防重入）— `frontend/src/layout/Inspector.tsx`、`frontend/src/api/hooks.ts`（`useAddHint`）
 
 ### 2b-3 · HITL UI 与 Replay
 

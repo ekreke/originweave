@@ -7,8 +7,8 @@
 
 - **M2 · 偏差记分卡（已完成）**（进度真相见 `SPEC.md` M2；详情见「已完成（近期）」）：
   verify 派发 + compare pass + deviation 记分 + 严格 `COMPLETE` + `report.md` + Gate B。
-  **下一步**：**M1c-2b** 前端接线（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 已完成**，下一步 **2b-2**
-  INSPECTOR 选中联动 + Hints）。其后 M3（容器化 runtime）；M6 P3（Settings/Search/Session proto）可并行规划。
+  **下一步**：**M1c-2b** 前端接线（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 / 2b-2 已完成**，
+  下一步 **2b-3** HITL Gate + Replay）。其后 M3（容器化 runtime）；M6 P3（Settings/Search/Session proto）可并行规划。
 - **M6 · Pi Worker、可配置工具与会话**（用户新增；进度真相见 `SPEC.md` M6）。计划 P0–P6：
   - **P0 契约/文档（已完成）**、**P1 Worker 抽象 + 会话 + 事件（已完成）**：`capabilities/worker.py`、
     `Engine(worker=...)`、`[worker]` 配置、`SESSION`/`WORKER_STEP` 事件、run dir `sessions/`。
@@ -51,10 +51,11 @@
     （`index.html` 回退），lifespan 收尾 `scheduler.drain()`；`cli._cmd_ui` 起 uvicorn（`frontend/dist`
     存在即托管），`--run <dir>` 单 run 只读（`ServerContext.pinned_run`）。前端 `transport` 默认
     端口改 8765。Makefile/README/docs 同步。
-  - **下一步 M1c-2b**（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 已完成**，下一步 **2b-2**）：
+  - **下一步 M1c-2b**（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 / 2b-2 已完成**，下一步 **2b-3**）：
     **2b-1**（已完成）数据层 + 只读接线（`@tanstack/react-query`、`QueryClientProvider`、`api/hooks.ts`
     的 `useProjects`/`useProjectRuns`/`useRun`、`Overview`/`Project`/`AppShell`/`Console` 接真实数据 +
-    `awaiting_human` 轮询、`transport` 默认同源）；**2b-2** INSPECTOR 选中联动 + Hints；
+    `awaiting_human` 轮询、`transport` 默认同源）；**2b-2**（已完成）INSPECTOR 选中联动 + Hints
+    （`useAddHint`；`Console.resolveSelection` 含 `origin`/`goal`；FACTS/INTENTS 行选中）；
     **2b-3** HITL UI（Gate A/B → `submitHumanInput`）+ Replay 步进；**2b-4** 新建核验表单 + 顶栏；
     **2b-5** 端到端 + 冒烟 + CI/文档。**M6 P3**（Settings/Search/Session proto + RPC）亦依赖 M1c-1，可并行规划。
   - 已定：proto 加 `source_text`（`url` 暂不支持）；目录式 projects；`CreateRun` 后台调度；统一端口 `8765`。
@@ -192,6 +193,16 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M1c-2b 2b-2 · INSPECTOR 交互（选中联动 + Hints）**：`Console` 加 `selectionId` +
+  `resolveSelection`（`origin`/`goal` 锚点优先、`intents` 兜底、未命中 `null`）；`GraphTab`
+  `onSelect` + `FactsTab`/`IntentsTab` 行 `onSelect` → `Inspector` 详情；`api/hooks.ts` 加
+  `useAddHint`（`AddHint` mutation + invalidate `['run', runId]`；空 `runId` 抛错）；`Inspector`
+  加 `hints`/`onAddHint` + `HintsPanel`（受控输入、Enter 提交、**IME 组合态守卫**、失败保留文本、
+  pending 防重入）。`presentation.css` 加选中/提示样式。测试 `routes.test.tsx`（选中联动 + Hint
+  提交）、`layout.test.tsx`（提交清空 / IME / 失败保留 / 无 handler 禁用）、`hooks.test.ts`
+  （`useAddHint`）。前端 `typecheck`/`lint`/`format:check`/`test`(40)/`build` 全绿；`originweave ui`
+  冒烟通过。经 subagent review（无 blocker；已修 IME、失败保留文本、pending、长文本溢出等）。
 
 - **M1c-2b 2b-1 · 数据层 + 只读接线**：前端加 `@tanstack/react-query`（`api/queryClient.ts` +
   `main.tsx` 的 `QueryClientProvider`），`api/hooks.ts` 提供 `useProjects`/`useProjectRuns`/`useRun`

@@ -2,8 +2,9 @@ import { Code, ConnectError } from '@connectrpc/connect'
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 
-import { useProjectRuns, useRun } from '@/api/hooks'
-import { Inspector } from '@/layout/Inspector'
+import { useAddHint, useProjectRuns, useRun } from '@/api/hooks'
+import type { Fact, Intent, RunDetail } from '@/gen/originweave/v1/originweave_pb'
+import { Inspector, type InspectorSelection } from '@/layout/Inspector'
 import { RunList } from '@/layout/RunList'
 import { EventsTab } from '@/tabs/EventsTab'
 import { FactsTab } from '@/tabs/FactsTab'
@@ -13,6 +14,23 @@ import { IntentsTab } from '@/tabs/IntentsTab'
 const TABS = ['GRAPH', 'FACTS', 'INTENTS', 'EVENTS'] as const
 
 type Tab = (typeof TABS)[number]
+
+// Map a graph/table selection id to an Inspector selection. The origin and goal
+// anchors are selectable too, so they are searched alongside the derived facts.
+function resolveSelection(
+  detail: RunDetail | undefined,
+  id: string | null,
+): InspectorSelection | null {
+  if (!detail || !id) return null
+  const anchors = [detail.origin, detail.goal, ...detail.facts].filter(
+    (f): f is Fact => f !== undefined,
+  )
+  const fact = anchors.find((f) => f.id === id)
+  if (fact) return { type: 'fact', fact }
+  const intent: Intent | undefined = detail.intents.find((it) => it.id === id)
+  if (intent) return { type: 'intent', intent }
+  return null
+}
 
 function NotFound() {
   return (
@@ -25,9 +43,12 @@ function NotFound() {
 export function Console() {
   const { projectId, runId } = useParams()
   const [tab, setTab] = useState<Tab>('GRAPH')
+  const [selectionId, setSelectionId] = useState<string | null>(null)
   const run = useRun(runId)
   const runs = useProjectRuns(projectId)
+  const addHint = useAddHint(runId)
   const detail = run.data
+  const selection = resolveSelection(detail, selectionId)
 
   const notFound = run.error instanceof ConnectError && run.error.code === Code.NotFound
 
@@ -56,11 +77,11 @@ export function Console() {
   function renderTab() {
     switch (tab) {
       case 'GRAPH':
-        return <GraphTab detail={detail} />
+        return <GraphTab detail={detail} onSelect={setSelectionId} />
       case 'FACTS':
-        return <FactsTab facts={detail?.facts} />
+        return <FactsTab facts={detail?.facts} onSelect={setSelectionId} />
       case 'INTENTS':
-        return <IntentsTab intents={detail?.intents} />
+        return <IntentsTab intents={detail?.intents} onSelect={setSelectionId} />
       case 'EVENTS':
         return <EventsTab events={detail?.events} />
     }
@@ -93,7 +114,13 @@ export function Console() {
           {renderTab()}
         </div>
       </section>
-      <Inspector intents={detail?.intents} waitingFor={detail?.waitingFor} />
+      <Inspector
+        selection={selection}
+        intents={detail?.intents}
+        hints={detail?.hints}
+        waitingFor={detail?.waitingFor}
+        onAddHint={(text) => addHint.mutateAsync(text).then(() => undefined)}
+      />
     </div>
   )
 }

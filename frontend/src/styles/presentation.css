@@ -402,3 +402,60 @@
 .live-off {
   color: rgb(var(--c-danger));
 }
+
+/* ---------------------------------------------------------- selection + hints */
+
+.selectable-row {
+  cursor: pointer;
+}
+
+.selectable-row:hover {
+  background: rgb(var(--c-wash) / 0.7);
+}
+
+.hints {
+  margin-top: 12px;
+}
+
+.hints h4 {
+  margin: 0 0 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: rgb(var(--c-muted));
+}
+
+.hints-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hints-list li {
+  display: flex;
+  gap: 6px;
+  font-size: 11.5px;
+}
+
+.hint-author {
+  flex: none;
+  color: rgb(var(--c-accent));
+}
+
+.hint-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hint-form {
+  display: flex;
+  gap: 6px;
+}
+
+.hint-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+}

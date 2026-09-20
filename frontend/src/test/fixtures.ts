@@ -6,6 +6,7 @@ import {
   EventSchema,
   EvidenceSchema,
   FactSchema,
+  HintSchema,
   IntentCountsSchema,
   IntentSchema,
   ProjectSchema,
@@ -17,6 +18,7 @@ import {
   type Event,
   type Evidence,
   type Fact,
+  type Hint,
   type Intent,
   type Project,
   type Run,
@@ -77,6 +79,16 @@ export function intent(overrides: Partial<Intent> = {}): Intent {
     from: 'origin',
     question: '',
     producedFacts: [],
+    createdAt: '2026-09-19T00:00:00Z',
+    ...overrides,
+  })
+}
+
+export function hint(overrides: Partial<Hint> = {}): Hint {
+  return create(HintSchema, {
+    id: 'h0',
+    text: 'a hint',
+    author: 'human',
     createdAt: '2026-09-19T00:00:00Z',
     ...overrides,
   })
