@@ -1,7 +1,7 @@
 import { MarkerType, type Edge, type Node } from '@xyflow/react'
 
 import type { Fact, RunDetail } from '@/gen/originweave/v1/originweave_pb'
-import { hasPosition, layoutRunDetail } from '@/graph/layout'
+import { LAYOUT_ROW_H, layoutRunDetail } from '@/graph/layout'
 
 // Pure mapping from the proto RunDetail contract to React Flow nodes/edges.
 // Following dashboard.md §2, Facts are double-encoded by kind (shape + colour)
@@ -24,6 +24,8 @@ export interface FactNodeData extends Record<string, unknown> {
 export interface IntentNodeData extends Record<string, unknown> {
   intent: RunDetail['intents'][number]
   variant: IntentVariant
+  /** Compact question preview; the full text stays in the Inspector. */
+  preview: string
 }
 
 export interface GraphEdgeData extends Record<string, unknown> {
@@ -73,10 +75,12 @@ const INTENT_VARIANTS: Record<string, IntentVariant> = {
 
 // Deterministic placement for Intents, which carry no position in the proto
 // contract: anchor each one just below its `from` fact, stacked in id order.
-const INTENT_ANCHOR_DX = -90
-const INTENT_ANCHOR_DY = 96
-const INTENT_GAP = 56
-const UNANCHORED_DX = -270
+const INTENT_LANE_OFFSET = LAYOUT_ROW_H
+export const INTENT_GRID_ROWS = 8
+export const INTENT_COL_W = 196
+export const INTENT_ROW_H = 76
+const INTENT_CARD_W = 156
+const INTENT_CARD_H = 48
 
 export function factShape(kind: string): FactShape {
   return Object.hasOwn(FACT_SHAPES, kind) ? FACT_SHAPES[kind] : 'square'
@@ -113,28 +117,35 @@ export function shortLabel(text: string, max = PREVIEW_MAX): string {
   return `${chars.slice(0, max).join('').trimEnd()}…`
 }
 
+function factAriaLabel(fact: Fact, preview: string): string {
+  const confidence = fact.confidence > 0 ? `，置信度 ${Math.round(fact.confidence * 100)}%` : ''
+  return `${fact.kind} ${fact.id}：${preview}，状态 ${fact.status}${confidence}`
+}
+
+function intentAriaLabel(intent: RunDetail['intents'][number], preview: string): string {
+  return `意图 ${intent.id}：${preview || '待处理意图'}，状态 ${intent.status}`
+}
+
 export function runDetailToGraph(detail: RunDetail): GraphModel {
   const nodes: GraphNode[] = []
   const anchors = new Map<string, { x: number; y: number }>()
-  // Positions are server-provided; when a live run carries none, fill the gaps with a
-  // deterministic layering so nodes do not all stack at (0,0).
-  const fallback = layoutRunDetail(detail)
+  const layout = layoutRunDetail(detail)
 
   const pushFact = (f: Fact | undefined) => {
     if (!f) return
-    const position = hasPosition(f.position)
-      ? { x: f.position!.x, y: f.position!.y }
-      : (fallback.get(f.id) ?? { x: 0, y: 0 })
+    const position = layout.get(f.id) ?? { x: 0, y: 0 }
+    const preview = shortLabel(f.label)
     anchors.set(f.id, position)
     nodes.push({
       id: f.id,
       type: 'fact',
       position,
+      ariaLabel: factAriaLabel(f, preview),
       data: {
         fact: f,
         shape: factShape(f.kind),
         color: factColor(f.kind),
-        preview: shortLabel(f.label),
+        preview,
       },
     })
   }
@@ -143,25 +154,56 @@ export function runDetailToGraph(detail: RunDetail): GraphModel {
   pushFact(detail.goal)
   for (const f of detail.facts) pushFact(f)
 
+  const bottomFactY = Math.max(0, ...[...anchors.values()].map((point) => point.y))
+  const intentLaneY = bottomFactY + INTENT_LANE_OFFSET
   const groups = new Map<string, RunDetail['intents']>()
-  for (const it of [...detail.intents].sort(byId)) {
-    const list = groups.get(it.from) ?? []
-    list.push(it)
-    groups.set(it.from, list)
+  for (const intent of [...detail.intents].sort(byId)) {
+    const intents = groups.get(intent.from) ?? []
+    intents.push(intent)
+    groups.set(intent.from, intents)
   }
-
-  let unanchored = 0
-  for (const [from, intents] of groups) {
-    const anchor = anchors.get(from)
-    intents.forEach((it, index) => {
-      const position = anchor
-        ? { x: anchor.x + INTENT_ANCHOR_DX, y: anchor.y + INTENT_ANCHOR_DY + index * INTENT_GAP }
-        : { x: UNANCHORED_DX, y: unanchored++ * INTENT_GAP }
+  // Intent cards sit in a bounded-height task lane below the evidence DAG. Each group
+  // starts to the right of its `from` Fact. Group rectangles are packed into separate
+  // lane bands whenever their horizontal ranges meet, avoiding dense overlap for large runs.
+  const occupiedGroups: Array<{ x: number; y: number; width: number; height: number }> = []
+  const orderedGroups = [...groups.entries()].sort(([a], [b]) => {
+    const ax = anchors.get(a)?.x ?? 0
+    const bx = anchors.get(b)?.x ?? 0
+    return ax === bx ? byId({ id: a }, { id: b }) : ax - bx
+  })
+  for (const [from, intents] of orderedGroups) {
+    const anchorX = anchors.get(from)?.x ?? 0
+    const columns = Math.ceil(intents.length / INTENT_GRID_ROWS)
+    const width = (columns - 1) * INTENT_COL_W + INTENT_CARD_W
+    const height = (Math.min(intents.length, INTENT_GRID_ROWS) - 1) * INTENT_ROW_H + INTENT_CARD_H
+    const x = anchorX + INTENT_COL_W
+    let y = intentLaneY
+    while (
+      occupiedGroups.some(
+        (group) =>
+          x < group.x + group.width &&
+          x + width > group.x &&
+          y < group.y + group.height &&
+          y + height > group.y,
+      )
+    ) {
+      y += INTENT_ROW_H
+    }
+    occupiedGroups.push({ x, y, width, height })
+    intents.forEach((intent, intentIndex) => {
+      const column = Math.floor(intentIndex / INTENT_GRID_ROWS)
+      const row = intentIndex % INTENT_GRID_ROWS
+      const preview = shortLabel(intent.question, 56)
       nodes.push({
-        id: it.id,
+        id: intent.id,
         type: 'intent',
-        position,
-        data: { intent: it, variant: intentVariant(it.status) },
+        position: { x: x + column * INTENT_COL_W, y: y + row * INTENT_ROW_H },
+        ariaLabel: intentAriaLabel(intent, preview),
+        data: {
+          intent,
+          variant: intentVariant(intent.status),
+          preview,
+        },
       })
     })
   }
@@ -174,6 +216,8 @@ export function runDetailToGraph(detail: RunDetail): GraphModel {
       target: e.target,
       type: 'smoothstep',
       markerEnd: { type: MarkerType.ArrowClosed },
+      className: `edge-${e.relation}`,
+      ariaLabel: `${e.relation}: ${e.source} 到 ${e.target}`,
       ...(dash ? { style: { strokeDasharray: dash } } : {}),
       data: { relation: e.relation, note: e.note },
     }

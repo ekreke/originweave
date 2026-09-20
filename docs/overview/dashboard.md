@@ -50,9 +50,11 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
     边按 `relation` 区分（`main-chain` 实线、`dependency` 虚线、
     `decomposes` 点线、`spawns`/`resolves` —— 见 `blackboard-protocol.md`）。
     **节点标签是短预览**（折叠空白、超长截断 + 省略号、CSS 3 行封顶），**完整文本在 INSPECTOR**
-    （点击节点后展示，长文可滚动）。坐标取 proto `Fact.position`；**live run 未写坐标时前端按溯源深度
-    分层兜底**（origin 顶 / goal 其上 / facts 按 BFS 深度成行；兜底布局内确定性、两两不重叠），也符合
-    "`position` 渲染侧可重算"的约定。
+    （点击节点后展示，长文可滚动）。前端按溯源深度作**确定性的从左到右分层布局**（origin 左侧 /
+    goal 左上；facts 按 BFS 深度向右推进、同层占独立纵向 lane；Intent 置于 facts 下方的独立网格任务 lane，
+    每列最多 8 项；横向区间重叠的来源组进入独立 lane band），
+    避免历史 proto `Fact.position` 造成重叠。节点可在当前审阅会话中拖动调整；该纯展示状态不写入 server、
+    黑板或事件日志，刷新/重放后恢复确定性布局。这符合 "`position` 渲染侧可重算" 的约定。
   - **FACTS** — 事实表：`ID | Kind | Statement | Conf. | Evidence`。
   - **INTENTS** — Intent 表：`ID | Type | Question | Status | From`，含 `dropped`（死胡同）。
   - **RELATIONS** — 实体-关系图（`analysis` 含 relation 时）。复用 PROVENANCE DAG 的图

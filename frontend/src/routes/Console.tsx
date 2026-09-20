@@ -1,6 +1,7 @@
 import { Code, ConnectError } from '@connectrpc/connect'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import type { XYPosition } from '@xyflow/react'
 
 import { useAddHint, useProjectRuns, useRun, useSubmitHumanInput } from '@/api/hooks'
 import type { Fact, Intent, RunDetail } from '@/gen/originweave/v1/originweave_pb'
@@ -34,7 +35,7 @@ function resolveSelection(
 
 function NotFound() {
   return (
-    <section className="col" aria-label="run console">
+    <section className="col console-main" aria-label="run console">
       <div className="empty">找不到该 run。它可能已被删除或从未创建。</div>
     </section>
   )
@@ -58,12 +59,25 @@ export function Console() {
     run: runId,
     step: null,
   })
+  const replayRef = useRef(replay)
+  // Dragging is presentation state only: retain it while reviewing this run, but do not
+  // write it into the server-owned blackboard or append-only event log.
+  const [graphPositions, setGraphPositions] = useState<{
+    run: string | undefined
+    positions: Record<string, XYPosition>
+  }>({ run: runId, positions: {} })
   const replayStep = replay.run === runId ? replay.step : null
+  // Replay is a historical board snapshot. Keep its geometry deterministic rather than
+  // mixing in any drag adjustments made while reviewing the live board.
+  const live = replayStep === null
   const stepReplay = (next: number | null | ((current: number | null) => number | null)) => {
-    setReplay((current) => {
-      const base = current.run === runId ? current.step : null
-      return { run: runId, step: typeof next === 'function' ? next(base) : next }
-    })
+    const current = replayRef.current
+    const base = current.run === runId ? current.step : null
+    const step = typeof next === 'function' ? next(base) : next
+    if (step !== null) setGraphPositions({ run: runId, positions: {} })
+    const updated = { run: runId, step }
+    replayRef.current = updated
+    setReplay(updated)
   }
 
   const run = useRun(runId, replayStep === null ? null : replayStep + 1)
@@ -74,6 +88,17 @@ export function Console() {
   const selectionId = selected.run === runId ? selected.id : null
   const selection = resolveSelection(detail, selectionId)
   const select = (id: string | null) => setSelected({ run: runId, id })
+  const graphPositionOverrides =
+    live && graphPositions.run === runId ? graphPositions.positions : {}
+  const saveGraphPosition = (id: string, position: XYPosition) => {
+    setGraphPositions((current) => ({
+      run: runId,
+      positions: {
+        ...(current.run === runId ? current.positions : {}),
+        [id]: position,
+      },
+    }))
+  }
 
   const events = detail?.events ?? []
   const maxStep = events.length - 1
@@ -104,7 +129,7 @@ export function Console() {
           error={runs.isError}
           projectId={projectId}
         />
-        <section className="col" aria-label="run console">
+        <section className="col console-main" aria-label="run console">
           <div className="empty">无法加载 run：{run.error.message}</div>
         </section>
         <Inspector />
@@ -115,7 +140,15 @@ export function Console() {
   function renderTab() {
     switch (tab) {
       case 'GRAPH':
-        return <GraphTab detail={detail} onSelect={select} />
+        return (
+          <GraphTab
+            detail={detail}
+            onSelect={select}
+            positions={graphPositionOverrides}
+            onPositionChange={live ? saveGraphPosition : undefined}
+            draggable={live}
+          />
+        )
       case 'FACTS':
         return <FactsTab facts={detail?.facts} onSelect={select} selectedId={selectionId} />
       case 'INTENTS':
@@ -134,7 +167,6 @@ export function Console() {
       ` · intents ${detail.run.intents?.open ?? 0}/${detail.run.intents?.done ?? 0}`
     : ''
   // The folded board is historical, so writing is disabled while replaying.
-  const live = replayStep === null
 
   return (
     <div className="console">
@@ -144,7 +176,7 @@ export function Console() {
         error={runs.isError}
         projectId={projectId}
       />
-      <section className="col" aria-label="run console">
+      <section className="col console-main" aria-label="run console">
         <div className="tabs" role="tablist">
           {TABS.map((name) => (
             <button

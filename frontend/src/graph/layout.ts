@@ -1,12 +1,11 @@
 import type { RunDetail } from '@/gen/originweave/v1/originweave_pb'
 
-// Deterministic fallback layout for runs whose Facts carry no `position` (dashboard.md
-// §2: the position is recomputable on the render side). A live run writes no positions,
-// so without this every node would stack at (0,0). Server-provided positions always win;
-// this only fills the gaps (per node), so a partially-positioned run still works.
-
-export const LAYOUT_ROW_H = 160
-export const LAYOUT_COL_W = 220
+// Deterministic, left-to-right provenance layout. Render-side positions are deliberately
+// recomputed so legacy server coordinates cannot reintroduce a dense top-down graph.
+export const LAYOUT_ROW_H = 168
+// A Fact card (172px) plus an Intent card (156px) must fit between consecutive
+// provenance layers when an intent resolves into the next Fact.
+export const LAYOUT_COL_W = 400
 
 export interface LayoutPoint {
   x: number
@@ -17,20 +16,14 @@ export interface LayoutPoint {
 // reducer derives. Relation types outside this set do not move a node down a row.
 const DEPTH_RELATIONS = new Set(['main-chain', 'dependency', 'decomposes'])
 
-/** True when a Fact carries a non-zero, server-provided position. */
-export function hasPosition(position: { x?: number; y?: number } | undefined): boolean {
-  return Boolean(position && (position.x !== 0 || position.y !== 0))
-}
-
 function byId(a: { id: string }, b: { id: string }): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
 }
 
 /**
- * Lay a provenance DAG out top-down: `origin` at the top, `goal` above it, facts in rows
- * by their BFS depth over provenance edges, spread horizontally in id order. Nodes in
- * the same row never share a coordinate. The result is a pure function of the input, so
- * two renders (or a replay) place nodes identically.
+ * Lay a provenance DAG left-to-right: `origin` anchors the first column and Facts advance
+ * by BFS depth. Siblings occupy generously spaced vertical lanes in id order. The result
+ * is a pure function of the input, so two renders (or a replay) place nodes identically.
  */
 export function layoutRunDetail(detail: RunDetail): Map<string, LayoutPoint> {
   const points = new Map<string, LayoutPoint>()
@@ -78,7 +71,10 @@ export function layoutRunDetail(detail: RunDetail): Map<string, LayoutPoint> {
   }
   for (const [row, ids] of rows) {
     ids.forEach((id, index) => {
-      points.set(id, { x: (index - (ids.length - 1) / 2) * LAYOUT_COL_W, y: row * LAYOUT_ROW_H })
+      points.set(id, {
+        x: row * LAYOUT_COL_W,
+        y: (index - (ids.length - 1) / 2) * LAYOUT_ROW_H,
+      })
     })
   }
   return points

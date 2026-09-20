@@ -172,20 +172,19 @@
 
 .fact-node {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   justify-content: center;
-  min-width: 56px;
-  max-width: 140px;
-  min-height: 34px;
-  padding: 4px 6px;
+  width: 172px;
+  min-height: 72px;
+  padding: 7px 9px 7px 31px;
   border: 1.5px solid var(--node-color);
-  background: rgb(var(--c-panel));
+  background: rgb(var(--c-panel) / 0.96);
+  box-shadow: 0 2px 6px rgb(var(--c-ink) / 0.08);
 }
 
 .shape-ring {
-  border-radius: 50%;
-  min-width: 52px;
-  min-height: 52px;
+  border-radius: 0;
 }
 
 .shape-square {
@@ -196,54 +195,111 @@
   border-style: dashed;
 }
 
-.shape-triangle,
-.shape-diamond,
-.shape-hexagon,
-.shape-warning-triangle {
-  border: none;
+.node-symbol {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--node-color);
+  background: rgb(var(--c-panel));
+}
+
+/* The compact card preserves readable evidence text; this marker keeps the
+   contractually fixed shape + colour encoding for every Fact kind. */
+.symbol-ring {
+  border-radius: 50%;
+}
+
+.symbol-square {
   background: var(--node-color);
-  color: rgb(var(--c-panel));
 }
 
-.shape-triangle {
+.symbol-triangle {
+  border: 0;
+  background: var(--node-color);
   clip-path: polygon(50% 0, 100% 100%, 0 100%);
-  padding-top: 14px;
-  min-height: 44px;
 }
 
-.shape-diamond {
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  min-height: 48px;
+.symbol-diamond {
+  width: 11px;
+  height: 11px;
+  margin: 1px;
+  transform: rotate(45deg);
+  background: var(--node-color);
 }
 
-.shape-hexagon {
+.symbol-dashed-box {
+  border-style: dashed;
+}
+
+.symbol-hexagon {
+  border: 0;
+  background: var(--node-color);
   clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
 }
 
-.shape-warning-triangle {
-  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+.symbol-warning-triangle {
+  border: 0;
   background: rgb(var(--c-k-deviation));
-  padding-top: 14px;
-  min-height: 44px;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
 }
 
 .intent-node {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 44px;
-  padding: 3px 6px;
+  align-items: flex-start;
+  gap: 7px;
+  width: 156px;
+  min-height: 48px;
+  padding: 6px 8px;
   /* dashboard.md §2: open = grey dashed, claimed = blue pulsing. */
   border: 1.5px dashed rgb(var(--c-muted));
-  border-radius: 999px;
+  border-radius: 4px;
   background: rgb(var(--c-panel));
   font-size: 10px;
   color: rgb(var(--c-muted));
 }
 
 .intent-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
   font-weight: 700;
   color: inherit;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+
+.intent-copy {
+  min-width: 0;
+  text-align: left;
+}
+
+.intent-id,
+.node-kicker,
+.node-foot {
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  color: rgb(var(--c-muted));
+}
+
+.node-kicker,
+.node-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  text-transform: uppercase;
+}
+
+.node-kicker {
+  margin-bottom: 4px;
+  color: var(--node-color);
+}
+
+.node-foot {
+  margin-top: 5px;
 }
 
 .intent-claimed {
@@ -276,7 +332,8 @@
 
 .node.selected {
   outline: 2px solid rgb(var(--c-accent));
-  outline-offset: 2px;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgb(var(--c-accent) / 0.12);
 }
 
 @keyframes intent-pulse {
@@ -405,6 +462,10 @@
   box-shadow: 0 0 0 1px rgb(var(--c-warn) / 0.35);
 }
 
+.run-card:hover {
+  background: rgb(var(--c-accent) / 0.05);
+}
+
 /* ---------------------------------------------------------------- connection */
 
 .live-off {
@@ -496,7 +557,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding-right: 8px;
+  min-height: 46px;
+  padding-right: 12px;
+  border-bottom: 1px solid rgb(var(--c-hairline));
+  background: rgb(var(--c-panel));
 }
 
 .replay {
@@ -554,7 +618,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 6px 12px;
+  padding: 8px 16px;
   overflow: hidden;
 }
 
@@ -740,4 +804,125 @@
   padding: 2px 7px;
   font-size: 10.5px;
   text-decoration: none;
+}
+
+/* Dense graph workspace: keep navigation on the edges and the evidence field quiet. */
+.graph-canvas .react-flow__background {
+  opacity: 0.48;
+}
+
+.graph-canvas .react-flow__edge-path {
+  stroke: rgb(var(--c-accent));
+  stroke-width: 1.25;
+  opacity: 0.45;
+}
+
+.graph-canvas .edge-dependency .react-flow__edge-path,
+.graph-canvas .edge-decomposes .react-flow__edge-path {
+  opacity: 0.33;
+}
+
+.graph-canvas .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid rgb(var(--c-hairline));
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgb(var(--c-ink) / 0.12);
+}
+
+.graph-canvas .react-flow__controls button {
+  border-bottom-color: rgb(var(--c-hairline));
+  background: rgb(var(--c-panel));
+  fill: rgb(var(--c-muted));
+}
+
+.graph-canvas .react-flow__controls button:hover {
+  background: rgb(var(--c-accent-soft));
+}
+
+.graph-minimap {
+  border: 1px solid rgb(var(--c-hairline));
+  border-radius: 4px;
+  background: rgb(var(--c-panel) / 0.94);
+}
+
+.graph-summary,
+.graph-legend {
+  padding: 8px 10px;
+  border: 1px solid rgb(var(--c-hairline));
+  border-radius: 4px;
+  background: rgb(var(--c-panel) / 0.94);
+  box-shadow: 0 2px 8px rgb(var(--c-ink) / 0.08);
+}
+
+.graph-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: rgb(var(--c-ink));
+}
+
+.graph-counts,
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 4px;
+  color: rgb(var(--c-muted));
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+}
+
+.graph-legend {
+  margin-top: 0;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-item::before {
+  width: 7px;
+  height: 7px;
+  content: '';
+  border: 1px solid currentColor;
+}
+
+.legend-fact {
+  color: rgb(var(--c-k-fact));
+}
+.legend-intent {
+  color: rgb(var(--c-k-intent));
+}
+.legend-intent::before {
+  border-radius: 50%;
+  border-style: dashed;
+}
+.legend-source {
+  color: rgb(var(--c-k-source));
+}
+.legend-source::before {
+  transform: rotate(45deg);
+}
+.legend-deviation {
+  color: rgb(var(--c-k-deviation));
+}
+.legend-deviation::before {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background: currentColor;
+}
+
+@media (max-width: 960px) {
+  .console {
+    grid-template-columns: 205px minmax(0, 1fr);
+  }
+
+  .console > .inspector {
+    display: none;
+  }
+
+  .graph-legend {
+    display: none;
+  }
 }

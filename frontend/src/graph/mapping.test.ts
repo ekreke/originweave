@@ -6,6 +6,7 @@ import {
   edgeDash,
   factColor,
   factShape,
+  INTENT_GRID_ROWS,
   intentVariant,
   runDetailToGraph,
   shortLabel,
@@ -73,17 +74,18 @@ describe('runDetailToGraph', () => {
     expect(graph.edges[1]?.data?.relation).toBe('goal-derived')
   })
 
-  it('passes Fact positions through and anchors intents below their source', () => {
+  it('lays out facts left-to-right and keeps intents in a separate lower lane', () => {
     const graph = runDetailToGraph(sampleRunDetail())
 
     const f1 = graph.nodes.find((n) => n.id === 'f1')
-    expect(f1?.position).toEqual({ x: 0, y: 160 })
+    const c1 = graph.nodes.find((n) => n.id === 'c1')
+    expect(c1?.position.x).toBeGreaterThan(f1?.position.x ?? 0)
 
-    // i1/i2/i3 are anchored to f1, stacked in id order; i4 to c1.
+    // Intent cards are separated from both Fact lanes and each other.
     const i2 = graph.nodes.find((n) => n.id === 'i2')
-    expect(i2?.position).toEqual({ x: -90, y: 160 + 96 + 56 })
     const i4 = graph.nodes.find((n) => n.id === 'i4')
-    expect(i4?.position).toEqual({ x: -90, y: 320 + 96 })
+    expect(i2?.position.y).toBeGreaterThan(f1?.position.y ?? 0)
+    expect(i4?.position.x).toBeGreaterThan(i2?.position.x ?? 0)
   })
 
   it('is deterministic for the same input', () => {
@@ -106,18 +108,16 @@ describe('runDetailToGraph', () => {
     expect(new Set(positions).size).toBe(positions.length)
   })
 
-  it('keeps an explicit position and falls back per missing node (mixed)', () => {
+  it('recomputes legacy explicit coordinates into the left-to-right layout', () => {
     const detail = create(RunDetailSchema, {
       origin: fact({ id: 'origin', kind: 'origin', position: vec2(30, 30) }),
       goal: fact({ id: 'goal', kind: 'goal' }),
       facts: [fact({ id: 'f1', position: vec2(400, 40) })],
     })
     const graph = runDetailToGraph(detail)
-    // Explicit (non-zero) coordinates are kept verbatim...
-    expect(graph.nodes.find((n) => n.id === 'origin')?.position).toEqual({ x: 30, y: 30 })
-    expect(graph.nodes.find((n) => n.id === 'f1')?.position).toEqual({ x: 400, y: 40 })
-    // ...while a node with no position gets its fallback (not the default 0,0).
-    expect(graph.nodes.find((n) => n.id === 'goal')?.position).toEqual({ x: 0, y: -160 })
+    expect(graph.nodes.find((n) => n.id === 'origin')?.position).toEqual({ x: 0, y: 0 })
+    expect(graph.nodes.find((n) => n.id === 'f1')?.position.x).toBeGreaterThan(0)
+    expect(graph.nodes.find((n) => n.id === 'goal')?.position.y).toBeLessThan(0)
   })
 
   it('sets a short preview on each fact node', () => {
@@ -129,5 +129,67 @@ describe('runDetailToGraph', () => {
     const data = node?.data as { preview: string; fact: { label: string } }
     expect(data.preview.endsWith('…')).toBe(true)
     expect(data.fact.label).toHaveLength(200)
+  })
+
+  it('sets a compact question preview on intent cards', () => {
+    const detail = create(RunDetailSchema, {
+      origin: fact({ id: 'origin', kind: 'origin' }),
+      intents: [
+        {
+          id: 'i1',
+          from: 'origin',
+          status: 'open',
+          question: '核对统计口径、对照组和指标定义。'.repeat(8),
+        },
+      ],
+    })
+    const node = runDetailToGraph(detail).nodes.find((item) => item.id === 'i1')
+    const data = node?.data as { preview: string }
+    expect(data.preview.endsWith('…')).toBe(true)
+  })
+
+  it('uses a multi-column task lane when a run has many intents', () => {
+    const detail = create(RunDetailSchema, {
+      origin: fact({ id: 'origin', kind: 'origin' }),
+      intents: Array.from({ length: INTENT_GRID_ROWS + 1 }, (_, index) => ({
+        id: `i${String(index).padStart(2, '0')}`,
+        from: 'origin',
+        status: 'open',
+        question: `问题 ${index}`,
+      })),
+    })
+    const intents = runDetailToGraph(detail).nodes.filter((node) => node.type === 'intent')
+    expect(intents).toHaveLength(INTENT_GRID_ROWS + 1)
+    expect(intents[INTENT_GRID_ROWS]?.position.y).toBe(intents[0]?.position.y)
+    expect(intents[INTENT_GRID_ROWS]?.position.x).toBeGreaterThan(intents[0]?.position.x ?? 0)
+    expect(intents[0]?.position.x).toBeGreaterThan(0)
+  })
+
+  it('separates task grids whose source layers would otherwise overlap', () => {
+    const detail = create(RunDetailSchema, {
+      origin: fact({ id: 'origin', kind: 'origin' }),
+      facts: [fact({ id: 'f1' })],
+      edges: [edge({ source: 'origin', target: 'f1', relation: 'main-chain' })],
+      intents: [
+        ...Array.from({ length: 17 }, (_, index) => ({
+          id: `i${String(index).padStart(2, '0')}`,
+          from: 'origin',
+          status: 'open',
+          question: `origin ${index}`,
+        })),
+        { id: 'i17', from: 'f1', status: 'open', question: 'child' },
+      ],
+    })
+    const graph = runDetailToGraph(detail)
+    const originIntent = graph.nodes.find((node) => node.id === 'i00')
+    const childIntent = graph.nodes.find((node) => node.id === 'i17')
+    expect(childIntent?.position.y).toBeGreaterThan(originIntent?.position.y ?? 0)
+  })
+
+  it('adds an accessible label that includes the node type, identity and status', () => {
+    const graph = runDetailToGraph(sampleRunDetail())
+    const node = graph.nodes.find((item) => item.id === 'f1')
+    expect(node?.ariaLabel).toContain('fact f1')
+    expect(node?.ariaLabel).toContain('状态 verified')
   })
 })

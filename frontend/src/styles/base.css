@@ -153,31 +153,46 @@ a {
 
 .console {
   display: grid;
-  grid-template-columns: 262px minmax(0, 1fr) 330px;
-  gap: 14px;
-  padding: 14px;
+  grid-template-columns: 248px minmax(0, 1fr) 312px;
+  gap: 0;
+  padding: 0;
   height: calc(100vh - var(--appbar-h));
-  min-height: 640px;
+  min-height: 620px;
+  background: rgb(var(--c-panel));
 }
 
 .col {
   background: rgb(var(--c-panel));
-  border: 1px solid rgb(var(--c-hairline));
+  border: 0;
+  border-right: 1px solid rgb(var(--c-hairline));
   overflow: auto;
+}
+
+.console > .inspector {
+  border-right: 0;
+}
+
+.console-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tabs {
   display: flex;
-  gap: 4px;
-  padding: 8px 10px;
+  gap: 0;
+  padding: 0 16px;
   border-bottom: 1px solid rgb(var(--c-hairline));
   background: rgb(var(--c-panel2));
+  min-height: 42px;
+  align-items: end;
 }
 
 .tab {
   font-size: 11.5px;
   letter-spacing: 0.4px;
-  padding: 4px 9px;
+  padding: 12px 10px 9px;
   color: rgb(var(--c-muted));
   background: transparent;
   border: 1px solid transparent;
@@ -186,17 +201,25 @@ a {
 
 .tab.on {
   color: rgb(var(--c-accent));
-  border-color: rgb(var(--c-hairline));
-  background: rgb(var(--c-panel));
+  border-color: transparent transparent rgb(var(--c-accent));
+  background: transparent;
 }
 
 .center-body {
-  height: calc(100% - 41px);
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.graph-tab {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .graph-canvas {
   height: 100%;
-  min-height: 320px;
+  min-height: 340px;
 }
 
 .graph-canvas .react-flow {
@@ -209,13 +232,14 @@ a {
   padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
 }
 
 .run-card {
-  padding: 9px 10px;
-  border: 1px solid rgb(var(--c-hairline));
-  background: rgb(var(--c-panel2));
+  padding: 12px;
+  border: 0;
+  border-bottom: 1px solid rgb(var(--c-hairline));
+  background: rgb(var(--c-panel));
   font-size: 12px;
 }
 
@@ -231,7 +255,7 @@ a {
 }
 
 .inspector {
-  padding: 12px 14px;
+  padding: 14px 16px;
   font-size: 12px;
 }
 
