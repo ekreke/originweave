@@ -8,11 +8,18 @@ the in-process ``LocalWorker``/``PiWorker``, so the engine is unchanged.
 
 from __future__ import annotations
 
-from .container import ContainerError, ContainerHandle, ContainerManager, ContainerWorker
+from .container import (
+    ContainerError,
+    ContainerHandle,
+    ContainerManager,
+    ContainerWorker,
+    RunContainerWorker,
+)
 
 __all__ = [
     "ContainerError",
     "ContainerHandle",
     "ContainerManager",
     "ContainerWorker",
+    "RunContainerWorker",
 ]

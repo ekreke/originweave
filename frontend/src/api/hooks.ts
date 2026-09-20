@@ -81,8 +81,84 @@ export function useRun(runId: string | undefined, atEvent?: number | null) {
   })
 }
 
+// Live run graph (light projection, dashboard.md §4). The console polls this --
+// not the full RunDetail -- so evidence quotes / session IO / event payloads stay
+// off the hot path. `atEvent` (Replay) folds the board server-side; only the live
+// view polls.
+export function useRunGraph(runId: string | undefined, atEvent?: number | null) {
+  const replaying = atEvent != null
+  return useQuery({
+    queryKey: ['run-graph', runId, atEvent ?? null],
+    enabled: Boolean(runId),
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === runId ? previousData : undefined,
+    queryFn: async () =>
+      (await client.getRunGraph({ runId: runId ?? '', ...(atEvent != null ? { atEvent } : {}) }))
+        .graph,
+    refetchInterval: (query) =>
+      replaying ? false : activePollInterval(query.state.data?.run?.status),
+  })
+}
+
+// Full Fact (note + verbatim evidence) for the Inspector, fetched only when a node
+// is selected. Replayed boards are historical and deterministic, so their details
+// cache forever; a live board may still upsert facts, so its details refetch.
+export function useFactDetail(
+  runId: string | undefined,
+  factId: string | undefined,
+  atEvent?: number | null,
+) {
+  const replaying = atEvent != null
+  return useQuery({
+    queryKey: ['fact', runId, factId, atEvent ?? null],
+    enabled: Boolean(runId && factId),
+    staleTime: replaying ? Infinity : 0,
+    queryFn: async () =>
+      (
+        await client.getFactDetail({
+          runId: runId ?? '',
+          factId: factId ?? '',
+          ...(atEvent != null ? { atEvent } : {}),
+        })
+      ).fact,
+  })
+}
+
+// Event timeline for the EVENTS tab; `enabled` gates it behind the tab being
+// active so a polled console does not drag the (payload-heavy) log along. Polling
+// additionally stops while replaying: a folded slice never changes.
+export function useRunEvents(
+  runId: string | undefined,
+  atEvent?: number | null,
+  enabled = true,
+  active = false,
+) {
+  return useQuery({
+    queryKey: ['run-events', runId, atEvent ?? null],
+    enabled: Boolean(runId) && enabled,
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === runId ? previousData : undefined,
+    queryFn: async () =>
+      (await client.listEvents({ runId: runId ?? '', ...(atEvent != null ? { atEvent } : {}) }))
+        .events,
+    refetchInterval: active && atEvent == null ? ACTIVE_POLL_MS : false,
+  })
+}
+
+// Worker session snapshots (raw input/output) for the Inspector. Not polled: they
+// are fetched on mount / selection and refreshed after gate & hint writes.
+export function useRunSessions(runId: string | undefined) {
+  return useQuery({
+    queryKey: ['sessions', runId],
+    enabled: Boolean(runId),
+    staleTime: 10_000,
+    queryFn: async () => (await client.listSessions({ runId: runId ?? '' })).sessions,
+  })
+}
+
 // Writing a Hint is non-blocking (the server appends a HINT event and the run keeps
-// going). Refetch the run so the new hint appears in the Inspector right away.
+// going). Refetch the graph (hints live there), events and sessions so the new
+// hint shows up right away.
 export function useAddHint(runId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -90,7 +166,11 @@ export function useAddHint(runId: string | undefined) {
       if (!runId) throw new Error('cannot add a hint without a run id')
       return client.addHint({ runId, text })
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['run', runId] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['run-graph', runId] })
+      void queryClient.invalidateQueries({ queryKey: ['run-events', runId] })
+      void queryClient.invalidateQueries({ queryKey: ['sessions', runId] })
+    },
   })
 }
 
@@ -158,7 +238,8 @@ export interface GateSubmission {
 }
 
 // Resolving a HITL gate (Gate A/B): the server writes HUMAN_INPUT and resumes (or
-// stops) the run. Refetch so `awaiting_human` clears once the server accepts it.
+// stops) the run. Refetch the graph/events/sessions so `awaiting_human` clears and
+// the resumed activity shows up right away.
 export function useSubmitHumanInput(runId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -172,6 +253,12 @@ export function useSubmitHumanInput(runId: string | undefined) {
         targets: submission.targets ?? [],
       })
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['run', runId] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['run-graph', runId] })
+      void queryClient.invalidateQueries({ queryKey: ['run-events', runId] })
+      void queryClient.invalidateQueries({ queryKey: ['sessions', runId] })
+      // A live-selected fact may have been upserted by the resumed run.
+      void queryClient.invalidateQueries({ queryKey: ['fact', runId] })
+    },
   })
 }

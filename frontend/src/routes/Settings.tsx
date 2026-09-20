@@ -3,6 +3,8 @@ import { type FormEvent, useState } from 'react'
 import { useSettings, useUpdateSettings } from '@/api/hooks'
 import {
   EMPTY_DRAFT,
+  CONTAINER_SCOPES,
+  EXECUTIONS,
   HEARTBEAT_ON_TIMEOUT,
   PROVIDERS,
   TOOLS,
@@ -95,11 +97,65 @@ export function Settings() {
                 <select
                   aria-label="worker provider"
                   value={draft.provider}
-                  onChange={(event) => patch({ provider: event.target.value })}
+                  onChange={(event) =>
+                    patch({
+                      provider: event.target.value,
+                      containerScope:
+                        event.target.value === 'pi' && draft.execution === 'container'
+                          ? draft.containerScope
+                          : 'per-call',
+                    })
+                  }
                 >
                   {PROVIDERS.map((provider) => (
                     <option key={provider} value={provider}>
                       {provider}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                execution
+                <select
+                  aria-label="worker execution"
+                  value={draft.execution}
+                  onChange={(event) =>
+                    patch({
+                      execution: event.target.value,
+                      containerScope:
+                        event.target.value === 'container' && draft.provider === 'pi'
+                          ? draft.containerScope
+                          : 'per-call',
+                    })
+                  }
+                >
+                  {EXECUTIONS.map((execution) => (
+                    <option key={execution} value={execution}>
+                      {execution}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                runtime image
+                <input
+                  aria-label="runtime image"
+                  value={draft.image}
+                  disabled={draft.execution !== 'container'}
+                  onChange={(event) => patch({ image: event.target.value })}
+                />
+              </label>
+              <label>
+                container scope
+                <select
+                  aria-label="container scope"
+                  value={draft.containerScope}
+                  disabled={draft.provider !== 'pi' || draft.execution !== 'container'}
+                  onChange={(event) => patch({ containerScope: event.target.value })}
+                >
+                  {CONTAINER_SCOPES.map((scope) => (
+                    <option key={scope} value={scope}>
+                      {scope === 'per-run' ? '每次核验复用一个容器' : '每次调用独立容器'}
                     </option>
                   ))}
                 </select>
@@ -116,6 +172,11 @@ export function Settings() {
                 />
               </label>
             </fieldset>
+
+            <p className="cnt">
+              容器设置仅影响之后新建的核验。默认 Pi 使用 Docker runtime；每次核验复用模式会跨人工
+              Gate 保持容器，容器异常会使该核验失败。
+            </p>
 
             <fieldset>
               <legend>LLM（复用 [capability.model]）</legend>

@@ -162,144 +162,68 @@
 
 /* ---------------------------------------------------------------- graph nodes */
 
+/* Compact cards (dashboard.md §2): colour encodes the Fact kind (left border +
+   kind chip), no shape clipping. Sizes mirror graph/layout.ts node constants. */
+
 .node {
   position: relative;
   font-size: 10.5px;
-  line-height: 1.15;
-  text-align: center;
+  line-height: 1.25;
+  text-align: left;
   color: rgb(var(--c-ink));
 }
 
 .fact-node {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  width: 172px;
-  min-height: 72px;
-  padding: 7px 9px 7px 31px;
-  border: 1.5px solid var(--node-color);
-  background: rgb(var(--c-panel) / 0.96);
-  box-shadow: 0 2px 6px rgb(var(--c-ink) / 0.08);
-}
-
-.shape-ring {
-  border-radius: 0;
-}
-
-.shape-square {
-  border-radius: 0;
-}
-
-.shape-dashed-box {
-  border-style: dashed;
-}
-
-.node-symbol {
-  position: absolute;
-  top: 9px;
-  left: 9px;
-  width: 13px;
-  height: 13px;
-  border: 2px solid var(--node-color);
+  gap: 4px;
+  width: 190px;
+  min-height: 68px;
+  padding: 6px 8px 8px;
+  border: 1px solid rgb(var(--c-hairline));
+  border-left: 3px solid var(--node-color);
   background: rgb(var(--c-panel));
+  box-shadow: 0 1px 2px rgb(var(--c-ink) / 0.08);
 }
 
-/* The compact card preserves readable evidence text; this marker keeps the
-   contractually fixed shape + colour encoding for every Fact kind. */
-.symbol-ring {
-  border-radius: 50%;
+.node-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
 }
 
-.symbol-square {
-  background: var(--node-color);
+.node-id {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgb(var(--c-accent));
 }
 
-.symbol-triangle {
-  border: 0;
-  background: var(--node-color);
-  clip-path: polygon(50% 0, 100% 100%, 0 100%);
-}
-
-.symbol-diamond {
-  width: 11px;
-  height: 11px;
-  margin: 1px;
-  transform: rotate(45deg);
-  background: var(--node-color);
-}
-
-.symbol-dashed-box {
-  border-style: dashed;
-}
-
-.symbol-hexagon {
-  border: 0;
-  background: var(--node-color);
-  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
-}
-
-.symbol-warning-triangle {
-  border: 0;
-  background: rgb(var(--c-k-deviation));
-  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+.node-kind {
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--node-color, rgb(var(--c-muted)));
+  white-space: nowrap;
 }
 
 .intent-node {
   display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  width: 156px;
+  flex-direction: column;
+  gap: 3px;
+  width: 172px;
   min-height: 48px;
-  padding: 6px 8px;
+  padding: 5px 8px 7px;
   /* dashboard.md §2: open = grey dashed, claimed = blue pulsing. */
-  border: 1.5px dashed rgb(var(--c-muted));
-  border-radius: 4px;
+  border: 1px dashed rgb(var(--c-muted));
+  border-radius: 2px;
   background: rgb(var(--c-panel));
   font-size: 10px;
   color: rgb(var(--c-muted));
 }
 
-.intent-mark {
-  display: grid;
-  place-items: center;
-  flex: 0 0 18px;
-  width: 18px;
-  height: 18px;
-  font-weight: 700;
-  color: inherit;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-}
-
-.intent-copy {
-  min-width: 0;
-  text-align: left;
-}
-
-.intent-id,
-.node-kicker,
-.node-foot {
-  font-size: 9px;
-  letter-spacing: 0.03em;
-  color: rgb(var(--c-muted));
-}
-
-.node-kicker,
-.node-foot {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  text-transform: uppercase;
-}
-
-.node-kicker {
-  margin-bottom: 4px;
-  color: var(--node-color);
-}
-
-.node-foot {
-  margin-top: 5px;
+.intent-node .node-id {
+  color: rgb(var(--c-k-intent));
 }
 
 .intent-claimed {
@@ -309,10 +233,13 @@
   animation: intent-pulse 1.4s ease-in-out infinite;
 }
 
+.intent-claimed .node-id {
+  color: rgb(var(--c-accent));
+}
+
 .intent-done {
   border-style: solid;
   border-color: rgb(var(--c-k-intent));
-  color: rgb(var(--c-k-intent));
 }
 
 .intent-dropped {
@@ -330,10 +257,28 @@
   box-shadow: 0 0 0 2px rgb(var(--c-warn) / 0.25);
 }
 
+.intent-awaiting_human .node-id {
+  color: rgb(var(--c-warn));
+}
+
 .node.selected {
   outline: 2px solid rgb(var(--c-accent));
-  outline-offset: 3px;
-  box-shadow: 0 0 0 5px rgb(var(--c-accent) / 0.12);
+  outline-offset: 2px;
+}
+
+/* Edge emphasis: selected-node incidence vs dimmed rest; the frozen main-chain
+   gets a subtle accent when nothing is selected. */
+.react-flow__edge.edge-main .react-flow__edge-path {
+  stroke: rgb(var(--c-accent) / 0.55);
+}
+
+.react-flow__edge.edge-active .react-flow__edge-path {
+  stroke: rgb(var(--c-accent));
+  stroke-width: 2;
+}
+
+.react-flow__edge.edge-dim {
+  opacity: 0.15;
 }
 
 @keyframes intent-pulse {
@@ -344,6 +289,55 @@
   50% {
     box-shadow: 0 0 0 4px rgb(var(--c-accent) / 0);
   }
+}
+
+/* ---------------------------------------------------------------- graph legend */
+
+.graph-legend {
+  display: flex;
+  gap: 16px;
+  padding: 8px 10px;
+  border: 1px solid rgb(var(--c-hairline));
+  background: rgb(var(--c-panel) / 0.92);
+  font-size: 10.5px;
+  color: rgb(var(--c-muted));
+}
+
+.legend-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-chip {
+  width: 8px;
+  height: 8px;
+  flex: none;
+}
+
+.legend-line {
+  width: 16px;
+  flex: none;
+  border-top: 2px solid rgb(var(--c-accent));
+}
+
+.legend-dashed {
+  border-top-style: dashed;
+}
+
+.legend-dotted {
+  border-top-style: dotted;
+}
+
+.legend-intent {
+  border-top-style: dashed;
+  border-top-color: rgb(var(--c-k-intent));
 }
 
 /* ---------------------------------------------------------------- inspector */
@@ -552,15 +546,67 @@
   color: rgb(var(--c-danger));
 }
 
-.run-head {
+/* ------------------------------------------------------- console center head */
+
+.center-head {
+  flex: none;
+  border-bottom: 1px solid rgb(var(--c-hairline));
+  background: rgb(var(--c-panel2));
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 0;
+  font-size: 11px;
+  color: rgb(var(--c-muted));
+}
+
+.crumb a:hover {
+  color: rgb(var(--c-accent));
+}
+
+.crumb-sep {
+  color: rgb(var(--c-hairline));
+}
+
+.crumb-run {
+  color: rgb(var(--c-ink));
+}
+
+.center-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
+  padding: 2px 12px 8px;
+}
+
+.center-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.head-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
   gap: 8px;
-  min-height: 46px;
-  padding-right: 12px;
-  border-bottom: 1px solid rgb(var(--c-hairline));
-  background: rgb(var(--c-panel));
+  min-width: 0;
+}
+
+.head-tools .budget {
+  font-size: 11px;
+  color: rgb(var(--c-muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .replay {
@@ -611,28 +657,6 @@
   margin: 0;
   font-size: 11px;
   color: rgb(var(--c-danger));
-}
-
-.run-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 8px 16px;
-  overflow: hidden;
-}
-
-.run-meta .run-id {
-  flex: none;
-  font-size: 11.5px;
-}
-
-.run-meta .budget {
-  font-size: 11px;
-  color: rgb(var(--c-muted));
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* Settings page (M6 P5): grouped fieldsets over the shared panel chrome. */
@@ -781,7 +805,6 @@
   -webkit-line-clamp: 3;
   line-clamp: 3;
   overflow: hidden;
-  max-width: 180px;
   word-break: break-word;
 }
 
@@ -925,4 +948,66 @@
   .graph-legend {
     display: none;
   }
+}
+
+/* -------------------------------------------------- inspector stats + meta */
+
+.run-stats {
+  margin-bottom: 12px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid rgb(var(--c-hairline));
+  background: rgb(var(--c-panel2));
+}
+
+.stat b {
+  font-size: 16px;
+  line-height: 1.1;
+}
+
+.stat span {
+  font-size: 9.5px;
+  letter-spacing: 0.5px;
+  color: rgb(var(--c-muted));
+}
+
+.meta-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.meta-rows dt {
+  padding-top: 1px;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: rgb(var(--c-muted));
+}
+
+.meta-rows dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------- active run card */
+
+.run-card-active {
+  border-color: rgb(var(--c-accent));
+  background: rgb(var(--c-accent-soft) / 0.45);
+  box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.35);
 }

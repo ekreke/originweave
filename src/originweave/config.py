@@ -27,8 +27,11 @@ ALLOWED_SEARCH_PROVIDERS: frozenset[str] = frozenset({"exa", "parallel"})
 ALLOWED_PROMPT_PROVIDERS: frozenset[str] = frozenset({"local", "langfuse"})
 ALLOWED_MODEL_PROVIDERS: frozenset[str] = frozenset({"openai"})
 ALLOWED_WORKER_PROVIDERS: frozenset[str] = frozenset({"local", "pi"})
-# Where a Worker call executes (M3a): in-process (temporary) or one container per call.
+# Where a Worker call executes: in-process (temporary) or the Docker runtime.
 ALLOWED_WORKER_EXECUTION: frozenset[str] = frozenset({"in-process", "container"})
+# How Pi calls use the runtime container.  ``per-run`` is deliberately scoped to
+# Pi: it saves the Pi/Node startup cost without changing the local worker contract.
+ALLOWED_CONTAINER_SCOPE: frozenset[str] = frozenset({"per-call", "per-run"})
 # Pi tool allowlist (M6); ``search`` is the TS extension tool, the rest are Pi built-ins.
 ALLOWED_WORKER_TOOLS: frozenset[str] = frozenset(
     {"search", "read", "grep", "find", "ls", "bash", "edit", "write"}
@@ -59,6 +62,7 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
             "provider",
             "execution",
             "image",
+            "container_scope",
             "max_concurrency",
             "tools",
             "heartbeat_interval",
@@ -133,11 +137,13 @@ class BudgetConfig:
 @dataclass(frozen=True)
 class WorkerConfig:
     provider: str = "pi"  # local | pi (the execution body inside the container)
-    # Where a Worker call runs (M3a): "in-process" (temporary, no Docker needed) or
-    # "container" (one container per call, red line 3).
-    execution: str = "in-process"  # in-process | container
+    # Where a Worker call runs. Container is the production default.
+    execution: str = "container"  # in-process | container
     # Runtime image used when execution == "container" (M3a; build it with `make image`).
     image: str = "originweave-runtime:latest"
+    # ``per-run`` reuses one Pi runtime container for this run; ``per-call`` is
+    # the strict isolation mode and starts a fresh container for every call.
+    container_scope: str = "per-run"  # per-call | per-run
     # Cap on concurrent workers (== concurrent containers under container-per-worker, M6).
     max_concurrency: int = 1
     # Pi tool allowlist; empty means "no tools" (M6).
@@ -189,6 +195,7 @@ class Config:
                 "provider": self.worker.provider,
                 "execution": self.worker.execution,
                 "image": self.worker.image,
+                "container_scope": self.worker.container_scope,
                 "max_concurrency": self.worker.max_concurrency,
                 "tools": list(self.worker.tools),
                 "heartbeat_interval": self.worker.heartbeat_interval,
@@ -237,6 +244,19 @@ class Config:
             raise ConfigError(
                 f"unknown worker.execution {execution!r}; "
                 f"expected one of {sorted(ALLOWED_WORKER_EXECUTION)}"
+            )
+        if execution == "container" and not self.worker.image:
+            raise ConfigError("worker.image must be a non-empty string when execution='container'")
+        scope = self.worker.container_scope
+        if scope not in ALLOWED_CONTAINER_SCOPE:
+            raise ConfigError(
+                f"unknown worker.container_scope {scope!r}; "
+                f"expected one of {sorted(ALLOWED_CONTAINER_SCOPE)}"
+            )
+        if scope == "per-run" and (worker != "pi" or execution != "container"):
+            raise ConfigError(
+                "worker.container_scope='per-run' requires "
+                "worker.provider='pi' and worker.execution='container'"
             )
         if self.worker.max_concurrency <= 0:
             raise ConfigError(
@@ -414,6 +434,11 @@ def from_dict(data: Mapping[str, Any]) -> Config:
                 worker.get("image"),
                 "worker.image",
                 defaults.worker.image,
+            ),
+            container_scope=_as_str(
+                worker.get("container_scope"),
+                "worker.container_scope",
+                defaults.worker.container_scope,
             ),
             max_concurrency=_as_int(
                 worker.get("max_concurrency"),

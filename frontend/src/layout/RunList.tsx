@@ -7,17 +7,20 @@ const RETRYABLE = new Set(['failed', 'stopped'])
 
 // Presentation-only run list; the caller supplies data (and its loading/error
 // state) from the server. A retryable run (failed/stopped) offers a "retry" link
-// that opens the new-run form prefilled from that run's inputs.
+// that opens the new-run form prefilled from that run's inputs. The active run's
+// card is highlighted so the console's left rail mirrors the open run.
 export function RunList({
   runs,
   loading,
   error,
   projectId,
+  activeRunId,
 }: {
   runs?: Run[]
   loading?: boolean
   error?: boolean
   projectId?: string
+  activeRunId?: string
 }) {
   if (loading) {
     return (
@@ -65,7 +68,9 @@ export function RunList({
         {runs.map((run) => (
           <li
             key={run.id}
-            className={`run-card${run.status === 'awaiting_human' ? ' run-card-alert' : ''}`}
+            className={`run-card${run.status === 'awaiting_human' ? ' run-card-alert' : ''}${
+              run.id === activeRunId ? ' run-card-active' : ''
+            }`}
             data-testid={`run-card-${run.id}`}
           >
             <div className="run-card-hd">

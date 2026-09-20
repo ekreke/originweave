@@ -3,11 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '@/App'
 import { AppProviders } from '@/test/providers'
+import { sampleRunGraph } from '@/test/fixtures'
 
 const mocks = vi.hoisted(() => ({
   listProjects: vi.fn(),
   listProjectRuns: vi.fn(),
   getRun: vi.fn(),
+  getRunGraph: vi.fn(),
+  getFactDetail: vi.fn(),
+  listEvents: vi.fn(),
+  listSessions: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({ client: mocks }))
@@ -24,6 +29,10 @@ beforeEach(() => {
   mocks.listProjects.mockReset().mockResolvedValue({ projects: [] })
   mocks.listProjectRuns.mockReset().mockResolvedValue({ runs: [] })
   mocks.getRun.mockReset().mockResolvedValue({})
+  mocks.getRunGraph.mockReset().mockResolvedValue({ graph: sampleRunGraph() })
+  mocks.getFactDetail.mockReset().mockResolvedValue({})
+  mocks.listEvents.mockReset().mockResolvedValue({ events: [] })
+  mocks.listSessions.mockReset().mockResolvedValue({ sessions: [] })
   localStorage.clear()
   document.documentElement.classList.remove('dark')
 })

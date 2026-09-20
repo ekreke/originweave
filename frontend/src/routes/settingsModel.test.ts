@@ -10,6 +10,9 @@ describe('toDraft', () => {
     const draft = toDraft(settings())
     expect(draft).toMatchObject({
       provider: 'pi',
+      execution: 'container',
+      image: 'originweave-runtime:latest',
+      containerScope: 'per-run',
       maxConcurrency: '1',
       llmModel: 'deepseek-v4.1-flash',
       heartbeatInterval: '15s',
@@ -37,6 +40,9 @@ describe('draftToMessage', () => {
     })
     const worker = message.worker
     expect(worker?.provider).toBe('pi')
+    expect(worker?.execution).toBe('container')
+    expect(worker?.image).toBe('originweave-runtime:latest')
+    expect(worker?.containerScope).toBe('per-run')
     expect(worker?.maxConcurrency).toBe(4)
     expect(worker?.tools).toEqual(['search', 'read'])
     expect(worker?.heartbeatInterval).toBe('10s')
@@ -56,6 +62,18 @@ describe('validateDraft', () => {
 
   it('requires a model', () => {
     expect(validateDraft({ ...VALID, llmModel: '  ' })).toBe('model 不能为空')
+  })
+
+  it('only permits per-run scope for Pi containers', () => {
+    expect(validateDraft({ ...VALID, provider: 'local' })).toContain('仅适用于 Pi')
+    expect(validateDraft({ ...VALID, execution: 'in-process' })).toContain('仅适用于 Pi')
+  })
+
+  it('requires a runtime image only for container execution', () => {
+    expect(validateDraft({ ...VALID, image: '' })).toContain('runtime image')
+    expect(
+      validateDraft({ ...VALID, execution: 'in-process', containerScope: 'per-call', image: '' }),
+    ).toBe('')
   })
 
   it('requires duration strings', () => {

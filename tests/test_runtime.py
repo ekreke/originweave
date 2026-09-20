@@ -15,7 +15,12 @@ from originweave.blackboard import Board, Fact
 from originweave.capabilities.base import CapabilityError, PromptTemplate
 from originweave.capabilities.worker import LocalWorker
 from originweave.config import Config, ConfigError, WorkerConfig
-from originweave.runtime import ContainerHandle, ContainerManager, ContainerWorker
+from originweave.runtime import (
+    ContainerHandle,
+    ContainerManager,
+    ContainerWorker,
+    RunContainerWorker,
+)
 from originweave.runtime import container as container_module
 from originweave.runtime import runner as runner_module
 from originweave.server.context import Providers, ServerContext
@@ -62,11 +67,12 @@ def _container_config() -> Config:
 # --------------------------------------------------------------------- config
 
 
-def test_worker_execution_defaults_to_in_process() -> None:
+def test_worker_execution_defaults_to_run_container() -> None:
     cfg = Config()
-    assert cfg.worker.execution == "in-process"
+    assert cfg.worker.execution == "container"
+    assert cfg.worker.container_scope == "per-run"
     assert cfg.worker.image == "originweave-runtime:latest"
-    assert cfg.to_dict()["worker"]["execution"] == "in-process"
+    assert cfg.to_dict()["worker"]["execution"] == "container"
 
 
 def test_worker_execution_rejects_unknown_value() -> None:
@@ -247,12 +253,102 @@ async def test_container_worker_reaps_when_the_task_fails(tmp_path: Path) -> Non
     assert manager.removed == ["cid-1"]  # the container is reclaimed on failure too
 
 
+async def test_run_container_worker_reuses_one_container_and_closes_at_run_end(
+    tmp_path: Path,
+) -> None:
+    manager = _FakeManager()
+    worker = RunContainerWorker(
+        manager=manager,  # type: ignore[arg-type]
+        run_dir=tmp_path,
+        env={"ORIGINWEAVE_MODEL": "a-model"},
+        transport=_transport(),
+    )
+
+    await asyncio.gather(
+        worker.run("Reason", PromptTemplate(name="reason", text="R"), _board()),
+        worker.run("Explore", PromptTemplate(name="explore", text="E"), _board()),
+    )
+    assert manager.spawned == [tmp_path]
+    await worker.close()
+    await worker.close()
+    assert manager.removed == ["cid-1"]
+
+
+async def test_run_container_worker_does_not_restart_after_a_failure(tmp_path: Path) -> None:
+    manager = _FakeManager()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        return httpx.Response(500, text="broken")
+
+    worker = RunContainerWorker(
+        manager=manager,  # type: ignore[arg-type]
+        run_dir=tmp_path,
+        env={},
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(container_module.ContainerError, match="returned 500"):
+        await worker.run("Reason", PromptTemplate(name="reason", text="R"), _board())
+    with pytest.raises(container_module.ContainerError, match="unavailable"):
+        await worker.run("Explore", PromptTemplate(name="explore", text="E"), _board())
+    assert manager.spawned == [tmp_path]
+    assert manager.removed == ["cid-1"]
+
+
+async def test_run_container_worker_abort_poison_and_reaps(tmp_path: Path) -> None:
+    manager = _FakeManager()
+    worker = RunContainerWorker(
+        manager=manager,  # type: ignore[arg-type]
+        run_dir=tmp_path,
+        env={},
+        transport=_transport(),
+    )
+    await worker.run("Reason", PromptTemplate(name="reason", text="R"), _board())
+    await worker.abort()
+    with pytest.raises(container_module.ContainerError, match="unavailable"):
+        await worker.run("Explore", PromptTemplate(name="explore", text="E"), _board())
+    assert manager.removed == ["cid-1"]
+
+
+async def test_run_container_worker_monitors_a_dead_idle_container(tmp_path: Path) -> None:
+    manager = _FakeManager()
+    failed = asyncio.Event()
+    health_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal health_calls
+        if request.url.path == "/health":
+            health_calls += 1
+            return httpx.Response(200 if health_calls == 1 else 503)
+        return httpx.Response(200, json={"text": "{}", "input": {}, "steps": []})
+
+    async def on_failure(_reason: str) -> None:
+        failed.set()
+
+    worker = RunContainerWorker(
+        manager=manager,  # type: ignore[arg-type]
+        run_dir=tmp_path,
+        env={},
+        health_interval=0.01,
+        failure_callback=on_failure,
+        transport=httpx.MockTransport(handler),
+    )
+    await worker.run("Reason", PromptTemplate(name="reason", text="R"), _board())
+    await asyncio.wait_for(failed.wait(), timeout=1)
+    assert manager.removed == ["cid-1"]
+
+
 # ----------------------------------------------------------------- server wiring
 
 
 def test_worker_for_in_process_returns_the_shared_provider(tmp_path: Path) -> None:
     providers = _providers()
-    ctx = ServerContext.build(config=Config(), providers=providers, root=tmp_path)
+    ctx = ServerContext.build(
+        config=Config(worker=WorkerConfig(execution="in-process", container_scope="per-call")),
+        providers=providers,
+        root=tmp_path,
+    )
     assert ctx.container_manager is None
     assert ctx.worker_for(tmp_path / "run_001") is providers.worker
 
@@ -262,6 +358,31 @@ def test_worker_for_container_returns_a_container_worker(tmp_path: Path) -> None
     assert ctx.container_manager is not None
     worker = ctx.worker_for(tmp_path / "run_001")
     assert isinstance(worker, ContainerWorker)
+
+
+def test_worker_for_run_scope_reuses_its_worker(tmp_path: Path) -> None:
+    ctx = ServerContext.build(config=_container_config(), root=tmp_path)
+    first = ctx.worker_for(tmp_path / "run_001")
+    second = ctx.worker_for(tmp_path / "run_001")
+    assert isinstance(first, RunContainerWorker)
+    assert first is second
+
+
+def test_worker_for_uses_the_frozen_runtime_provider_and_image(tmp_path: Path) -> None:
+    live = Config(
+        worker=WorkerConfig(
+            provider="local",
+            execution="container",
+            image="new:1",
+            container_scope="per-call",
+        )
+    )
+    frozen = Config(worker=WorkerConfig(image="frozen:1"))
+    ctx = ServerContext.build(config=live, root=tmp_path)
+    worker = ctx.worker_for(tmp_path / "run_001", config=frozen)
+    assert isinstance(worker, RunContainerWorker)
+    assert worker._env["ORIGINWEAVE_WORKER_PROVIDER"] == "pi"
+    assert worker._manager._image == "frozen:1"
 
 
 def test_worker_for_container_without_a_manager_raises(tmp_path: Path) -> None:

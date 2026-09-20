@@ -1,6 +1,6 @@
 import type { KeyboardEvent } from 'react'
 
-import type { Fact } from '@/gen/originweave/v1/originweave_pb'
+import type { FactSummary } from '@/gen/originweave/v1/originweave_pb'
 
 // Presentation-only table; the caller supplies data from the server. Clicking (or
 // pressing Enter/Space on) a row reports the fact id so the console can drive the
@@ -10,7 +10,7 @@ export function FactsTab({
   onSelect,
   selectedId,
 }: {
-  facts?: Fact[]
+  facts?: FactSummary[]
   onSelect?: (id: string) => void
   selectedId?: string | null
 }) {
@@ -68,7 +68,7 @@ export function FactsTab({
                 {f.role !== 'none' ? <span className="role-tag">{f.role}</span> : null}
               </td>
               <td className="mono">{f.confidence.toFixed(2)}</td>
-              <td className="mono">{f.evidence.length}</td>
+              <td className="mono">{f.evidenceCount}</td>
             </tr>
           ))}
         </tbody>

@@ -29,7 +29,7 @@ from ..capabilities import (
 from ..capabilities.model import BASE_URL_ENV_VAR, ENV_VAR
 from ..config import Config
 from ..persistence import ProjectRegistry
-from ..runtime import ContainerManager, ContainerWorker
+from ..runtime import ContainerManager, ContainerWorker, RunContainerWorker
 from ..runtime.container import ENV_BASE_URL, ENV_MODEL, ENV_PROVIDER, ENV_TOOLS
 from ..store import RunStore
 
@@ -37,7 +37,7 @@ _log = logging.getLogger(__name__)
 
 
 def _container_manager_for(cfg: Config) -> ContainerManager | None:
-    """A runtime container manager when ``[worker].execution == "container"`` (M3a)."""
+    """A runtime container manager when ``[worker].execution == "container"``."""
     if cfg.worker.execution == "container":
         return ContainerManager(image=cfg.worker.image)
     return None
@@ -120,6 +120,13 @@ class RunScheduler:
         if self._tasks:
             await asyncio.gather(*list(self._tasks.values()), return_exceptions=True)
 
+    async def cancel(self, run_id: str) -> None:
+        """Stop one active engine before its runtime lease is force-released."""
+        task = self._tasks.get(run_id)
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
 
 @dataclass
 class ServerContext:
@@ -136,6 +143,10 @@ class ServerContext:
     providers_factory: Callable[[Config], Providers] = build_providers
     # Runtime container manager (M3a); built when [worker].execution == "container".
     container_manager: ContainerManager | None = None
+    # Run-scoped Pi workers retain their lease across a human Gate. They are keyed by
+    # resolved run directory so a fresh Engine used by SubmitHumanInput finds the same
+    # container rather than starting another one.
+    run_workers: dict[Path, RunContainerWorker] = field(default_factory=dict)
     # ``originweave ui --run <dir>``: serve only this one run, read-only (C4).
     pinned_run: Path | None = None
 
@@ -153,40 +164,70 @@ class ServerContext:
         # Rebuild the container manager too: [worker].execution/image may have changed.
         self.container_manager = _container_manager_for(config)
 
-    def worker_for(self, run_dir: Path) -> Worker:
+    def worker_for(self, run_dir: Path, *, config: Config | None = None) -> Worker:
         """The Worker for one run: container-per-worker, else the in-process provider.
 
-        Container-per-worker (M3a) starts a fresh container per call, so the worker is
-        bound to the run's directory (mounted into the container); the in-process path
-        keeps using the shared provider so tests can inject a fake.
+        ``per-run`` Pi workers retain a container lease across Gate resumes; ``per-call``
+        workers retain the earlier strict isolation. Both mount the run directory.
         """
-        if self.config.worker.execution != "container":
+        cfg = self.config if config is None else config
+        if cfg.worker.execution != "container":
             return self.providers.worker
-        if self.container_manager is None:
+        if config is None and self.container_manager is None:
             raise CapabilityError(
                 "worker.execution=container but no container manager is configured"
             )
-        return ContainerWorker(
-            manager=self.container_manager,
-            run_dir=run_dir,
-            env=self._worker_env(),
-        )
+        manager = self._manager_for(cfg)
+        if manager is None:
+            raise CapabilityError(
+                "worker.execution=container but no container manager is configured"
+            )
+        env = self._worker_env(cfg)
+        if cfg.worker.container_scope == "per-run":
+            key = run_dir.resolve()
+            worker = self.run_workers.get(key)
+            if worker is None:
+                worker = RunContainerWorker(
+                    manager=manager, run_dir=run_dir, env=env
+                )
+                self.run_workers[key] = worker
+            return worker
+        return ContainerWorker(manager=manager, run_dir=run_dir, env=env)
 
-    def _worker_env(self) -> dict[str, str]:
+    def _manager_for(self, config: Config) -> ContainerManager | None:
+        """Resolve the runtime image frozen in a run snapshot, not live Settings."""
+        if config.worker.execution != "container":
+            return None
+        if (
+            self.container_manager is not None
+            and self.config.worker.execution == "container"
+            and self.config.worker.image == config.worker.image
+        ):
+            return self.container_manager
+        return ContainerManager(image=config.worker.image)
+
+    async def release_run_worker(self, run_dir: Path) -> None:
+        """Release a run-level container at a terminal lifecycle boundary."""
+        worker = self.run_workers.pop(run_dir.resolve(), None)
+        if worker is not None:
+            await worker.close()
+
+    def _worker_env(self, config: Config | None = None) -> dict[str, str]:
         """Env injected into the container: worker config + credentials (env only)."""
-        model = self.config.capability.model
+        cfg = self.config if config is None else config
+        model = cfg.capability.model
         # `search` is not mounted inside the container: the Pi TS search extension would
         # call the server at an address the container cannot reach. Retrieval therefore
         # stays a host-side pre-fetch (the engine sees no `search` tool and pre-fetches),
         # so container and in-process workers agree on who searches (M3a).
-        tools = tuple(tool for tool in self.config.worker.tools if tool != "search")
-        if "search" in self.config.worker.tools:
+        tools = tuple(tool for tool in cfg.worker.tools if tool != "search")
+        if "search" in cfg.worker.tools:
             _log.warning(
                 "worker.tools 'search' is not mounted under execution=container; "
                 "retrieval runs as a host-side pre-fetch (M3a)"
             )
         env = {
-            ENV_PROVIDER: self.config.worker.provider,
+            ENV_PROVIDER: cfg.worker.provider,
             ENV_MODEL: model.model,
             ENV_BASE_URL: model.base_url or os.environ.get(BASE_URL_ENV_VAR, ""),
             ENV_TOOLS: ",".join(tools),

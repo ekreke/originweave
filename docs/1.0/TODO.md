@@ -157,11 +157,9 @@
 
 ## 已知风险 / 缺口
 
-- **M3 container-per-worker（M3a）**：每次 Worker 调用起/销毁一个容器（`docker run` + `rm`），有
-  启动开销（Bootstrap/Reason/Validate/Explore 各一次）。**容器池预热（后续优化）**：设置
-  `[worker].max_concurrency` 时预热 N 个容器、调用时复用，见 `agent-design.md §6`。启用
-  `[worker].execution=container` 需 Docker + `make image`（默认 `in-process`，无 Docker 也可用；
-  `container` 下缺 Docker/镜像应明确报错，不静默降级）。
+- **M3 Pi runtime 范围**：默认 `per-run` 在一次核验中复用一个 Pi 容器，减少 Bootstrap/Reason/Explore
+  的启动开销；`per-call` 仍可用于严格隔离。启用默认的 `[worker].execution=container` 需 Docker +
+  `make image`；缺 Docker/镜像会明确报错，不静默降级。预热多容器池仍是独立后续优化。
 
 - **M1c-1 C3b**：`SubmitHumanInput` 目前**同步 await** 整个续跑周期（Reason→dispatch 可能数秒~数十秒），
   与 SPEC 字面一致但会阻塞该 RPC；若需非阻塞可后续改为后台任务 + 前端轮询。同因，客户端取消该请求会让
@@ -224,6 +222,18 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **前端 · 图数据拆分 + 图渲染重构**：proto 新增 **`GetRunGraph`/`GetFactDetail`/`ListEvents`/
+  `ListSessions`** 与 `RunGraph`/`FactSummary`（`dashboard.md §4.1/§4.2a`）——控制台轮询轻量图投影
+  （无 note/evidence/events/sessions；`event_count` 为 Replay 游标上界），`GetFactDetail` 点节点才取
+  全量 Fact，`ListEvents` 仅 EVENTS 页签激活时取，`ListSessions` INSPECTOR 按需取；`GetRun` 保留给
+  重试预填与兼容。**渲染重构**：节点改紧凑矩形卡（id+kind chip 头部、截断预览；按 kind 着色，去形状
+  clip-path），`graph/layout.ts` 改 **dagre TB 分层**（确定性、非零 `Fact.position` 逐节点优先）、
+  画布带 Controls/MiniMap/图例、选中高亮入射边其余变暗；中栏顶栏改面包屑+标题+状态/预算+Replay 控件，
+  INSPECTOR 顶部加 run 统计块（FACTS/INTENTS/OPEN/HINTS）+ 元信息行，左栏 run 卡片 `run-card-active`
+  高亮当前 run。测试：`tests/test_server.py`（4 个新 RPC：投影/折算/NOT_FOUND/INVALID_ARGUMENT/pinned）、
+  前端 graph 三件套重写 + hooks/routes/layout/tabs 更新。前端 typecheck/lint/format/test(128)/build
+  全绿；Python lint + test(416) 全绿。无 Engine/reducer 改动。
 
 - **前端 · run 卡片可点击进入审阅台**：`layout/RunList.tsx` 卡片标题在有 `projectId` 时渲染为
   `<Link>` 到 `/projects/:id/runs/:runId`（此前卡片从未可点，旧 run 只能靠 URL 进入）；「重试」链接

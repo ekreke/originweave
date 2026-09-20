@@ -1,18 +1,10 @@
 import { create } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
 
-import { RunDetailSchema } from '@/gen/originweave/v1/originweave_pb'
-import {
-  edgeDash,
-  factColor,
-  factShape,
-  INTENT_GRID_ROWS,
-  intentVariant,
-  runDetailToGraph,
-  shortLabel,
-} from '@/graph/mapping'
+import { RunGraphSchema } from '@/gen/originweave/v1/originweave_pb'
+import { edgeDash, factColor, intentVariant, runGraphToFlow, shortLabel } from '@/graph/mapping'
 
-import { edge, fact, sampleRunDetail, vec2 } from '@/test/fixtures'
+import { edge, factSummary, sampleRunGraph, vec2 } from '@/test/fixtures'
 
 describe('shortLabel', () => {
   it('collapses whitespace and keeps short labels intact', () => {
@@ -28,18 +20,9 @@ describe('shortLabel', () => {
 })
 
 describe('visual encoding', () => {
-  it('maps fact kinds to shapes and colour tokens', () => {
-    expect(factShape('origin')).toBe('ring')
-    expect(factShape('goal')).toBe('ring')
-    expect(factShape('fact')).toBe('square')
-    expect(factShape('citation')).toBe('triangle')
-    expect(factShape('source')).toBe('diamond')
-    expect(factShape('boundary')).toBe('dashed-box')
-    expect(factShape('compare')).toBe('hexagon')
-    expect(factShape('deviation')).toBe('warning-triangle')
-    expect(factShape('unknown')).toBe('square')
-
+  it('maps fact kinds to colour tokens', () => {
     expect(factColor('source')).toBe('--c-k-source')
+    expect(factColor('goal')).toBe('--c-k-goal')
     expect(factColor('unknown')).toBe('--c-k-fact')
   })
 
@@ -56,140 +39,77 @@ describe('visual encoding', () => {
   })
 })
 
-describe('runDetailToGraph', () => {
+describe('runGraphToFlow', () => {
   it('produces an empty graph without data', () => {
-    const graph = runDetailToGraph(create(RunDetailSchema, {}))
-    expect(graph.nodes).toEqual([])
-    expect(graph.edges).toEqual([])
+    const flow = runGraphToFlow(create(RunGraphSchema, {}))
+    expect(flow.nodes).toEqual([])
+    expect(flow.edges).toEqual([])
   })
 
-  it('maps facts, intents and edges from a RunDetail', () => {
-    const graph = runDetailToGraph(sampleRunDetail())
+  it('maps facts, intents and edges from a RunGraph', () => {
+    const flow = runGraphToFlow(sampleRunGraph())
 
-    const factNodes = graph.nodes.filter((n) => n.type === 'fact')
-    const intentNodes = graph.nodes.filter((n) => n.type === 'intent')
+    const factNodes = flow.nodes.filter((n) => n.type === 'fact')
+    const intentNodes = flow.nodes.filter((n) => n.type === 'intent')
     expect(factNodes).toHaveLength(6) // origin + goal + 4 facts
     expect(intentNodes).toHaveLength(4)
-    expect(graph.edges).toHaveLength(6)
-    expect(graph.edges[1]?.data?.relation).toBe('goal-derived')
+    expect(flow.edges).toHaveLength(6)
+    expect(flow.edges[1]?.data?.relation).toBe('goal-derived')
   })
 
-  it('lays out facts left-to-right and keeps intents in a separate lower lane', () => {
-    const graph = runDetailToGraph(sampleRunDetail())
+  it('keeps explicit fact positions and dagre-places intents', () => {
+    const flow = runGraphToFlow(sampleRunGraph())
 
-    const f1 = graph.nodes.find((n) => n.id === 'f1')
-    const c1 = graph.nodes.find((n) => n.id === 'c1')
-    expect(c1?.position.x).toBeGreaterThan(f1?.position.x ?? 0)
+    const f1 = flow.nodes.find((n) => n.id === 'f1')
+    expect(f1?.position).toEqual({ x: 0, y: 160 })
 
-    // Intent cards are separated from both Fact lanes and each other.
-    const i2 = graph.nodes.find((n) => n.id === 'i2')
-    const i4 = graph.nodes.find((n) => n.id === 'i4')
-    expect(i2?.position.y).toBeGreaterThan(f1?.position.y ?? 0)
-    expect(i4?.position.x).toBeGreaterThan(i2?.position.x ?? 0)
+    // Intents have no server position; dagre gives each one a spot.
+    const intentPositions = flow.nodes
+      .filter((n) => n.type === 'intent')
+      .map((n) => `${n.position.x},${n.position.y}`)
+    expect(intentPositions).toHaveLength(4)
+    expect(new Set(intentPositions).size).toBe(intentPositions.length)
   })
 
   it('is deterministic for the same input', () => {
-    const a = runDetailToGraph(sampleRunDetail())
-    const b = runDetailToGraph(sampleRunDetail())
+    const a = runGraphToFlow(sampleRunGraph())
+    const b = runGraphToFlow(sampleRunGraph())
     expect(a).toEqual(b)
   })
 
   it('lays out a live run (no positions) without stacking nodes', () => {
-    const detail = create(RunDetailSchema, {
-      origin: fact({ id: 'origin', kind: 'origin' }),
-      goal: fact({ id: 'goal', kind: 'goal' }),
-      facts: [fact({ id: 'f1', role: 'main-claim' }), fact({ id: 'c1', kind: 'citation' })],
+    const detail = create(RunGraphSchema, {
+      origin: factSummary({ id: 'origin', kind: 'origin' }),
+      goal: factSummary({ id: 'goal', kind: 'goal' }),
+      facts: [
+        factSummary({ id: 'f1', role: 'main-claim' }),
+        factSummary({ id: 'c1', kind: 'citation' }),
+      ],
       edges: [
         edge({ id: 'e1', source: 'origin', target: 'f1', relation: 'main-chain' }),
         edge({ id: 'e2', source: 'f1', target: 'c1', relation: 'dependency' }),
       ],
     })
-    const positions = runDetailToGraph(detail).nodes.map((n) => `${n.position.x},${n.position.y}`)
+    const positions = runGraphToFlow(detail).nodes.map((n) => `${n.position.x},${n.position.y}`)
     expect(new Set(positions).size).toBe(positions.length)
   })
 
-  it('recomputes legacy explicit coordinates into the left-to-right layout', () => {
-    const detail = create(RunDetailSchema, {
-      origin: fact({ id: 'origin', kind: 'origin', position: vec2(30, 30) }),
-      goal: fact({ id: 'goal', kind: 'goal' }),
-      facts: [fact({ id: 'f1', position: vec2(400, 40) })],
+  it('sets a short preview on each fact node and keeps the full label', () => {
+    const detail = create(RunGraphSchema, {
+      origin: factSummary({ id: 'origin', kind: 'origin' }),
+      goal: factSummary({ id: 'goal', kind: 'goal', label: 'x'.repeat(200) }),
     })
-    const graph = runDetailToGraph(detail)
-    expect(graph.nodes.find((n) => n.id === 'origin')?.position).toEqual({ x: 0, y: 0 })
-    expect(graph.nodes.find((n) => n.id === 'f1')?.position.x).toBeGreaterThan(0)
-    expect(graph.nodes.find((n) => n.id === 'goal')?.position.y).toBeLessThan(0)
-  })
-
-  it('sets a short preview on each fact node', () => {
-    const detail = create(RunDetailSchema, {
-      origin: fact({ id: 'origin', kind: 'origin' }),
-      goal: fact({ id: 'goal', kind: 'goal', label: 'x'.repeat(200) }),
-    })
-    const node = runDetailToGraph(detail).nodes.find((n) => n.id === 'goal')
-    const data = node?.data as { preview: string; fact: { label: string } }
+    const node = runGraphToFlow(detail).nodes.find((n) => n.id === 'goal')
+    const data = node?.data as { preview: string; summary: { label: string } }
     expect(data.preview.endsWith('…')).toBe(true)
-    expect(data.fact.label).toHaveLength(200)
+    expect(data.summary.label).toHaveLength(200)
   })
 
-  it('sets a compact question preview on intent cards', () => {
-    const detail = create(RunDetailSchema, {
-      origin: fact({ id: 'origin', kind: 'origin' }),
-      intents: [
-        {
-          id: 'i1',
-          from: 'origin',
-          status: 'open',
-          question: '核对统计口径、对照组和指标定义。'.repeat(8),
-        },
-      ],
+  it('exposes an explicit position on the mapped node', () => {
+    const detail = create(RunGraphSchema, {
+      origin: factSummary({ id: 'origin', kind: 'origin', position: vec2(30, 30) }),
     })
-    const node = runDetailToGraph(detail).nodes.find((item) => item.id === 'i1')
-    const data = node?.data as { preview: string }
-    expect(data.preview.endsWith('…')).toBe(true)
-  })
-
-  it('uses a multi-column task lane when a run has many intents', () => {
-    const detail = create(RunDetailSchema, {
-      origin: fact({ id: 'origin', kind: 'origin' }),
-      intents: Array.from({ length: INTENT_GRID_ROWS + 1 }, (_, index) => ({
-        id: `i${String(index).padStart(2, '0')}`,
-        from: 'origin',
-        status: 'open',
-        question: `问题 ${index}`,
-      })),
-    })
-    const intents = runDetailToGraph(detail).nodes.filter((node) => node.type === 'intent')
-    expect(intents).toHaveLength(INTENT_GRID_ROWS + 1)
-    expect(intents[INTENT_GRID_ROWS]?.position.y).toBe(intents[0]?.position.y)
-    expect(intents[INTENT_GRID_ROWS]?.position.x).toBeGreaterThan(intents[0]?.position.x ?? 0)
-    expect(intents[0]?.position.x).toBeGreaterThan(0)
-  })
-
-  it('separates task grids whose source layers would otherwise overlap', () => {
-    const detail = create(RunDetailSchema, {
-      origin: fact({ id: 'origin', kind: 'origin' }),
-      facts: [fact({ id: 'f1' })],
-      edges: [edge({ source: 'origin', target: 'f1', relation: 'main-chain' })],
-      intents: [
-        ...Array.from({ length: 17 }, (_, index) => ({
-          id: `i${String(index).padStart(2, '0')}`,
-          from: 'origin',
-          status: 'open',
-          question: `origin ${index}`,
-        })),
-        { id: 'i17', from: 'f1', status: 'open', question: 'child' },
-      ],
-    })
-    const graph = runDetailToGraph(detail)
-    const originIntent = graph.nodes.find((node) => node.id === 'i00')
-    const childIntent = graph.nodes.find((node) => node.id === 'i17')
-    expect(childIntent?.position.y).toBeGreaterThan(originIntent?.position.y ?? 0)
-  })
-
-  it('adds an accessible label that includes the node type, identity and status', () => {
-    const graph = runDetailToGraph(sampleRunDetail())
-    const node = graph.nodes.find((item) => item.id === 'f1')
-    expect(node?.ariaLabel).toContain('fact f1')
-    expect(node?.ariaLabel).toContain('状态 verified')
+    const node = runGraphToFlow(detail).nodes.find((n) => n.id === 'origin')
+    expect(node?.position).toEqual({ x: 30, y: 30 })
   })
 })

@@ -20,7 +20,7 @@ pytest.importorskip("originweave.v1.originweave_connect")
 from originweave import config as config_module  # noqa: E402
 from originweave.capabilities import PromptTemplate, ProviderError  # noqa: E402
 from originweave.capabilities.worker import LocalWorker  # noqa: E402
-from originweave.config import Config  # noqa: E402
+from originweave.config import Config, WorkerConfig  # noqa: E402
 from originweave.persistence import Project, ProjectRegistry  # noqa: E402
 from originweave.reduce import reduce  # noqa: E402
 from originweave.server import Providers, ServerContext, create_app  # noqa: E402
@@ -111,7 +111,10 @@ def _client(root: Path) -> httpx.AsyncClient:
 def _ctx_with(root: Path, providers: Providers) -> ServerContext:
     """A server context rooted at ``root`` with a project ``p`` and given providers."""
     ProjectRegistry(root / "projects", root / "runs").write(Project(id="p", name="P"))
-    return ServerContext.build(config=Config(), providers=providers, root=root)
+    # Scripted providers run in-process; container behaviour is covered separately in
+    # test_runtime without requiring Docker for every server contract test.
+    config = Config(worker=WorkerConfig(execution="in-process", container_scope="per-call"))
+    return ServerContext.build(config=config, providers=providers, root=root)
 
 
 def _ctx(root: Path, *replies: str) -> ServerContext:
@@ -371,6 +374,223 @@ async def test_get_run_source_text_is_empty_without_input(tmp_path: Path) -> Non
     assert detail.get("sourceText", "") == ""
 
 
+async def test_get_run_graph_returns_light_projection(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+
+    async with _client(tmp_path) as client:
+        response = await _post(client, "GetRunGraph", {"runId": "run_001"})
+
+    assert response.status_code == 200
+    graph = response.json()["graph"]
+    assert graph["run"]["id"] == "run_001"
+    assert graph["run"]["status"] == "completed"
+    assert [fact["id"] for fact in graph["facts"]] == ["f1"]
+    assert [intent["id"] for intent in graph["intents"]] == ["i1"]
+    assert graph["origin"]["kind"] == "origin"
+    assert graph["goal"]["kind"] == "goal"
+    assert graph["eventCount"] == 5
+    # The light projection carries counts, not evidence/note payloads...
+    assert graph["facts"][0].get("evidenceCount", 0) == 0
+    assert "evidence" not in graph["facts"][0]
+    assert "note" not in graph["facts"][0]
+    # ...and none of the heavy RunDetail-only sections.
+    assert "events" not in graph
+    assert "sessions" not in graph
+    assert "sourceText" not in graph
+
+
+async def test_get_run_graph_at_event_folds_and_keeps_full_count(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+    events = RunStore(tmp_path / "runs" / "run_001").read_events()
+
+    async with _client(tmp_path) as client:
+        responses = [
+            await _post(client, "GetRunGraph", {"runId": "run_001", "atEvent": k})
+            for k in range(1, 6)
+        ]
+
+    for k, response in enumerate(responses, start=1):
+        assert response.status_code == 200, response.text
+        graph = response.json()["graph"]
+        board = reduce(events[:k])
+        assert [fact["id"] for fact in graph.get("facts", [])] == [f.id for f in board.facts]
+        assert graph["run"]["status"] == board.status
+        # The cursor bound is the full-log length, stable while stepping.
+        assert graph["eventCount"] == len(events)
+    assert responses[0].json()["graph"].get("facts", []) == []
+    assert responses[4].json()["graph"]["run"]["status"] == "completed"
+
+
+async def test_get_run_graph_missing_reports_not_found(tmp_path: Path) -> None:
+    async with _client(tmp_path) as client:
+        response = await _post(client, "GetRunGraph", {"runId": "run_404"})
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "not_found"
+
+
+async def test_get_run_graph_rejects_out_of_range_at_event(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+
+    async with _client(tmp_path) as client:
+        too_small = await _post(client, "GetRunGraph", {"runId": "run_001", "atEvent": 0})
+        too_big = await _post(client, "GetRunGraph", {"runId": "run_001", "atEvent": 99})
+
+    for response in (too_small, too_big):
+        assert response.status_code == 400
+        assert response.json()["code"] == "invalid_argument"
+
+
+def _write_run_with_evidence(runs_dir: Path, run_id: str) -> None:
+    """A run whose produced fact carries a note + verbatim evidence (M2 style)."""
+    store = RunStore(runs_dir / run_id)
+    store.init_layout()
+    store.write_run_meta({"id": run_id, "project_id": "p"})
+    at = "2026-01-01T00:00:0{}"
+    store.append_event("PROJECT", {"origin": _ORIGIN, "goal": _GOAL}, at=at.format(0))
+    store.append_event(
+        "INTENT",
+        {"intent": {"id": "i1", "type": "explore", "from": "origin", "question": "q"}},
+        at=at.format(1),
+    )
+    store.append_event(
+        "EXECUTE", {"intentId": "i1", "worker": "worker-1", "model": "x"}, at=at.format(2)
+    )
+    store.append_event(
+        "CONCLUDE",
+        {
+            "intentId": "i1",
+            "facts": [
+                {
+                    "id": "f1",
+                    "kind": "fact",
+                    "role": "sub-claim",
+                    "note": "analyst remark",
+                    "evidence": [
+                        {
+                            "id": "ev1",
+                            "quote": "verbatim",
+                            "sourceTitle": "Source",
+                            "url": "https://example.com",
+                            "locator": "p.1",
+                        }
+                    ],
+                }
+            ],
+        },
+        at=at.format(3),
+    )
+
+
+async def test_get_fact_detail_returns_evidence_and_note(tmp_path: Path) -> None:
+    _write_run_with_evidence(tmp_path / "runs", "run_001")
+
+    async with _client(tmp_path) as client:
+        response = await _post(client, "GetFactDetail", {"runId": "run_001", "factId": "f1"})
+
+    assert response.status_code == 200
+    fact = response.json()["fact"]
+    assert fact["note"] == "analyst remark"
+    assert [evidence["id"] for evidence in fact["evidence"]] == ["ev1"]
+    assert fact["evidence"][0]["quote"] == "verbatim"
+
+
+async def test_get_fact_detail_serves_origin_goal_and_missing(tmp_path: Path) -> None:
+    _write_run_with_evidence(tmp_path / "runs", "run_001")
+
+    async with _client(tmp_path) as client:
+        origin = await _post(client, "GetFactDetail", {"runId": "run_001", "factId": "origin"})
+        goal = await _post(client, "GetFactDetail", {"runId": "run_001", "factId": "goal"})
+        missing = await _post(client, "GetFactDetail", {"runId": "run_001", "factId": "nope"})
+        empty = await _post(client, "GetFactDetail", {"runId": "run_001", "factId": ""})
+
+    assert origin.json()["fact"]["kind"] == "origin"
+    assert goal.json()["fact"]["kind"] == "goal"
+    assert missing.status_code == 404
+    assert empty.status_code == 400
+
+
+async def test_get_fact_detail_folds_at_event(tmp_path: Path) -> None:
+    # f1 only exists from the CONCLUDE event (4) onward; earlier folds lack it.
+    _write_run_with_evidence(tmp_path / "runs", "run_001")
+
+    async with _client(tmp_path) as client:
+        early = await _post(
+            client, "GetFactDetail", {"runId": "run_001", "factId": "f1", "atEvent": 2}
+        )
+        late = await _post(
+            client, "GetFactDetail", {"runId": "run_001", "factId": "f1", "atEvent": 4}
+        )
+
+    assert early.status_code == 404
+    assert late.status_code == 200
+    assert late.json()["fact"]["id"] == "f1"
+
+
+async def test_list_events_returns_full_and_sliced(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+
+    async with _client(tmp_path) as client:
+        full = await _post(client, "ListEvents", {"runId": "run_001"})
+        sliced = await _post(client, "ListEvents", {"runId": "run_001", "atEvent": 2})
+        out_of_range = await _post(client, "ListEvents", {"runId": "run_001", "atEvent": 99})
+
+    assert full.status_code == 200
+    assert len(full.json()["events"]) == 5
+    assert sliced.status_code == 200
+    assert [event["id"] for event in sliced.json()["events"]] == ["e0001", "e0002"]
+    assert out_of_range.status_code == 400
+
+
+async def test_list_sessions_filters_by_intent(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "run_001")
+    store.init_layout()
+    store.write_run_meta({"id": "run_001", "project_id": "p"})
+    store.append_event(
+        "PROJECT", {"origin": _ORIGIN, "goal": _GOAL}, at="2026-01-01T00:00:00+00:00"
+    )
+    sessions_dir = store.root / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    (sessions_dir / "sess_001.json").write_text(
+        json.dumps({"id": "sess_001", "runId": "run_001", "task": "Explore", "intentId": "i1"}),
+        encoding="utf-8",
+    )
+    (sessions_dir / "sess_002.json").write_text(
+        json.dumps({"id": "sess_002", "runId": "run_001", "task": "Bootstrap"}),
+        encoding="utf-8",
+    )
+
+    async with _client(tmp_path) as client:
+        every = await _post(client, "ListSessions", {"runId": "run_001"})
+        only_i1 = await _post(client, "ListSessions", {"runId": "run_001", "intentId": "i1"})
+        none = await _post(client, "ListSessions", {"runId": "run_404"})
+
+    assert [session["id"] for session in every.json().get("sessions", [])] == [
+        "sess_001",
+        "sess_002",
+    ]
+    assert [session["id"] for session in only_i1.json().get("sessions", [])] == ["sess_001"]
+    assert none.status_code == 404
+
+
+async def test_pinned_run_serves_graph_fact_events_sessions(tmp_path: Path) -> None:
+    run_dir = _write_ui_run(tmp_path, "demo")
+
+    async with _ui_client(tmp_path, static_dir=None, run_dir=run_dir) as client:
+        graph = await _post(client, "GetRunGraph", {"runId": "demo"})
+        wrong = await _post(client, "GetRunGraph", {"runId": "other"})
+        fact = await _post(client, "GetFactDetail", {"runId": "demo", "factId": "goal"})
+        events = await _post(client, "ListEvents", {"runId": "demo"})
+        sessions = await _post(client, "ListSessions", {"runId": "demo"})
+
+    assert graph.json()["graph"]["run"]["status"] == "completed"
+    assert graph.json()["graph"]["eventCount"] == 2
+    assert wrong.status_code == 404
+    assert fact.json()["fact"]["kind"] == "goal"
+    assert len(events.json()["events"]) == 2
+    assert sessions.json().get("sessions", []) == []
+
+
 async def test_projects_list_and_get(tmp_path: Path) -> None:
     ProjectRegistry(tmp_path / "projects", tmp_path / "runs").write(Project(id="p", name="P"))
 
@@ -493,6 +713,20 @@ async def test_create_run_persists_input_and_is_readable(tmp_path: Path) -> None
     assert store.run_json_path.is_file()
     meta = store.read_run_meta()
     assert meta is not None and meta["id"] == "run_001" and meta["project_id"] == "p"
+
+
+async def test_create_run_freezes_non_secret_runtime_config(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, _bootstrap("A claim"), NO_REASON)
+    async with _client_for(ctx) as client:
+        await _create_run(client, auto=True)
+        await ctx.scheduler.wait("run_001")
+
+    meta = RunStore(tmp_path / "runs" / "run_001").read_run_meta()
+    assert meta is not None
+    runtime = meta["runtime"]
+    assert runtime["worker"]["execution"] == "in-process"
+    assert runtime["worker"]["container_scope"] == "per-call"
+    assert "OPENAI_API_KEY" not in str(runtime)
 
 
 async def test_create_run_requires_an_existing_project(tmp_path: Path) -> None:
@@ -909,7 +1143,11 @@ async def test_lifespan_drains_background_runs(tmp_path: Path) -> None:
         prompt=_FakePrompt(),
     )
     ProjectRegistry(tmp_path / "projects", tmp_path / "runs").write(Project(id="p", name="P"))
-    app = create_app(config=Config(), providers=providers, root=tmp_path)
+    app = create_app(
+        config=Config(worker=WorkerConfig(execution="in-process", container_scope="per-call")),
+        providers=providers,
+        root=tmp_path,
+    )
 
     async with (
         app.router.lifespan_context(app),

@@ -6,12 +6,14 @@ import {
   EventSchema,
   EvidenceSchema,
   FactSchema,
+  FactSummarySchema,
   HintSchema,
   IntentCountsSchema,
   IntentSchema,
   LlmSettingsSchema,
   ProjectSchema,
   RunDetailSchema,
+  RunGraphSchema,
   RunSchema,
   SessionSchema,
   SessionStepSchema,
@@ -24,11 +26,13 @@ import {
   type Event,
   type Evidence,
   type Fact,
+  type FactSummary,
   type Hint,
   type Intent,
   type Project,
   type Run,
   type RunDetail,
+  type RunGraph,
   type Session,
   type SessionStep,
   type Settings,
@@ -167,7 +171,9 @@ export function workerBudget(overrides: Partial<WorkerBudget> = {}): WorkerBudge
   return create(WorkerBudgetSchema, { maxSteps: 60, maxWall: '10m', maxCost: 2, ...overrides })
 }
 
-export function workerSettings(overrides: Partial<WorkerSettings> = {}): WorkerSettings {
+export function workerSettings(
+  overrides: Partial<Omit<WorkerSettings, '$typeName' | '$unknown'>> = {},
+): WorkerSettings {
   return create(WorkerSettingsSchema, {
     llm: create(LlmSettingsSchema, {
       provider: 'openai',
@@ -180,6 +186,9 @@ export function workerSettings(overrides: Partial<WorkerSettings> = {}): WorkerS
     heartbeatInterval: '15s',
     heartbeatTimeout: '5m',
     heartbeatOnTimeout: 'release',
+    execution: 'container',
+    image: 'originweave-runtime:latest',
+    containerScope: 'per-run',
     budget: workerBudget(),
     ...overrides,
   })
@@ -343,6 +352,50 @@ export function sampleRunDetail(): RunDetail {
         steps: [sessionStep({ seq: 1, kind: 'turn-start' })],
       }),
     ],
+  })
+}
+
+export function factSummary(overrides: Partial<FactSummary> = {}): FactSummary {
+  return create(FactSummarySchema, {
+    id: 'f0',
+    label: 'a fact',
+    subtitle: '',
+    kind: 'fact',
+    role: 'none',
+    status: 'open',
+    confidence: 0,
+    position: vec2(),
+    evidenceCount: 0,
+    ...overrides,
+  })
+}
+
+// The graph projection of `sampleRunDetail()`: same board, light facts (no
+// evidence/note), plus the Replay cursor bound.
+export function sampleRunGraph(): RunGraph {
+  const detail = sampleRunDetail()
+  const summarize = (f: Fact): FactSummary =>
+    factSummary({
+      id: f.id,
+      label: f.label,
+      subtitle: f.subtitle,
+      kind: f.kind,
+      role: f.role,
+      status: f.status,
+      confidence: f.confidence,
+      position: f.position,
+      evidenceCount: f.evidence.length,
+    })
+  return create(RunGraphSchema, {
+    run: detail.run,
+    origin: detail.origin ? summarize(detail.origin) : undefined,
+    goal: detail.goal ? summarize(detail.goal) : undefined,
+    facts: detail.facts.map(summarize),
+    intents: detail.intents,
+    edges: detail.edges,
+    hints: detail.hints,
+    waitingFor: detail.waitingFor,
+    eventCount: detail.events.length,
   })
 }
 

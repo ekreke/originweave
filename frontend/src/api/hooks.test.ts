@@ -9,7 +9,11 @@ import {
   useAddHint,
   useCreateProject,
   useCreateRun,
+  useFactDetail,
   useRun,
+  useRunGraph,
+  useRunEvents,
+  useRunSessions,
   useSettings,
   useSubmitHumanInput,
   useUpdateSettings,
@@ -22,6 +26,10 @@ const mocks = vi.hoisted(() => ({
   createRun: vi.fn(),
   createProject: vi.fn(),
   getRun: vi.fn(),
+  getRunGraph: vi.fn(),
+  getFactDetail: vi.fn(),
+  listEvents: vi.fn(),
+  listSessions: vi.fn(),
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
 }))
@@ -87,7 +95,83 @@ describe('useAddHint', () => {
 
     result.current.mutate('check it')
 
-    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['run', 'run_001'] }))
+    await waitFor(() => {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['run-graph', 'run_001'] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['run-events', 'run_001'] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions', 'run_001'] })
+    })
+  })
+})
+
+describe('useRunGraph', () => {
+  beforeEach(() => {
+    mocks.getRunGraph.mockReset().mockResolvedValue({ graph: {} })
+  })
+
+  it('forwards at_event when replaying', async () => {
+    const { result } = renderHook(() => useRunGraph('run_001', 3), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(mocks.getRunGraph).toHaveBeenCalledWith({ runId: 'run_001', atEvent: 3 })
+  })
+
+  it('omits at_event for the live view', async () => {
+    const { result } = renderHook(() => useRunGraph('run_001'), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(mocks.getRunGraph).toHaveBeenCalledWith({ runId: 'run_001' })
+  })
+})
+
+describe('useFactDetail', () => {
+  beforeEach(() => {
+    mocks.getFactDetail.mockReset().mockResolvedValue({ fact: { id: 'f1' } })
+  })
+
+  it('fetches the selected fact, forwarding at_event', async () => {
+    const { result } = renderHook(() => useFactDetail('run_001', 'f1', 2), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(mocks.getFactDetail).toHaveBeenCalledWith({ runId: 'run_001', factId: 'f1', atEvent: 2 })
+  })
+
+  it('stays idle without a selection', async () => {
+    const { result } = renderHook(() => useFactDetail('run_001', undefined), { wrapper })
+    expect(result.current.fetchStatus).toBe('idle')
+    expect(mocks.getFactDetail).not.toHaveBeenCalled()
+  })
+})
+
+describe('useRunEvents', () => {
+  beforeEach(() => {
+    mocks.listEvents.mockReset().mockResolvedValue({ events: [] })
+  })
+
+  it('fetches the timeline only when enabled', async () => {
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useRunEvents('run_001', null, enabled),
+      { wrapper, initialProps: { enabled: false } },
+    )
+    expect(result.current.fetchStatus).toBe('idle')
+
+    rerender({ enabled: true })
+    await waitFor(() => expect(mocks.listEvents).toHaveBeenCalledWith({ runId: 'run_001' }))
+  })
+
+  it('forwards at_event while replaying', async () => {
+    renderHook(() => useRunEvents('run_001', 2, true), { wrapper })
+    await waitFor(() =>
+      expect(mocks.listEvents).toHaveBeenCalledWith({ runId: 'run_001', atEvent: 2 }),
+    )
+  })
+})
+
+describe('useRunSessions', () => {
+  beforeEach(() => {
+    mocks.listSessions.mockReset().mockResolvedValue({ sessions: [] })
+  })
+
+  it('loads the session snapshots for the run', async () => {
+    const { result } = renderHook(() => useRunSessions('run_001'), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(mocks.listSessions).toHaveBeenCalledWith({ runId: 'run_001' })
   })
 })
 
@@ -118,7 +202,10 @@ describe('useSubmitHumanInput', () => {
 
     result.current.mutate({ gate: 'arbitrate', decision: 'approve' })
 
-    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['run', 'run_001'] }))
+    await waitFor(() => {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['run-graph', 'run_001'] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['fact', 'run_001'] })
+    })
   })
 })
 

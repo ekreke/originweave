@@ -66,18 +66,24 @@ def create_app(
     in that case — tests drive ``ServerContext.scheduler`` directly.
     """
     scheduler = None
+    managed_service = None
     if service is None:
         context = ServerContext.build(
             config=config, providers=providers, root=root, run_dir=run_dir
         )
         service = Service(context)
         scheduler = context.scheduler
+        managed_service = service
 
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         try:
             yield
         finally:
+            # Shared Pi leases must be failed and reclaimed before waiting for other
+            # background work; otherwise an indefinitely wedged call delays shutdown.
+            if managed_service is not None:
+                await managed_service.shutdown()
             if scheduler is not None:
                 await scheduler.drain()
 

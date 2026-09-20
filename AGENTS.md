@@ -80,11 +80,20 @@
 - `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出、**勿手改**）：前端 TS 由
   `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，落到 `frontend/src/gen/`），
   server Python 由 `make proto`（根 `buf.gen.yaml`，落到 `src/originweave/v1` → `originweave.v1.*`）。
-- **前端（`frontend/`，M1b 脚手架 + M1c-2b 接线 + M6 P5）**：React + Vite + TS + React Flow + Connect；
-  **M1c-2b 2b-1–2b-5 全部落地**（`@tanstack/react-query`；`api/{queryClient,hooks}.ts`，活动态轮询；
-  `Overview`/`Project`/`AppShell`/`Console` 读真实数据；图/表格选中 → Inspector；Hints `AddHint`；
-  Gate A/B → `SubmitHumanInput`；**Replay 走服务端折算** `GetRun(at_event=k)`（复用 `reduce(events[:k])`,
-  前端只步进/高亮）；新建核验表单 + 顶栏；`transport` 默认同源；`make smoke` 端到端冒烟）。
+- **前端（`frontend/`，M1b 脚手架 + M1c-2b 接线 + M6 P5 + 图数据拆分/重构）**：React + Vite + TS +
+  React Flow + Connect；**M1c-2b 2b-1–2b-5 全部落地**（`@tanstack/react-query`；
+  `api/{queryClient,hooks}.ts`，活动态轮询；`Overview`/`Project`/`AppShell`/`Console` 读真实数据；
+  图/表格选中 → Inspector；Hints `AddHint`；Gate A/B → `SubmitHumanInput`；Replay 走服务端折算；
+  新建核验表单 + 顶栏；`transport` 默认同源）。
+  **图数据拆分已落地**：控制台轮询**轻量 `GetRunGraph`**（`RunGraph`/`FactSummary`，无 note/evidence/
+  events/sessions），`useFactDetail` 点节点才取全量 Fact（Replay 下 `staleTime=Infinity`）、
+  `useRunEvents` 仅 EVENTS 页签激活时取、`useRunSessions` 按需取（不轮询）；`GetRun` 保留给
+  NewRun 重试预填（`source_text`）与兼容。`graph.event_count` 是 Replay 游标上界。
+  **图渲染已重构**：节点为**紧凑矩形卡**（id+kind chip 头部、截断预览正文；颜色按 kind，去形状
+  clip-path）、布局用 **`@dagrejs/dagre`**（`graph/layout.ts`，TB 分层、确定性、非零 `Fact.position`
+  逐节点优先、dagre 补缺）、画布带 Controls/MiniMap/图例、选中高亮入射边其余变暗（`classifyEdges`）；
+  中栏顶栏为面包屑 + 标题 + 状态/预算 + Replay 控件，右栏 INSPECTOR 顶部为 run 统计块
+  （FACTS/INTENTS/OPEN/HINTS）+ 元信息行，左栏 run 卡片 `run-card-active` 高亮当前 run。
   **浏览器 e2e**：`@playwright/test`（`frontend/e2e/`，`make frontend-e2e`）驱动真实 `frontend/dist` +
   fake-provider server（`scripts/e2e_server.py`）。
   **M6 P5 已落地**：Settings 页（`routes/Settings.tsx` + `settingsModel.ts`；`useSettings`/`useUpdateSettings`

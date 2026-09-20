@@ -4,9 +4,10 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { Inspector } from '@/layout/Inspector'
 import { RunList } from '@/layout/RunList'
-import { hint, run, sampleRunDetail, sampleRuns } from '@/test/fixtures'
+import { hint, run, sampleRunDetail, sampleRunGraph, sampleRuns } from '@/test/fixtures'
 
 const detail = sampleRunDetail()
+const graph = sampleRunGraph()
 
 describe('Inspector', () => {
   it('keeps the empty state without a selection', () => {
@@ -14,14 +15,35 @@ describe('Inspector', () => {
     expect(screen.getByText(/无选中项/)).toBeInTheDocument()
   })
 
-  it('shows a fact with its verbatim evidence', () => {
+  it('shows a fact summary, its stat tiles and the on-demand evidence', () => {
     render(
-      <Inspector selection={{ type: 'fact', fact: detail.facts[0]! }} intents={detail.intents} />,
+      <Inspector
+        run={detail.run}
+        selection={{ type: 'fact', fact: graph.facts[0]! }}
+        factDetail={detail.facts[0]!}
+        intents={detail.intents}
+      />,
     )
     expect(screen.getByText('f1')).toBeInTheDocument()
+    // The verbatim evidence arrives through the on-demand GetFactDetail RPC.
     expect(screen.getByText('verbatim quote from the source')).toBeInTheDocument()
     expect(screen.getByText('GitHub Labs')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Intents' })).toBeInTheDocument()
+    // Run-level stat tiles replace the old intent counts section.
+    expect(screen.getByText('FACTS')).toBeInTheDocument()
+    expect(screen.getByText('INTENTS')).toBeInTheDocument()
+    expect(screen.getByText('OPEN')).toBeInTheDocument()
+    expect(screen.getByText('HINTS')).toBeInTheDocument()
+  })
+
+  it('shows the loading state while the fact detail is in flight', () => {
+    render(<Inspector selection={{ type: 'fact', fact: graph.facts[0]! }} factLoading />)
+    expect(screen.getByText('加载详情…')).toBeInTheDocument()
+    expect(screen.queryByText('verbatim quote from the source')).not.toBeInTheDocument()
+  })
+
+  it('shows the fact detail error inline', () => {
+    render(<Inspector selection={{ type: 'fact', fact: graph.facts[0]! }} factError="boom" />)
+    expect(screen.getByText('boom')).toBeInTheDocument()
   })
 
   it('shows the awaiting intent detail', () => {
@@ -135,6 +157,12 @@ describe('RunList', () => {
     expect(screen.getByTestId('run-card-run_009')).toHaveClass('run-card-alert')
     expect(screen.getByTestId('run-card-run_008')).not.toHaveClass('run-card-alert')
     expect(screen.getByText('completed')).toBeInTheDocument()
+  })
+
+  it('highlights only the active run card', () => {
+    render(<RunList runs={sampleRuns()} activeRunId="run_008" />)
+    expect(screen.getByTestId('run-card-run_008')).toHaveClass('run-card-active')
+    expect(screen.getByTestId('run-card-run_009')).not.toHaveClass('run-card-active')
   })
 
   it('links each card title to the run console when given a project', () => {

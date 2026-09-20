@@ -28,6 +28,7 @@ from ..config import (
     ConfigError,
     ModelConfig,
     WorkerConfig,
+    from_dict,
     parse_duration,
 )
 from ..config import save as save_config
@@ -36,6 +37,7 @@ from ..events import Event, now_iso
 from ..persistence import Project, Run, allocate_run_id, is_run_id, summarize_run
 from ..reduce import ReduceError, reduce
 from ..report import ReportError
+from ..runtime import RunContainerWorker
 from ..store import RunStore
 from . import convert
 from .context import ServerContext
@@ -111,10 +113,19 @@ def _config_from_settings(base: Config, settings: Any) -> Config:
         ),
         worker=WorkerConfig(
             provider=worker.provider,
-            # execution/image are not exposed via the Settings RPC; keep the current
-            # values when rebuilding the worker block from a settings update (M3a).
-            execution=base.worker.execution,
-            image=base.worker.image,
+            # Keep compatibility with older generated clients. Current clients round
+            # trip these fields, but old clients cannot express them yet.
+            execution=worker.execution or base.worker.execution,
+            image=worker.image or base.worker.image,
+            container_scope=(
+                worker.container_scope
+                or (
+                    "per-call"
+                    if worker.provider != "pi"
+                    or (worker.execution or base.worker.execution) != "container"
+                    else base.worker.container_scope
+                )
+            ),
             max_concurrency=worker.max_concurrency,
             tools=tuple(worker.tools),
             heartbeat_interval=worker.heartbeat_interval,
@@ -222,6 +233,71 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
                 Code.INTERNAL, f"run {run_id!r} has a malformed event log: {exc}"
             ) from exc
 
+    async def get_run_graph(self, request: Any, ctx: Any) -> Any:
+        """The light graph projection polled by the console (dashboard.md §4)."""
+        store = self._read_store(request.run_id)
+        at_event = request.at_event if request.HasField("at_event") else None
+        try:
+            events, board, run = self._folded_board(store, at_event=at_event)
+        except (BlackboardError, ReduceError, ReportError) as exc:
+            raise ConnectError(
+                Code.INTERNAL, f"run {request.run_id!r} has a malformed event log: {exc}"
+            ) from exc
+        return pb.GetRunGraphResponse(
+            graph=convert.run_graph_pb(run, board, event_count=len(events))
+        )
+
+    async def get_fact_detail(self, request: Any, ctx: Any) -> Any:
+        """One Fact with its verbatim evidence; fetched on node click, not polled."""
+        if not request.fact_id:
+            raise ConnectError(Code.INVALID_ARGUMENT, "fact_id is required")
+        store = self._read_store(request.run_id)
+        at_event = request.at_event if request.HasField("at_event") else None
+        try:
+            folded = self._folded_events(store.read_events(), at_event)
+            board = reduce(folded)
+        except (BlackboardError, ReduceError) as exc:
+            raise ConnectError(
+                Code.INTERNAL, f"run {request.run_id!r} has a malformed event log: {exc}"
+            ) from exc
+        fact = board.fact(request.fact_id)
+        if fact is None and board.origin.id == request.fact_id:
+            fact = board.origin
+        if fact is None and board.goal.id == request.fact_id:
+            fact = board.goal
+        if fact is None:
+            raise ConnectError(
+                Code.NOT_FOUND, f"fact {request.fact_id!r} not found in run {request.run_id!r}"
+            )
+        return pb.GetFactDetailResponse(fact=convert.fact_pb(fact))
+
+    async def list_events(self, request: Any, ctx: Any) -> Any:
+        """The event timeline (EVENTS tab); optionally sliced for Replay."""
+        store = self._read_store(request.run_id)
+        at_event = request.at_event if request.HasField("at_event") else None
+        try:
+            events = store.read_events()
+            folded = self._folded_events(events, at_event)
+        except (BlackboardError, ReduceError, ReportError) as exc:
+            raise ConnectError(
+                Code.INTERNAL, f"run {request.run_id!r} has a malformed event log: {exc}"
+            ) from exc
+        return pb.ListEventsResponse(events=[convert.event_pb(event) for event in folded])
+
+    async def list_sessions(self, request: Any, ctx: Any) -> Any:
+        """Worker session snapshots; the Inspector fetches these on demand."""
+        store = self._read_store(request.run_id)
+        try:
+            sessions = store.read_sessions()
+        except BlackboardError as exc:
+            raise ConnectError(
+                Code.INTERNAL, f"run {request.run_id!r} has a malformed session log: {exc}"
+            ) from exc
+        if request.HasField("intent_id"):
+            intent_id = str(request.intent_id)
+            sessions = [s for s in sessions if s.get("intentId") == intent_id]
+        return pb.ListSessionsResponse(sessions=[convert.session_pb(s) for s in sessions])
+
     async def create_run(self, request: Any, ctx: Any) -> Any:
         """Start a run: persist the input, schedule the engine, return the run (C3b).
 
@@ -279,6 +355,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             "analysis": analysis,
             "goal": request.goal,
             "created_at": created_at,
+            # Static, non-secret runtime snapshot. A Gate resume must use the same
+            # Pi image and container lease even if project Settings changed meanwhile.
+            "runtime": self._ctx.config.to_dict(),
         }
         if request.HasField("auto"):
             meta["auto"] = bool(request.auto)
@@ -311,7 +390,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         )
         auto = bool(request.auto) if request.HasField("auto") else self._ctx.config.hitl.auto
         engine = self._build_engine(store, auto=auto)
-        task = self._ctx.scheduler.start(run_id, engine.run(origin=origin, goal=goal, auto=auto))
+        task = self._ctx.scheduler.start(
+            run_id, self._run_initial(engine, store, origin=origin, goal=goal, auto=auto)
+        )
         await self._await_project(store, task)
         run = summarize_run(store, meta=meta, budget=self._ctx.config.worker.budget)
         return pb.CreateRunResponse(run=convert.run_pb(run))
@@ -358,6 +439,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             )
         except EngineError as exc:
             raise ConnectError(Code.FAILED_PRECONDITION, str(exc)) from exc
+        await self._release_if_terminal(store)
         run = summarize_run(
             store, meta=store.read_run_meta(), budget=self._ctx.config.worker.budget
         )
@@ -390,6 +472,29 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             raise ConnectError(Code.INTERNAL, f"could not apply settings: {exc}") from exc
         return pb.UpdateSettingsResponse(settings=convert.settings_pb(new_config))
 
+    async def shutdown(self) -> None:
+        """Fail and reclaim non-terminal shared Pi containers during server shutdown."""
+        for run_dir in list(self._ctx.run_workers):
+            store = RunStore(run_dir)
+            try:
+                await self._ctx.scheduler.cancel(run_dir.name)
+                engine = self._build_engine(store, auto=False)
+                await engine.fail_runtime("server shutdown released shared worker container")
+            finally:
+                await self._ctx.release_run_worker(run_dir)
+
+    async def _run_initial(
+        self, engine: Engine, store: RunStore, *, origin: Fact, goal: Fact, auto: bool
+    ) -> Any:
+        board = await engine.run(origin=origin, goal=goal, auto=auto)
+        await self._release_if_terminal(store)
+        return board
+
+    async def _release_if_terminal(self, store: RunStore) -> None:
+        board = reduce(store.read_events())
+        if board.status in {"completed", "failed", "stopped"}:
+            await self._ctx.release_run_worker(store.root)
+
     async def search(self, request: Any, ctx: Any) -> Any:
         """Run a retrieval through the configured search provider (M6 P3b).
 
@@ -413,12 +518,12 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         return pb.SearchResponse(text=text)
 
     def _build_engine(self, store: RunStore, *, auto: bool) -> Engine:
-        """Build an engine over ``store`` from the resolved config/providers."""
-        worker = self._ctx.config.worker
-        return Engine(
-            # container-per-worker (M3a) binds the worker to this run; in-process
-            # returns the shared provider (tests inject a fake).
-            worker=self._ctx.worker_for(store.root),
+        """Build an engine over ``store`` using its immutable runtime snapshot."""
+        config = self._runtime_config(store)
+        worker = config.worker
+        resolved_worker = self._ctx.worker_for(store.root, config=config)
+        engine = Engine(
+            worker=resolved_worker,
             search=self._ctx.providers.search,
             prompt=self._ctx.providers.prompt,
             store=store,
@@ -430,6 +535,23 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             heartbeat_on_timeout=worker.heartbeat_on_timeout,
             auto=auto,
         )
+        if isinstance(resolved_worker, RunContainerWorker):
+            async def fail_lease(reason: str) -> None:
+                await engine.fail_runtime(reason)
+                await self._ctx.release_run_worker(store.root)
+
+            resolved_worker.set_failure_callback(fail_lease)
+        return engine
+
+    def _runtime_config(self, store: RunStore) -> Config:
+        """The configuration frozen at CreateRun, with a legacy-run fallback."""
+        meta = store.read_run_meta() or {}
+        runtime = meta.get("runtime")
+        if isinstance(runtime, dict):
+            snapshot = from_dict(runtime)
+            snapshot.validate()
+            return snapshot
+        return self._ctx.config
 
     async def _await_project(self, store: RunStore, task: asyncio.Task[Any]) -> None:
         """Yield until the background engine has written its first (``PROJECT``) event.
@@ -552,6 +674,35 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
                 continue
             runs.append(run)
         return runs
+
+    def _read_store(self, run_id: str) -> RunStore:
+        """RunStore for a read RPC, honouring the pinned single-run mode."""
+        if self._ctx.pinned_run is not None:
+            store = self._pinned_store()
+            if run_id != self._run_id_of(store):
+                raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
+            return store
+        if not is_run_id(run_id):
+            raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
+        store = RunStore(self._ctx.runs_dir / run_id)
+        if not store.events_path.is_file():
+            raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
+        return store
+
+    def _folded_board(
+        self, store: RunStore, *, at_event: int | None
+    ) -> tuple[list[Event], Any, Run]:
+        """(full events, folded board, folded run summary) shared by the read RPCs."""
+        events = store.read_events()
+        folded = self._folded_events(events, at_event)
+        board = reduce(folded)
+        run = summarize_run(
+            store,
+            meta=store.read_run_meta(),
+            budget=self._ctx.config.worker.budget,
+            events=folded,
+        )
+        return events, board, run
 
     def _run_detail(self, store: RunStore, *, at_event: int | None = None) -> Any:
         events = store.read_events()

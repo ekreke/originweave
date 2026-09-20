@@ -14,6 +14,8 @@ import {
 // into proto on submit. Keeping this model out of the component keeps the render pure.
 
 export const PROVIDERS = ['local', 'pi'] as const
+export const EXECUTIONS = ['container', 'in-process'] as const
+export const CONTAINER_SCOPES = ['per-run', 'per-call'] as const
 export const HEARTBEAT_ON_TIMEOUT = ['release', 'fail'] as const
 export const TOOLS = ['search', 'read', 'grep', 'find', 'ls', 'bash', 'edit', 'write'] as const
 const DURATION_RE = /^[1-9][0-9]*(ms|s|m|h|d)$/
@@ -30,6 +32,9 @@ function durationSeconds(text: string): number | null {
 
 export interface Draft {
   provider: string
+  execution: string
+  image: string
+  containerScope: string
   maxConcurrency: string
   llmProvider: string
   llmModel: string
@@ -45,6 +50,9 @@ export interface Draft {
 
 export const EMPTY_DRAFT: Draft = {
   provider: 'pi',
+  execution: 'container',
+  image: 'originweave-runtime:latest',
+  containerScope: 'per-run',
   maxConcurrency: '1',
   llmProvider: 'openai',
   llmModel: '',
@@ -64,6 +72,9 @@ export function toDraft(settings: Settings): Draft {
   const budget = worker?.budget
   return {
     provider: worker?.provider || EMPTY_DRAFT.provider,
+    execution: worker?.execution || EMPTY_DRAFT.execution,
+    image: worker?.image || EMPTY_DRAFT.image,
+    containerScope: worker?.containerScope || EMPTY_DRAFT.containerScope,
     maxConcurrency: String(worker?.maxConcurrency ?? 1),
     llmProvider: llm?.provider || 'openai',
     llmModel: llm?.model ?? '',
@@ -82,6 +93,13 @@ export function toDraft(settings: Settings): Draft {
 // a round-trip; the server remains the authority.
 export function validateDraft(draft: Draft): string {
   if (!draft.llmModel.trim()) return 'model 不能为空'
+  if (draft.execution === 'container' && !draft.image.trim()) return 'runtime image 不能为空'
+  if (
+    draft.containerScope === 'per-run' &&
+    (draft.provider !== 'pi' || draft.execution !== 'container')
+  ) {
+    return '每次 run 复用容器仅适用于 Pi 的 container 执行'
+  }
   for (const [label, value] of [
     ['heartbeat interval', draft.heartbeatInterval],
     ['heartbeat timeout', draft.heartbeatTimeout],
@@ -116,6 +134,9 @@ export function draftToMessage(draft: Draft): Settings {
         baseUrl: draft.llmBaseUrl.trim(),
       }),
       provider: draft.provider,
+      execution: draft.execution,
+      image: draft.image.trim(),
+      containerScope: draft.containerScope,
       maxConcurrency: Number(draft.maxConcurrency),
       tools: [...draft.tools],
       heartbeatInterval: draft.heartbeatInterval.trim(),

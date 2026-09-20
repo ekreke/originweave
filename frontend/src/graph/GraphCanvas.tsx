@@ -1,16 +1,16 @@
+import { useMemo } from 'react'
 import {
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   Panel,
   ReactFlow,
-  useNodesState,
   type Edge,
   type Node,
-  type XYPosition,
 } from '@xyflow/react'
-import { useEffect, useState, type KeyboardEvent } from 'react'
 
+import { classifyEdges } from './mapping'
 import { FactNode, IntentNode } from './nodes'
 
 const nodeTypes = { fact: FactNode, intent: IntentNode }
@@ -18,96 +18,97 @@ const nodeTypes = { fact: FactNode, intent: IntentNode }
 const EMPTY_NODES: Node[] = []
 const EMPTY_EDGES: Edge[] = []
 
+// Legend rows: fact-kind colour chips + the three frozen relation line styles.
+const KIND_LEGEND = [
+  ['origin/goal', '--c-k-origin'],
+  ['fact', '--c-k-fact'],
+  ['citation', '--c-k-citation'],
+  ['source', '--c-k-source'],
+  ['boundary', '--c-k-boundary'],
+  ['compare', '--c-k-compare'],
+  ['deviation', '--c-k-deviation'],
+] as const
+
+const RELATION_LEGEND = [
+  ['main-chain', 'solid'],
+  ['dependency', 'dashed'],
+  ['decomposes', 'dotted'],
+] as const
+
 export interface GraphCanvasProps {
   nodes?: Node[]
   edges?: Edge[]
   onSelect?: (id: string | null) => void
-  onPositionChange?: (id: string, position: XYPosition) => void
-  draggable?: boolean
+  /** Console-managed selection: highlights the node and dims unrelated edges. */
+  selectedId?: string | null
 }
 
-// Presentation-only canvas: nodes/edges are supplied by the caller and positions are
-// render-side state. Without data it stays an empty canvas.
+// Presentation-only canvas: nodes/edges are supplied by the caller (mapped from
+// RunGraph) and positions come from the server / dagre fallback. Without data it
+// stays an empty canvas.
 export function GraphCanvas({
   nodes = EMPTY_NODES,
   edges = EMPTY_EDGES,
   onSelect,
-  onPositionChange,
-  draggable = true,
+  selectedId,
 }: GraphCanvasProps) {
-  const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes)
-  const [dragging, setDragging] = useState(false)
-  // Active runs poll for new facts. Do not replace the local React Flow state in the
-  // middle of a gesture, or a node being dragged would jump back under the cursor.
-  useEffect(() => {
-    if (!dragging) setFlowNodes(nodes)
-  }, [dragging, nodes, setFlowNodes])
-  // React Flow's built-in keyboard handler updates its internal selected state,
-  // but controlled nodes do not reliably surface that change to onSelectionChange.
-  // Capture activation from the focusable node wrapper so keyboard and mouse both
-  // drive the external Inspector selection.
-  const onCanvasKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return
-    const node = (event.target as HTMLElement).closest<HTMLElement>('.react-flow__node[data-id]')
-    if (node?.dataset.id) onSelect?.(node.dataset.id)
-  }
+  const styledEdges = useMemo(() => classifyEdges(edges, selectedId), [edges, selectedId])
+
+  const markedNodes = useMemo(
+    () =>
+      nodes.map((node) => ({
+        ...node,
+        selected: selectedId == null ? node.selected : node.id === selectedId,
+        // Keyboard activation (Enter/Space on the focused card) reports through
+        // the same callback as clicks.
+        data: { ...node.data, onSelect },
+      })),
+    [nodes, selectedId, onSelect],
+  )
 
   return (
-    <div className="graph-canvas" data-testid="graph-canvas" onKeyDownCapture={onCanvasKeyDown}>
+    <div className="graph-canvas" data-testid="graph-canvas">
       <ReactFlow
-        nodes={flowNodes}
-        edges={edges}
+        nodes={markedNodes}
+        edges={styledEdges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2, maxZoom: 1.1 }}
-        minZoom={0.15}
-        maxZoom={1.8}
+        minZoom={0.1}
+        maxZoom={2}
         proOptions={{ hideAttribution: true }}
-        nodesDraggable={draggable}
-        onNodesChange={onNodesChange}
-        elementsSelectable
+        nodesDraggable={false}
+        nodesConnectable={false}
         nodesFocusable
-        edgesFocusable={false}
+        elementsSelectable
         onNodeClick={(_event, node) => onSelect?.(node.id)}
-        onNodeDragStart={() => setDragging(true)}
-        onNodeDragStop={(_event, node) => {
-          onPositionChange?.(node.id, node.position)
-          setDragging(false)
-        }}
         onPaneClick={() => onSelect?.(null)}
-        aria-label="溯源 DAG"
       >
-        <Background gap={20} size={1} />
-        <Controls showInteractive={false} position="bottom-left" />
-        <MiniMap
-          ariaLabel="图谱概览"
-          className="graph-minimap"
-          maskColor="rgb(var(--c-paper) / 0.72)"
-          nodeColor="rgb(var(--c-accent))"
-          pannable
-          zoomable
-        />
-        <Panel position="top-left" className="graph-summary" role="status" aria-label="图谱摘要">
-          <div className="graph-title">PROVENANCE DAG</div>
-          <div className="graph-counts">
-            <span>{flowNodes.filter((node) => node.type === 'fact').length} facts</span>
-            <span>{flowNodes.filter((node) => node.type === 'intent').length} intents</span>
-            <span>{edges.length} links</span>
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+        <Controls showInteractive={false} position="top-right" />
+        <MiniMap pannable zoomable position="bottom-right" />
+        <Panel position="bottom-left">
+          <div className="graph-legend" aria-label="graph legend">
+            <div className="legend-col">
+              {KIND_LEGEND.map(([label, token]) => (
+                <span key={label} className="legend-row">
+                  <i className="legend-chip" style={{ background: `rgb(var(${token}))` }} />
+                  {label}
+                </span>
+              ))}
+            </div>
+            <div className="legend-col">
+              {RELATION_LEGEND.map(([label, line]) => (
+                <span key={label} className="legend-row">
+                  <i className={`legend-line legend-${line}`} />
+                  {label}
+                </span>
+              ))}
+              <span className="legend-row">
+                <i className="legend-line legend-intent" />
+                intent
+              </span>
+            </div>
           </div>
-        </Panel>
-        <Panel position="top-right" className="graph-legend" role="list" aria-label="节点图例">
-          <span className="legend-item legend-fact" role="listitem">
-            Fact
-          </span>
-          <span className="legend-item legend-intent" role="listitem">
-            Intent
-          </span>
-          <span className="legend-item legend-source" role="listitem">
-            Source
-          </span>
-          <span className="legend-item legend-deviation" role="listitem">
-            Deviation
-          </span>
         </Panel>
       </ReactFlow>
     </div>

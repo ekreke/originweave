@@ -237,6 +237,9 @@ message WorkerSettings {
   string heartbeat_timeout = 6;    // must be > heartbeat_interval
   string heartbeat_on_timeout = 7; // release | fail
   WorkerBudget budget = 8;
+  string execution = 9; // in-process | container
+  string image = 10; // runtime image when execution=container
+  string container_scope = 11; // per-call | per-run (Pi + container only)
 }
 
 message Settings {
@@ -257,6 +260,80 @@ message Event {
   // Per-type payload. Field names inside Struct MUST use the lowerCamelCase JSON
   // names from blackboard-protocol.md §5 (e.g. sourceTitle, producedFacts).
   google.protobuf.Struct payload = 6;
+}
+
+// ---------------------------------------------------------------- run graph (light)
+
+// A Fact stripped to its graph-facing fields: no `note`, no `evidence[]` (the
+// verbatim quotes stay behind `GetFactDetail`); `evidence_count` keeps the badge.
+message FactSummary {
+  string id = 1;
+  string label = 2;
+  string subtitle = 3;
+  // Same value set as Fact.kind.
+  string kind = 4;
+  string role = 5;   // main-claim | sub-claim | none
+  string status = 6; // verified | open | flagged | review
+  double confidence = 7;
+  Vec2 position = 8;
+  int32 evidence_count = 9;
+}
+
+// The graph projection polled by the console: board elements + Gate state +
+// `event_count` (the full-log length, so the Replay cursor stays stable while
+// stepping). Deliberately excludes events[], sessions[], report/deviations and
+// source_text -- those live behind GetRun / ListEvents / ListSessions.
+message RunGraph {
+  Run run = 1;
+  FactSummary origin = 2;
+  FactSummary goal = 3;
+  repeated FactSummary facts = 4;
+  repeated Intent intents = 5;
+  repeated Edge edges = 6;
+  repeated Hint hints = 7;
+  optional WaitingFor waiting_for = 8;
+  int32 event_count = 9;
+}
+
+message GetRunGraphRequest {
+  string run_id = 1;
+  // Fold only the first `at_event` events (Replay); same semantics as
+  // GetRunRequest.at_event.
+  optional int32 at_event = 2;
+}
+
+message GetRunGraphResponse {
+  RunGraph graph = 1;
+}
+
+message GetFactDetailRequest {
+  string run_id = 1;
+  string fact_id = 2; // a facts[] id, or "origin" / "goal"
+  optional int32 at_event = 3;
+}
+
+message GetFactDetailResponse {
+  Fact fact = 1;
+}
+
+message ListEventsRequest {
+  string run_id = 1;
+  // Return only the first `at_event` events (Replay slice); absent = full log.
+  optional int32 at_event = 2;
+}
+
+message ListEventsResponse {
+  repeated Event events = 1;
+}
+
+message ListSessionsRequest {
+  string run_id = 1;
+  // When set, only the sessions of this Intent; absent = every session.
+  optional string intent_id = 2;
+}
+
+message ListSessionsResponse {
+  repeated Session sessions = 1;
 }
 
 // ---------------------------------------------------------------- run detail
@@ -289,6 +366,10 @@ service OriginweaveService {
   rpc ListProjectRuns(ListProjectRunsRequest) returns (ListProjectRunsResponse);
   rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
   rpc GetRun(GetRunRequest) returns (GetRunResponse);
+  rpc GetRunGraph(GetRunGraphRequest) returns (GetRunGraphResponse);
+  rpc GetFactDetail(GetFactDetailRequest) returns (GetFactDetailResponse);
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc CreateRun(CreateRunRequest) returns (CreateRunResponse);
   rpc AddHint(AddHintRequest) returns (AddHintResponse);
   rpc SubmitHumanInput(SubmitHumanInputRequest) returns (SubmitHumanInputResponse);

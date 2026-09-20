@@ -17,6 +17,9 @@ def test_default_values() -> None:
     assert cfg.capability.model.model == "deepseek-v4.1-flash"
     assert cfg.capability.model.base_url == ""
     assert cfg.worker.provider == "pi"
+    assert cfg.worker.execution == "container"
+    assert cfg.worker.image == "originweave-runtime:latest"
+    assert cfg.worker.container_scope == "per-run"
     assert cfg.worker.max_concurrency == 1
     assert cfg.worker.tools == ()
     assert cfg.worker.budget.max_steps == 60
@@ -43,7 +46,9 @@ def test_write_refuses_overwrite_without_force(tmp_path: Path) -> None:
 def test_save_overwrites_and_roundtrips(tmp_path: Path) -> None:
     path = tmp_path / "originweave.toml"
     config.write_default(path)
-    edited = config.Config(worker=config.WorkerConfig(provider="local", max_concurrency=3))
+    edited = config.Config(
+        worker=config.WorkerConfig(provider="local", container_scope="per-call", max_concurrency=3)
+    )
     assert config.save(edited, path) == path
     assert config.load(path) == edited
 
@@ -120,6 +125,16 @@ def test_validate_rejects_unknown_model_provider() -> None:
 def test_validate_rejects_unknown_worker_provider() -> None:
     cfg = config.Config(worker=config.WorkerConfig(provider="nope"))
     with pytest.raises(config.ConfigError):
+        cfg.validate()
+
+
+def test_run_container_scope_requires_pi_container() -> None:
+    cfg = config.Config(
+        worker=config.WorkerConfig(
+            provider="local", execution="container", container_scope="per-run"
+        )
+    )
+    with pytest.raises(config.ConfigError, match="requires"):
         cfg.validate()
 
 

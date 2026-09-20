@@ -268,11 +268,14 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
       `submitHumanInput`；含修正说明输入、pending 禁用、失败行内报错；Gate C（`review`）随 M3 —
       `frontend/src/layout/Inspector.tsx`（`GateCard`）、`frontend/src/api/hooks.ts`（`useSubmitHumanInput`）、
       `frontend/src/routes/Console.tsx`
-- [x] Replay 步进：**服务端折算** `GetRun(at_event=k)`（`reduce(events[:k])`，复用唯一 reducer、
-      零漂移；`events[]` 仍全量），前端只做步进/高亮与折算 board 的展示（步进随 run 隔离；replay 期间
-      禁用写操作）— `proto/`（`GetRunRequest.at_event`）、`service.py`（`_run_detail`/`_folded_events`）、
-      `persistence.py`（`summarize_run(events=…)`）、`frontend/src/api/hooks.ts`（`useRun(runId, atEvent)`）、
-      `frontend/src/routes/Console.tsx`、`frontend/src/tabs/EventsTab.tsx`、`frontend/src/tabs/GraphTab.tsx`
+- [x] Replay 步进：**服务端折算**（`reduce(events[:k])`，复用唯一 reducer、零漂移），前端只做步进/
+      高亮与折算 board 的展示（步进随 run 隔离；replay 期间禁用写操作）。初版走 `GetRun(at_event=k)`；
+      图数据拆分后 console 折算走 **`GetRunGraph(at_event=k)`**（`event_count` 为全量游标上界），
+      事件时间线走 `ListEvents(at_event=k)` — `proto/`（`GetRunGraphRequest.at_event` 等）、
+      `service.py`（`_run_detail`/`_folded_events`/`get_run_graph`/`list_events`）、
+      `persistence.py`（`summarize_run(events=…)`）、`frontend/src/api/hooks.ts`
+      （`useRunGraph(runId, atEvent)`/`useRunEvents`）、`frontend/src/routes/Console.tsx`、
+      `frontend/src/tabs/EventsTab.tsx`、`frontend/src/tabs/GraphTab.tsx`
 
 ### 2b-4 · 新建核验表单 + 顶栏
 

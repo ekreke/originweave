@@ -172,6 +172,9 @@ def worker_settings_pb(worker: WorkerConfig, model: ModelConfig) -> Any:
         heartbeat_interval=worker.heartbeat_interval,
         heartbeat_timeout=worker.heartbeat_timeout,
         heartbeat_on_timeout=worker.heartbeat_on_timeout,
+        execution=worker.execution,
+        image=worker.image,
+        container_scope=worker.container_scope,
         budget=pb.WorkerBudget(
             max_steps=worker.budget.max_steps,
             max_wall=worker.budget.max_wall,
@@ -232,6 +235,41 @@ def run_pb(run: Run) -> Any:
         ),
         created_at=run.created_at,
         updated_at=run.updated_at,
+    )
+
+
+def fact_summary_pb(fact: Fact) -> Any:
+    """The graph-facing projection of a Fact (no note / evidence quotes)."""
+    return pb.FactSummary(
+        id=fact.id,
+        label=fact.label,
+        subtitle=fact.subtitle,
+        kind=fact.kind,
+        role=fact.role,
+        status=fact.status,
+        confidence=fact.confidence,
+        position=pb.Vec2(
+            x=float(fact.position.get("x", 0.0)),
+            y=float(fact.position.get("y", 0.0)),
+        ),
+        evidence_count=len(fact.evidence),
+    )
+
+
+def run_graph_pb(run: Run, board: Board, *, event_count: int) -> Any:
+    """The light RunGraph projection (dashboard.md §4): board elements + Gate
+    state + the full-log event count; no events/sessions/report/source_text."""
+    waiting = waiting_for_pb(board.waitingFor) if board.waitingFor is not None else None
+    return pb.RunGraph(
+        run=run_pb(run),
+        origin=fact_summary_pb(board.origin),
+        goal=fact_summary_pb(board.goal),
+        facts=[fact_summary_pb(fact) for fact in board.facts],
+        intents=[intent_pb(intent) for intent in board.intents],
+        edges=[edge_pb(edge) for edge in board.edges],
+        hints=[hint_pb(hint) for hint in board.hints],
+        event_count=event_count,
+        waiting_for=waiting,
     )
 
 

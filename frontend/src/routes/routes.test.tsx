@@ -3,15 +3,26 @@ import { Code, ConnectError } from '@connectrpc/connect'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { RunDetailSchema } from '@/gen/originweave/v1/originweave_pb'
+import { RunGraphSchema } from '@/gen/originweave/v1/originweave_pb'
 import { App } from '@/App'
-import { sampleProjects, sampleRunDetail, sampleRuns, fact, settings } from '@/test/fixtures'
+import {
+  factSummary,
+  sampleProjects,
+  sampleRunDetail,
+  sampleRunGraph,
+  sampleRuns,
+  settings,
+} from '@/test/fixtures'
 import { AppProviders } from '@/test/providers'
 
 const mocks = vi.hoisted(() => ({
   listProjects: vi.fn(),
   listProjectRuns: vi.fn(),
   getRun: vi.fn(),
+  getRunGraph: vi.fn(),
+  getFactDetail: vi.fn(),
+  listEvents: vi.fn(),
+  listSessions: vi.fn(),
   addHint: vi.fn(),
   submitHumanInput: vi.fn(),
   createRun: vi.fn(),
@@ -34,6 +45,15 @@ beforeEach(() => {
   mocks.listProjects.mockReset().mockResolvedValue({ projects: sampleProjects() })
   mocks.listProjectRuns.mockReset().mockResolvedValue({ runs: sampleRuns() })
   mocks.getRun.mockReset().mockResolvedValue({ runDetail: sampleRunDetail() })
+  mocks.getRunGraph.mockReset().mockResolvedValue({ graph: sampleRunGraph() })
+  mocks.getFactDetail.mockReset().mockImplementation(async (request: { factId: string }) => {
+    const detail = sampleRunDetail()
+    const anchors = [detail.origin, detail.goal, ...detail.facts]
+    const match = anchors.find((f) => f?.id === request.factId) ?? detail.origin
+    return { fact: match }
+  })
+  mocks.listEvents.mockReset().mockResolvedValue({ events: sampleRunDetail().events })
+  mocks.listSessions.mockReset().mockResolvedValue({ sessions: sampleRunDetail().sessions })
   mocks.addHint.mockReset().mockResolvedValue({ hint: undefined })
   mocks.submitHumanInput.mockReset().mockResolvedValue({ run: { id: 'run_009' } })
   mocks.createRun.mockReset().mockResolvedValue({ run: { id: 'run_009' } })
@@ -61,14 +81,14 @@ describe('project', () => {
     const { container } = renderAt('/projects/copilot-productivity')
     fireEvent.click(await screen.findByRole('link', { name: '已完成核验' }))
 
-    await waitFor(() => expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_008' }))
+    await waitFor(() => expect(mocks.getRunGraph).toHaveBeenCalledWith({ runId: 'run_008' }))
     // The console header now shows the clicked run.
-    expect(container.querySelector('.run-meta .run-id')?.textContent).toBe('run_008')
+    expect(container.querySelector('.crumb-run')?.textContent).toBe('run_008')
   })
 })
 
 describe('console', () => {
-  it('renders the RunDetail tabs from GetRun', async () => {
+  it('renders the graph tabs from GetRunGraph', async () => {
     renderAt('/projects/copilot-productivity/runs/run_009')
 
     expect(await screen.findByText('Copilot 提升 55% 生产率')).toBeInTheDocument()
@@ -77,7 +97,7 @@ describe('console', () => {
     expect(screen.getByText('55% 来自哪里？')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: 'EVENTS' }))
-    expect(screen.getByText('Gate A: confirm the claim')).toBeInTheDocument()
+    expect(await screen.findByText('Gate A: confirm the claim')).toBeInTheDocument()
   })
 
   it('shows the awaiting_human status and the gate question', async () => {
@@ -90,27 +110,30 @@ describe('console', () => {
     renderAt('/projects/copilot-productivity/runs/run_009')
     await screen.findByText('Copilot 提升 55% 生产率')
     expect(mocks.listProjectRuns).toHaveBeenCalledWith({ projectId: 'copilot-productivity' })
-    expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_009' })
+    expect(mocks.getRunGraph).toHaveBeenCalledWith({ runId: 'run_009' })
   })
 
   it('distinguishes a missing run from a connection error', async () => {
-    mocks.getRun.mockRejectedValue(new ConnectError('no such run', Code.NotFound))
+    mocks.getRunGraph.mockRejectedValue(new ConnectError('no such run', Code.NotFound))
     renderAt('/projects/copilot-productivity/runs/run_404')
     expect(await screen.findByText(/找不到该 run/)).toBeInTheDocument()
   })
 
-  it('shows an error panel when GetRun fails for another reason', async () => {
-    mocks.getRun.mockRejectedValue(new Error('boom'))
+  it('shows an error panel when GetRunGraph fails for another reason', async () => {
+    mocks.getRunGraph.mockRejectedValue(new Error('boom'))
     renderAt('/projects/copilot-productivity/runs/run_009')
     expect(await screen.findByText(/无法加载 run/)).toBeInTheDocument()
   })
 
-  it('drives the Inspector from a graph node selection', async () => {
+  it('drives the Inspector from a graph node selection via GetFactDetail', async () => {
     renderAt('/projects/copilot-productivity/runs/run_009')
     fireEvent.click(await screen.findByTestId('fact-node-f1'))
 
     const inspector = within(screen.getByLabelText('inspector'))
-    expect(inspector.getByText('verbatim quote from the source')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(mocks.getFactDetail).toHaveBeenCalledWith({ runId: 'run_009', factId: 'f1' }),
+    )
+    expect(await inspector.findByText('verbatim quote from the source')).toBeInTheDocument()
   })
 
   it('drives the Inspector from a FACTS row selection', async () => {
@@ -121,7 +144,7 @@ describe('console', () => {
     fireEvent.click(screen.getByText('Copilot 提升 55% 生产率'))
 
     const inspector = within(screen.getByLabelText('inspector'))
-    expect(inspector.getByText('verbatim quote from the source')).toBeInTheDocument()
+    expect(await inspector.findByText('verbatim quote from the source')).toBeInTheDocument()
     // The selected row is highlighted.
     const row = within(screen.getByRole('table')).getByText('Copilot 提升 55% 生产率').closest('tr')
     expect(row).toHaveClass('selected-row')
@@ -152,21 +175,18 @@ describe('console', () => {
   })
 
   it('shows the full goal text in the Inspector after clicking its node', async () => {
-    const base = sampleRunDetail()
+    const base = sampleRunGraph()
     const longGoal =
       '判定「55% faster」是否忠实于一手研究：核对样本量、时间窗口、适用范围与统计口径，并说明是否外推到所有开发者。'
-    mocks.getRun.mockResolvedValue({
-      runDetail: create(RunDetailSchema, {
-        run: base.run,
-        origin: base.origin,
-        goal: fact({ id: 'goal', kind: 'goal', label: longGoal }),
-        facts: base.facts,
-        intents: base.intents,
-        edges: base.edges,
-        events: base.events,
-        waitingFor: base.waitingFor,
-        hints: base.hints,
-        sessions: base.sessions,
+    mocks.getRunGraph.mockResolvedValue({
+      graph: create(RunGraphSchema, {
+        ...base,
+        goal: factSummary({
+          id: 'goal',
+          kind: 'goal',
+          label: longGoal,
+          position: base.goal?.position,
+        }),
       }),
     })
     renderAt('/projects/copilot-productivity/runs/run_009')
@@ -230,7 +250,9 @@ describe('replay stepper', () => {
     expect(label()).toBe('live')
     fireEvent.click(forward)
     // Stepping asks the server to fold the board to the first event.
-    await waitFor(() => expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_009', atEvent: 1 }))
+    await waitFor(() =>
+      expect(mocks.getRunGraph).toHaveBeenCalledWith({ runId: 'run_009', atEvent: 1 }),
+    )
     await waitFor(() => expect(label()).toBe('1/4'))
     fireEvent.click(forward)
     fireEvent.click(forward)
@@ -240,20 +262,21 @@ describe('replay stepper', () => {
     expect(label()).toBe('live')
   })
 
-  it('renders the folded board returned by GetRun(at_event)', async () => {
-    const full = sampleRunDetail()
+  it('renders the folded board returned by GetRunGraph(at_event)', async () => {
+    const full = sampleRunGraph()
     // Step 1 = only PROJECT: the anchors exist, the derived nodes do not.
-    const folded = create(RunDetailSchema, {
+    const folded = create(RunGraphSchema, {
       run: full.run,
       origin: full.origin,
       goal: full.goal,
       facts: [],
       intents: [],
       edges: [],
-      events: full.events,
+      hints: [],
+      eventCount: full.eventCount,
     })
-    mocks.getRun.mockImplementation(async (request: { atEvent?: number }) =>
-      request.atEvent === 1 ? { runDetail: folded } : { runDetail: full },
+    mocks.getRunGraph.mockImplementation(async (request: { atEvent?: number }) =>
+      request.atEvent === 1 ? { graph: folded } : { graph: full },
     )
 
     renderAt('/projects/copilot-productivity/runs/run_009')
@@ -282,12 +305,12 @@ describe('run header badges', () => {
     const { container } = renderAt('/projects/copilot-productivity/runs/run_009')
     await screen.findByText('确认核心论点？')
 
-    const budget = container.querySelector('.run-meta .budget')?.textContent ?? ''
+    const budget = container.querySelector('.head-tools .budget')?.textContent ?? ''
     expect(budget).toContain('steps 3/8')
     expect(budget).toContain('intents 2/1')
     expect(budget).toContain('tok 0')
     expect(budget).toContain('cost 0.00')
-    expect(container.querySelector('.run-meta .status-badge')?.textContent).toBe('awaiting_human')
+    expect(container.querySelector('.head-tools .status-badge')?.textContent).toBe('awaiting_human')
   })
 })
 
@@ -360,6 +383,9 @@ describe('settings', () => {
     // The whole authoritative worker block round-trips (the server rejects omissions).
     expect(request.settings.worker).toMatchObject({
       provider: 'pi',
+      execution: 'container',
+      image: 'originweave-runtime:latest',
+      containerScope: 'per-run',
       maxConcurrency: 1,
       heartbeatInterval: '15s',
       heartbeatTimeout: '5m',

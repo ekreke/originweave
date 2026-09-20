@@ -16,7 +16,8 @@ invoked as a subprocess so no extra Python dependency is needed.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+import contextlib
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -162,42 +163,50 @@ class ContainerWorker:
         handle = await self._manager.spawn(run_dir=self._run_dir, env=self._env)
         try:
             await self._wait_ready(handle)
-            payload = {
-                "task": task,
-                "template": template.text,
-                "board": board_payload(board),
-                "extra": dict(extra) if extra else {},
-            }
-            try:
-                async with httpx.AsyncClient(
-                    timeout=self._request_timeout, transport=self._transport
-                ) as http:
-                    response = await http.post(f"{handle.base_url}/run", json=payload)
-            except httpx.HTTPError as exc:
-                # Wrap transport failures so the engine sees a CapabilityError and
-                # fails the run loudly instead of leaving it stuck in `running`.
-                raise ContainerError(f"worker container request failed: {exc}") from exc
-            if response.status_code != 200:
-                raise ContainerError(
-                    f"worker container returned {response.status_code}: {response.text[:500]}"
-                )
-            try:
-                data = response.json()
-            except ValueError as exc:
-                raise ContainerError(f"worker container returned invalid JSON: {exc}") from exc
-            try:
-                steps = [WorkerStep(**step) for step in data.get("steps", [])]
-                return WorkerReply(
-                    text=str(data.get("text", "")),
-                    input=dict(data.get("input") or {}),
-                    steps=steps,
-                )
-            except (AttributeError, TypeError, ValueError) as exc:
-                raise ContainerError(
-                    f"worker container returned a malformed reply: {exc}"
-                ) from exc
+            return await self._request(handle, task, template, board, extra=extra)
         finally:
             await self._manager.remove(handle)
+
+    async def _request(
+        self,
+        handle: ContainerHandle,
+        task: TaskKind,
+        template: PromptTemplate,
+        board: Any,
+        *,
+        extra: Mapping[str, Any] | None = None,
+    ) -> WorkerReply:
+        """Send one task to an already-ready runtime container."""
+        payload = {
+            "task": task,
+            "template": template.text,
+            "board": board_payload(board),
+            "extra": dict(extra) if extra else {},
+        }
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._request_timeout, transport=self._transport
+            ) as http:
+                response = await http.post(f"{handle.base_url}/run", json=payload)
+        except httpx.HTTPError as exc:
+            raise ContainerError(f"worker container request failed: {exc}") from exc
+        if response.status_code != 200:
+            raise ContainerError(
+                f"worker container returned {response.status_code}: {response.text[:500]}"
+            )
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ContainerError(f"worker container returned invalid JSON: {exc}") from exc
+        try:
+            steps = [WorkerStep(**step) for step in data.get("steps", [])]
+            return WorkerReply(
+                text=str(data.get("text", "")),
+                input=dict(data.get("input") or {}),
+                steps=steps,
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ContainerError(f"worker container returned a malformed reply: {exc}") from exc
 
     async def _wait_ready(self, handle: ContainerHandle) -> None:
         deadline = asyncio.get_running_loop().time() + self._ready_timeout
@@ -217,6 +226,146 @@ class ContainerWorker:
                 await asyncio.sleep(self._poll_interval)
 
 
+class RunContainerWorker(ContainerWorker):
+    """A Pi Worker that shares one lazily-created container for an entire run.
+
+    The runner remains stateless: each HTTP request creates its own Pi session.  Only
+    the OS container is shared.  A failed request poisons the lease; retrying it would
+    violate the run-level failure boundary, so later calls fail immediately.
+    """
+
+    def __init__(
+        self,
+        *,
+        health_interval: float = 5.0,
+        failure_callback: Callable[[str], Awaitable[None]] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._lease_lock = asyncio.Lock()
+        self._handle: ContainerHandle | None = None
+        self._failure: str | None = None
+        self._closed = False
+        self._health_interval = health_interval
+        self._failure_callback = failure_callback
+        self._monitor_task: asyncio.Task[None] | None = None
+        self._inflight = 0
+
+    def set_failure_callback(self, callback: Callable[[str], Awaitable[None]]) -> None:
+        """Install the Engine-owned failure writer before the first task starts."""
+        self._failure_callback = callback
+
+    async def run(
+        self,
+        task: TaskKind,
+        template: PromptTemplate,
+        board: Any,
+        *,
+        extra: Mapping[str, Any] | None = None,
+    ) -> WorkerReply:
+        handle = await self._begin_call()
+        try:
+            return await self._request(handle, task, template, board, extra=extra)
+        except ContainerError as exc:
+            await self._poison(exc)
+            raise
+        finally:
+            await self._end_call()
+
+    async def close(self) -> None:
+        """Release the run lease. Safe to call repeatedly at a terminal boundary."""
+        async with self._lease_lock:
+            self._closed = True
+            handle, self._handle = self._handle, None
+            monitor, self._monitor_task = self._monitor_task, None
+        if monitor is not None and monitor is not asyncio.current_task():
+            monitor.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await monitor
+        if handle is not None:
+            await self._manager.remove(handle)
+
+    async def abort(self) -> None:
+        """Poison a lease whose caller timed out; it must never be reused."""
+        await self._poison(ContainerError("run worker container call timed out"))
+
+    async def _acquire(self) -> ContainerHandle:
+        async with self._lease_lock:
+            if self._closed:
+                raise ContainerError("run worker container has been closed")
+            if self._failure is not None:
+                raise ContainerError(f"run worker container is unavailable: {self._failure}")
+            if self._handle is None:
+                handle = await self._manager.spawn(run_dir=self._run_dir, env=self._env)
+                try:
+                    await self._wait_ready(handle)
+                except ContainerError as exc:
+                    await self._manager.remove(handle)
+                    self._failure = str(exc)
+                    raise
+                self._handle = handle
+                self._monitor_task = asyncio.create_task(self._monitor())
+            return self._handle
+
+    async def _begin_call(self) -> ContainerHandle:
+        handle = await self._acquire()
+        async with self._lease_lock:
+            if self._handle is not handle or self._failure is not None or self._closed:
+                raise ContainerError("run worker container is unavailable")
+            self._inflight += 1
+        return handle
+
+    async def _end_call(self) -> None:
+        async with self._lease_lock:
+            self._inflight = max(0, self._inflight - 1)
+
+    async def _poison(self, exc: ContainerError) -> None:
+        async with self._lease_lock:
+            if self._failure is None:
+                self._failure = str(exc)
+            handle, self._handle = self._handle, None
+        if handle is not None:
+            await self._manager.remove(handle)
+
+    async def _poison_if_idle(self, exc: ContainerError) -> bool:
+        """Poison only if no request started while the monitor probed health."""
+        async with self._lease_lock:
+            if self._inflight or self._handle is None or self._closed:
+                return False
+            if self._failure is None:
+                self._failure = str(exc)
+            handle, self._handle = self._handle, None
+        await self._manager.remove(handle)
+        return True
+
+    async def _monitor(self) -> None:
+        """Detect a shared container dying while its run waits at a human Gate."""
+        while True:
+            await asyncio.sleep(self._health_interval)
+            async with self._lease_lock:
+                handle = self._handle
+                closed = self._closed
+                inflight = self._inflight
+            if closed or handle is None:
+                return
+            if inflight:
+                continue
+            try:
+                async with httpx.AsyncClient(timeout=2.0, transport=self._transport) as http:
+                    response = await http.get(f"{handle.base_url}/health")
+                if response.status_code != 200:
+                    raise ContainerError(
+                        f"worker container health check returned {response.status_code}"
+                    )
+            except (ContainerError, httpx.HTTPError) as exc:
+                error = exc if isinstance(exc, ContainerError) else ContainerError(str(exc))
+                poisoned = await self._poison_if_idle(error)
+                if poisoned and self._failure_callback is not None:
+                    await self._failure_callback(str(error))
+                if poisoned:
+                    return
+
+
 __all__ = [
     "CONTAINER_PORT",
     "ENV_BASE_URL",
@@ -227,4 +376,5 @@ __all__ = [
     "ContainerHandle",
     "ContainerManager",
     "ContainerWorker",
+    "RunContainerWorker",
 ]

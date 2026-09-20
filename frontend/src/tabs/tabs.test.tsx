@@ -4,9 +4,10 @@ import { describe, expect, it } from 'vitest'
 import { EventsTab } from '@/tabs/EventsTab'
 import { FactsTab } from '@/tabs/FactsTab'
 import { IntentsTab } from '@/tabs/IntentsTab'
-import { event, sampleRunDetail } from '@/test/fixtures'
+import { event, sampleRunDetail, sampleRunGraph } from '@/test/fixtures'
 
 const detail = sampleRunDetail()
+const graph = sampleRunGraph()
 
 describe('presentation tabs', () => {
   it('keeps the empty states without data', () => {
@@ -23,7 +24,7 @@ describe('presentation tabs', () => {
   })
 
   it('renders the facts table with evidence counts', () => {
-    render(<FactsTab facts={detail.facts} />)
+    render(<FactsTab facts={graph.facts} />)
     expect(screen.getByText('f1')).toBeInTheDocument()
     expect(screen.getByText('main-claim')).toBeInTheDocument()
     expect(screen.getByText('0.90')).toBeInTheDocument()

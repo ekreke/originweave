@@ -1,17 +1,33 @@
 import { useState } from 'react'
 
-import type { Fact, Hint, Intent, Session, WaitingFor } from '@/gen/originweave/v1/originweave_pb'
+import type {
+  Evidence,
+  Fact,
+  FactSummary,
+  Hint,
+  Intent,
+  Run,
+  Session,
+  WaitingFor,
+} from '@/gen/originweave/v1/originweave_pb'
 
-// Presentation-only inspector: node detail, verbatim evidence, intent/hint counts, the
-// HITL gate card and the worker session view. Gate decisions are surfaced via
-// `onDecision` and hints via `onAddHint`; submitting them over RPC is the console's job.
+// Presentation-only inspector: run stat tiles, node detail (summary now, verbatim
+// evidence on demand), the HITL gate card and the worker session view. Gate
+// decisions are surfaced via `onDecision` and hints via `onAddHint`; submitting
+// them over RPC is the console's job.
 
-export type InspectorSelection = { type: 'fact'; fact: Fact } | { type: 'intent'; intent: Intent }
+export type InspectorSelection =
+  { type: 'fact'; fact: FactSummary } | { type: 'intent'; intent: Intent }
 
 export type GateDecision = 'approve' | 'edit' | 'reject'
 
 export interface InspectorProps {
+  run?: Run
   selection?: InspectorSelection | null
+  /** Full Fact (note + verbatim evidence) fetched on demand for the selection. */
+  factDetail?: Fact
+  factLoading?: boolean
+  factError?: string
   intents?: Intent[]
   hints?: Hint[]
   waitingFor?: WaitingFor
@@ -187,49 +203,112 @@ function GateCard({
   )
 }
 
-const STATUS_ORDER = ['open', 'claimed', 'done', 'dropped', 'awaiting_human'] as const
-
-function countByStatus(intents: Intent[]) {
-  const counts = new Map<string, number>()
-  for (const it of intents) counts.set(it.status, (counts.get(it.status) ?? 0) + 1)
-  return counts
+// Run-level stat tiles + meta rows (dashboard.md §2 INSPECTOR).
+function RunStats({ run, intents, hints }: { run: Run; intents?: Intent[]; hints?: Hint[] }) {
+  const open = (intents ?? []).filter((it) => it.status === 'open').length
+  const stats = [
+    [run.facts, 'FACTS'],
+    [intents?.length ?? 0, 'INTENTS'],
+    [open, 'OPEN'],
+    [hints?.length ?? 0, 'HINTS'],
+  ] as const
+  return (
+    <div className="run-stats">
+      <div className="stat-grid">
+        {stats.map(([value, label]) => (
+          <div key={label} className="stat">
+            <b className="mono">{value}</b>
+            <span>{label}</span>
+          </div>
+        ))}
+      </div>
+      <dl className="meta-rows">
+        <dt>Status</dt>
+        <dd>
+          <span className={`status-badge status-${run.status}`}>{run.status}</span>
+        </dd>
+        {run.goal ? (
+          <>
+            <dt>Goal</dt>
+            <dd>{run.goal}</dd>
+          </>
+        ) : null}
+        {run.createdAt ? (
+          <>
+            <dt>Created</dt>
+            <dd className="mono">{run.createdAt}</dd>
+          </>
+        ) : null}
+        <dt>Steps</dt>
+        <dd className="mono">
+          {run.steps?.current ?? 0}/{run.steps?.total ?? 0}
+        </dd>
+        <dt>Conf.</dt>
+        <dd className="mono">{run.confidence.toFixed(2)}</dd>
+        <dt>Budget</dt>
+        <dd className="mono">
+          tok {String(run.budget?.tokens ?? 0n)} · ${(run.budget?.cost ?? 0).toFixed(2)}
+        </dd>
+      </dl>
+    </div>
+  )
 }
 
-function FactDetail({ fact }: { fact: Fact }) {
+function EvidenceBlock({ evidence }: { evidence: Evidence[] }) {
+  return (
+    <div className="evidence">
+      <h4>证据</h4>
+      {evidence.map((e) => (
+        <figure key={e.id} className="evidence-item">
+          <blockquote>{e.quote}</blockquote>
+          <figcaption>
+            <span>{e.sourceTitle}</span>
+            {e.locator ? <span className="mono"> · {e.locator}</span> : null}
+            {e.url ? (
+              <a href={e.url} target="_blank" rel="noreferrer">
+                {e.url}
+              </a>
+            ) : null}
+          </figcaption>
+        </figure>
+      ))}
+    </div>
+  )
+}
+
+// Fact detail: the light summary immediately, the heavy part (note + verbatim
+// evidence) as soon as the on-demand RPC resolves.
+function FactSection({
+  summary,
+  detail,
+  loading,
+  error,
+}: {
+  summary: FactSummary
+  detail?: Fact
+  loading?: boolean
+  error?: string
+}) {
   return (
     <div className="detail">
-      <div className="detail-id mono">{fact.id}</div>
+      <div className="detail-id mono">{summary.id}</div>
       <dl className="detail-grid">
         <dt>kind</dt>
-        <dd>{fact.kind}</dd>
+        <dd>{summary.kind}</dd>
         <dt>role</dt>
-        <dd>{fact.role}</dd>
+        <dd>{summary.role}</dd>
         <dt>status</dt>
-        <dd>{fact.status}</dd>
+        <dd>{summary.status}</dd>
         <dt>conf.</dt>
-        <dd className="mono">{fact.confidence.toFixed(2)}</dd>
+        <dd className="mono">{summary.confidence.toFixed(2)}</dd>
+        <dt>evidence</dt>
+        <dd className="mono">{summary.evidenceCount}</dd>
       </dl>
-      <div className="detail-scroll">{fact.label}</div>
-      {fact.note ? <div className="detail-scroll">{fact.note}</div> : null}
-      {fact.evidence.length > 0 ? (
-        <div className="evidence">
-          <h4>证据</h4>
-          {fact.evidence.map((e) => (
-            <figure key={e.id} className="evidence-item">
-              <blockquote>{e.quote}</blockquote>
-              <figcaption>
-                <span>{e.sourceTitle}</span>
-                {e.locator ? <span className="mono"> · {e.locator}</span> : null}
-                {e.url ? (
-                  <a href={e.url} target="_blank" rel="noreferrer">
-                    {e.url}
-                  </a>
-                ) : null}
-              </figcaption>
-            </figure>
-          ))}
-        </div>
-      ) : null}
+      <div className="detail-scroll">{summary.label}</div>
+      {loading ? <p className="cnt">加载详情…</p> : null}
+      {error ? <p className="gate-error">{error}</p> : null}
+      {detail?.note ? <div className="detail-scroll">{detail.note}</div> : null}
+      {detail && detail.evidence.length > 0 ? <EvidenceBlock evidence={detail.evidence} /> : null}
     </div>
   )
 }
@@ -269,7 +348,11 @@ function IntentDetail({ intent }: { intent: Intent }) {
 }
 
 export function Inspector({
+  run,
   selection,
+  factDetail,
+  factLoading,
+  factError,
   intents,
   hints,
   waitingFor,
@@ -279,7 +362,6 @@ export function Inspector({
   decisionError,
   onAddHint,
 }: InspectorProps) {
-  const counts = intents && intents.length > 0 ? countByStatus(intents) : null
   const intentSessions =
     selection?.type === 'intent'
       ? (sessions ?? []).filter((session) => session.intentId === selection.intent.id)
@@ -287,11 +369,13 @@ export function Inspector({
   // Bootstrap/Reason/Validate sessions have no Intent; surface them separately.
   const taskSessions = (sessions ?? []).filter((session) => !session.intentId)
   const hasSessions = intentSessions.length > 0 || taskSessions.length > 0
-  const isEmpty = !waitingFor && !selection && !counts && !hasSessions
+  const isEmpty = !run && !waitingFor && !selection && !hasSessions
 
   return (
     <div className="col inspector" aria-label="inspector">
       <h3>INSPECTOR</h3>
+
+      {run ? <RunStats run={run} intents={intents} hints={hints} /> : null}
 
       {waitingFor ? (
         <GateCard
@@ -302,7 +386,14 @@ export function Inspector({
         />
       ) : null}
 
-      {selection?.type === 'fact' ? <FactDetail fact={selection.fact} /> : null}
+      {selection?.type === 'fact' ? (
+        <FactSection
+          summary={selection.fact}
+          detail={factDetail}
+          loading={factLoading}
+          error={factError}
+        />
+      ) : null}
       {selection?.type === 'intent' ? <IntentDetail intent={selection.intent} /> : null}
 
       {intentSessions.length > 0 ? (
@@ -320,20 +411,6 @@ export function Inspector({
           {taskSessions.map((session) => (
             <SessionView key={session.id} session={session} />
           ))}
-        </div>
-      ) : null}
-
-      {counts ? (
-        <div className="intent-counts">
-          <h4>Intents</h4>
-          <ul>
-            {STATUS_ORDER.filter((s) => counts.has(s)).map((s) => (
-              <li key={s}>
-                <span className={`status-badge status-${s}`}>{s}</span>
-                <span className="mono">{counts.get(s)}</span>
-              </li>
-            ))}
-          </ul>
         </div>
       ) : null}
 

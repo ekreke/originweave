@@ -22,9 +22,10 @@ Dashboard 是 run 的**审阅台**：查看溯源 DAG、事实/意图表、事�
 （该稿用 d3，不作为实现）。
 
 设计取向：**工程制图般的秩序感**——浅色网格纸底 + 蓝图蓝强调，把颜色预算留给语义。
-`Fact` 按 `kind` 用**形状 + 颜色双编码**（origin/goal 圆环、fact 方块、citation 三角、
-source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）；`Intent` 为**虚线问号徽标**
-（`open` 虚线 / `claimed` 脉冲 / `done` 实线 / `dropped` 划除 / `awaiting_human` 警示描边）；
+`Fact` 渲染为**紧凑矩形卡**：头部 `id`（mono）+ `kind` chip、正文 2–3 行截断预览，
+**颜色按 `kind` 编码**（左侧色条 + chip，origin/goal 墨色、fact 蓝、citation 黄、source 绿、
+boundary 灰、compare 青、deviation 红）；`Intent` 为**状态色迷你卡**（`open` 虚线灰 /
+`claimed` 蓝脉冲 / `done` 青实线 / `dropped` 划除 / `awaiting_human` 警示描边）；
 `Hint` 计数归于 INSPECTOR，`origin`/`goal` 为两端锚点。
 
 参考稿：`docs/design/swiss-blueprint.html`（非契约，仅参考）。
@@ -50,11 +51,12 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
     边按 `relation` 区分（`main-chain` 实线、`dependency` 虚线、
     `decomposes` 点线、`spawns`/`resolves` —— 见 `blackboard-protocol.md`）。
     **节点标签是短预览**（折叠空白、超长截断 + 省略号、CSS 3 行封顶），**完整文本在 INSPECTOR**
-    （点击节点后展示，长文可滚动）。前端按溯源深度作**确定性的从左到右分层布局**（origin 左侧 /
-    goal 左上；facts 按 BFS 深度向右推进、同层占独立纵向 lane；Intent 置于 facts 下方的独立网格任务 lane，
-    每列最多 8 项；横向区间重叠的来源组进入独立 lane band），
-    避免历史 proto `Fact.position` 造成重叠。节点可在当前审阅会话中拖动调整；该纯展示状态不写入 server、
-    黑板或事件日志，刷新/重放后恢复确定性布局。这符合 "`position` 渲染侧可重算" 的约定。
+    （点击节点后经 `GetFactDetail` 按需加载，长文可滚动）。前端用 **dagre 自上而下分层布局**
+    （`@dagrejs/dagre`，origin→claim→citation 逐层、Intent 就近其来源；纯函数、确定性；未带坐标的
+    节点两两不重叠，显式坐标原样保留）；历史 proto `Fact.position` 非零时**逐节点优先**、dagre 只补
+    缺口（live run 无坐标即全 dagre），符合 "`position` 渲染侧可重算" 的约定。节点可聚焦，
+    Enter/Space 与点击同效（选中送 INSPECTOR）。画布提供缩放控件 / MiniMap / **图例**（kind 色点 +
+    relation 线型）；选中节点与其入射边高亮、其余边变暗，无选中时 `main-chain` 微高亮。
   - **FACTS** — 事实表：`ID | Kind | Statement | Conf. | Evidence`。
   - **INTENTS** — Intent 表：`ID | Type | Question | Status | From`，含 `dropped`（死胡同）。
   - **RELATIONS** — 实体-关系图（`analysis` 含 relation 时）。复用 PROVENANCE DAG 的图
@@ -62,13 +64,14 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
     边标 `Relation.type`，`inferred=true` 用虚线（无来源推断）。
   - **ENTITIES** — 实体表：`ID | Name | Type | Aliases | Conf. | Mentions`。
   - **EVENTS** — 事件时间线，按 `tone` 着色（黑板协议事件）。
-- 右栏 **INSPECTOR**：选中节点详情（`role`/`from`/`spawns`/`resolved-by`）、
-  逐字引用（`quote + sourceTitle + locator`）、`Intent open/claimed/done/dropped` 计数、
-  `Hints`（含写 Hint 输入框）、预算状态。
+- 右栏 **INSPECTOR**：顶部 **run 统计块**（FACTS / INTENTS / OPEN / HINTS 四格）+
+  元信息行（Status / Goal / Created / Steps / Conf. / Budget）；选中节点详情
+  （Fact 摘要即时显示，`note` + 逐字引用 `quote + sourceTitle + locator` 经 `GetFactDetail`
+  **按需加载**）、Intent 会话、`Hints`（含写 Hint 输入框）。
 - **HITL Gate 面板**：`run.status = awaiting_human` 时，INSPECTOR 顶部高亮门控卡片
   （Gate A 论点确认 / Gate B 歧义裁决 / Gate C 最终审阅），提供 批准 / 修正 / 驳回。
 - 左侧 run 列表：卡片展示 `status`、`facts`、`deviations`、`confidence`、`steps`；
-  `awaiting_human` 时以警示色高亮。
+  `awaiting_human` 时以警示色高亮，**当前打开的 run 以强调色高亮**（`run-card-active`）。
 
 ## 3. 路由
 
@@ -102,7 +105,11 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 | `CreateProject` | `CreateProjectRequest{id, name, description?, accent?}` | `CreateProjectResponse{project}` | 建目录式项目（`projects/<id>/project.json`）；id 已存在 → `ALREADY_EXISTS`，非法/保留 id（`new`）、空 name → `INVALID_ARGUMENT`，pinned 只读 → `FAILED_PRECONDITION` |
 | `ListProjectRuns` | `ListProjectRunsRequest{project_id}` | `ListProjectRunsResponse{runs}` | 某项目下 run 列表 |
 | `ListRuns` | `ListRunsRequest{project_id?}` | `ListRunsResponse{runs}` | 全部 run（可按项目过滤） |
-| `GetRun` | `GetRunRequest{run_id, at_event?}` | `GetRunResponse{run_detail}` | run 详情；不存在 → `NOT_FOUND` |
+| `GetRun` | `GetRunRequest{run_id, at_event?}` | `GetRunResponse{run_detail}` | run **全量详情**（重试预填 / 兼容）；不存在 → `NOT_FOUND` |
+| `GetRunGraph` | `GetRunGraphRequest{run_id, at_event?}` | `GetRunGraphResponse{graph}` | **轻量图投影**（控制台轮询用，见 §4.2a）；不存在 → `NOT_FOUND`，`at_event` 越界 → `INVALID_ARGUMENT` |
+| `GetFactDetail` | `GetFactDetailRequest{run_id, fact_id, at_event?}` | `GetFactDetailResponse{fact}` | 单个 Fact 全量（`note` + 逐字 `evidence`），点节点时按需取；fact 不存在 → `NOT_FOUND`，空 `fact_id` / `at_event` 越界 → `INVALID_ARGUMENT` |
+| `ListEvents` | `ListEventsRequest{run_id, at_event?}` | `ListEventsResponse{events}` | 事件时间线（EVENTS 页签激活时取；`at_event` 给出时返回前缀切片，越界 → `INVALID_ARGUMENT`） |
+| `ListSessions` | `ListSessionsRequest{run_id, intent_id?}` | `ListSessionsResponse{sessions}` | Worker 会话快照（INSPECTOR 按需取；`intent_id` 过滤该 Intent 的会话） |
 | `CreateRun` | `CreateRunRequest` | `CreateRunResponse{run}` | 新建 run（**起一次核验的唯一入口**） |
 | `AddHint` | `AddHintRequest{run_id, text}` | `AddHintResponse{hint}` | 写一条 Hint（`author=human`，非阻塞） |
 | `SubmitHumanInput` | `SubmitHumanInputRequest` | `SubmitHumanInputResponse{run}` | 提交 Gate 决策，解除 `awaiting_human` |
@@ -126,6 +133,26 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 折算 board —— `run`/`origin`/`goal`/`facts`/`intents`/`hints`/`edges`/`deviations`/`report`/
 `waiting_for`/`decisions` 均为**第 k 步当时态**；`events[]` 仍返回**全量**（时间轴长度稳定）。
 `k` 越界 → `INVALID_ARGUMENT`。不传 `at_event` 即全量 board。
+
+### 4.2a RunGraph（轻量投影）
+
+控制台**轮询** `GetRunGraph` 而非 `GetRun`，把重负载移出热路径（逐字引用 / 会话原始 IO /
+事件 payload 只在需要时经 `GetFactDetail` / `ListSessions` / `ListEvents` 取）：
+
+```text
+RunGraph {
+  run,                                  # 复用 Run（状态 / 计数 / 预算）
+  origin, goal, facts[],                # FactSummary：id/label/subtitle/kind/role/
+                                        #   status/confidence/position/evidence_count
+                                        #   —— 无 note 与 evidence[]（引文留在 GetFactDetail）
+  intents[],                            # 复用 Intent（本身轻量）
+  edges[], hints[], waiting_for?,       # 复用；Gate 卡随轮询刷新
+  event_count,                          # 全量事件数：Replay 游标上界（不随 at_event 折算）
+}
+```
+
+`at_event` 语义与 `GetRun` 相同（`reduce(events[:k])`），但 `event_count` 恒为全量长度，
+步进时游标稳定。四个读 RPC 均支持 pinned 单 run 只读模式。
 
 ### 4.3 CreateRunRequest
 
@@ -164,6 +191,7 @@ Settings {
   worker: WorkerSettings {
     llm: LlmSettings { provider, model, baseUrl }   # 来自 [capability.model]；baseUrl 空 = OPENAI_BASE_URL
     provider,                         # local | pi
+    execution, image, containerScope, # runtime 设置；per-run 仅 Pi + container
     maxConcurrency,                   # 本项目每次 run 的 worker 上限（>0 且 <=16）
     tools: string[],                  # 启用的工具名单（扁平白名单，与 [worker].tools 一致）
     heartbeatInterval,                # 单次调用的 HEARTBEAT 间隔，如 "15s"（I4）
@@ -184,7 +212,8 @@ Session {                             # 一次 Worker 调用的历史（隔离�
 ```
 `GetSettings`/`UpdateSettings` 读写项目 `originweave.toml`：`UpdateSettings` 的 `worker` 块为**权威值**
 （逐字段写回 `[worker]`，`llm` 写回 `[capability.model]`），校验失败 → `INVALID_ARGUMENT`；
-调用后 server 重建 worker/search/prompt provider，**对后续 run 生效**（在飞的 run 保持旧 provider）。
+调用后 server 重建 worker/search/prompt provider，**仅对后续新建 run 生效**；每个 run 的 `run.json`
+冻结非敏感 runtime 设置，保证人工 Gate 恢复仍使用原有容器与镜像。
 会话快照落 run dir `sessions/<id>.json`；`RunDetail.sessions` 直接读该快照（原始输入/输出与完整步骤链，
 样例目录无 `sessions/` 则为空），与 `SESSION`/`WORKER_STEP` 事件互为索引，前端 INSPECTOR 依会话展示。
 `Search` 为只读 RPC（`[capability.search]` 单一来源，切换 provider 不需改 Pi 扩展）。

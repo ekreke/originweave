@@ -677,6 +677,13 @@ class Engine:
             return reduce(self._store.read_events())
         return await self._continue()
 
+    async def fail_runtime(self, reason: str) -> Board:
+        """Record a server-owned runtime shutdown through the Engine write path."""
+        board = reduce(self._store.read_events())
+        if board.status not in {"completed", "failed", "stopped"}:
+            self._store.append_event("FAILED", {"reason": reason})
+        return reduce(self._store.read_events())
+
     def _restore_counters(self, board: Board, events: Sequence[Event]) -> None:
         """Rebuild the deterministic id counters from an existing run (I5 resume).
 
@@ -1199,8 +1206,14 @@ class Engine:
                         timeout=self._heartbeat_timeout,
                     )
                 except TimeoutError:
-                    # The lease expired; the dispatcher decides release vs. fail.
-                    return self._timeout_outcome(intent, worker)
+                    # A shared run container is tainted by a cancelled call: it must
+                    # fail the run rather than reuse a potentially wedged runtime.
+                    timeout = self._timeout_outcome(intent, worker)
+                    abort = getattr(self._worker, "abort", None)
+                    if abort is not None:
+                        await abort()
+                        timeout.error = CapabilityError(str(timeout.error))
+                    return timeout
                 except CapabilityError as exc:
                     return _ExploreOutcome(intent_id=intent.id, worker=worker, error=exc)
             finally:
