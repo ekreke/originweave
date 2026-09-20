@@ -235,15 +235,43 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 ## M1c-2b · 前端接线与 UI（依赖 M1c-1 C3/C4 + M1c-2a）
 
 目标：前端改为读取真实数据（**不接 mock**），在 HITL Gate 处提供人工介入。
+按 **2b-1–2b-5** 分片推进，每次迭代一片。
 
-- [ ] Connect 数据层：React Query hooks（`listProjects`/`listProjectRuns`/`getRun`/`createRun`/`addHint`/`submitHumanInput`）+ 轮询刷新 `awaiting_human`
-- [ ] 页签 GRAPH / FACTS / INTENTS / EVENTS 绑定真实数据（RELATIONS/ENTITIES 归 M5）
-- [ ] INSPECTOR 接线：Hints 输入（`AddHint`）+ 选中状态与图联动
-- [ ] HITL UI：`awaiting_human` → Gate A/B/C 面板（approve/edit/reject）→ `submitHumanInput`；Replay 步进（前端按 `events[]`）
-- [ ] 新建核验表单（`CreateRun`：`source_text`/`goal`/`auto` 等）+ 顶栏操作与预算徽标
-- [x] `transport` 默认端口改指 `8765`（随 C4 完成 — `frontend/src/api/transport.ts`）
+> 已完成：`transport` 默认端口改指 `8765`（随 M1c-1 C4 — `frontend/src/api/transport.ts`）。
+
+### 2b-1 · 数据层 + 只读接线
+
+- [ ] 依赖 `@tanstack/react-query`；`QueryClientProvider`（`main.tsx`）；hooks
+      `listProjects`/`listProjectRuns`/`getRun`；`awaiting_human` 轮询刷新 — `frontend/src/api/`
+- [ ] 真实数据接入只读视图：`Overview`（项目列表）、`Project`（run 列表）、`AppShell`
+      （项目导航）、`Console`（`RunList` + 页签 GRAPH/FACTS/INTENTS/EVENTS + `Inspector` 计数）；
+      loading/error/`NOT_FOUND` 与空态保留 — `frontend/src/{routes,layout,tabs}/`
+- [ ] 测试：Vitest（mock `@/api/client`，测试专属；生产不接 mock）— `frontend/src/**/*.test.tsx`
+
+### 2b-2 · INSPECTOR 交互（选中联动 + Hints）
+
+- [ ] 选中状态与图联动：`GraphCanvas` `onSelect` / 页签选择 → `Inspector` 详情 —
+      `frontend/src/routes/Console.tsx`、`frontend/src/layout/Inspector.tsx`
+- [ ] Hints 输入（`AddHint` mutation + refetch，非阻塞）— `frontend/src/layout/Inspector.tsx`
+
+### 2b-3 · HITL UI 与 Replay
+
+- [ ] `awaiting_human` → Gate A（`confirm-claim`）/ Gate B（`arbitrate`）面板（approve/edit/reject）→
+      `submitHumanInput`；Gate C（`review`）随 M3 — `frontend/src/layout/Inspector.tsx`
+- [ ] Replay 步进：前端按 `events[]` 逐步回放 — `frontend/src/routes/Console.tsx`
+
+### 2b-4 · 新建核验表单 + 顶栏
+
+- [ ] 新建核验表单（`CreateRun`：`source_text`/`title`/`goal`/`auto`）→ 导航到 Console —
+      `frontend/src/routes/NewRun.tsx`
+- [ ] 顶栏：run 状态/预算徽标与连通性（LIVE/OFFLINE）指示 — `frontend/src/layout/AppShell.tsx`
+
+### 2b-5 · 端到端与冒烟
+
 - [ ] 端到端：起 server → 建 run → 前端看到 DAG → Gate 处人工介入（测试以 fake provider 驱动）+ 冒烟
+- [ ] CI / 文档同步（`Makefile` / `README.md`）
 
+约束：前端只调 RPC、不编排；RELATIONS/ENTITIES 页签归 M5；不改 `proto/`；fixture 只进测试文件。
 验收：从前端发起一次核验（样例），看到由抽象论点拆解出的 DAG，可在 Gate 处人工介入；
 架构红线未被突破（前端不编排、server 拥有调度）。
 
