@@ -56,6 +56,15 @@ describe('project', () => {
     expect(await screen.findByTestId('run-card-run_009')).toBeInTheDocument()
     expect(screen.getByTestId('run-card-run_009')).toHaveClass('run-card-alert')
   })
+
+  it('opens the run console from a run card', async () => {
+    const { container } = renderAt('/projects/copilot-productivity')
+    fireEvent.click(await screen.findByRole('link', { name: '已完成核验' }))
+
+    await waitFor(() => expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_008' }))
+    // The console header now shows the clicked run.
+    expect(container.querySelector('.run-meta .run-id')?.textContent).toBe('run_008')
+  })
 })
 
 describe('console', () => {

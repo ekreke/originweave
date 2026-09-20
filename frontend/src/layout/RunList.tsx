@@ -69,7 +69,13 @@ export function RunList({
             data-testid={`run-card-${run.id}`}
           >
             <div className="run-card-hd">
-              <span className="t">{run.title || run.id}</span>
+              {projectId ? (
+                <Link className="t" to={`/projects/${projectId}/runs/${run.id}`}>
+                  {run.title || run.id}
+                </Link>
+              ) : (
+                <span className="t">{run.title || run.id}</span>
+              )}
               <span className="run-card-actions">
                 {projectId && RETRYABLE.has(run.status) ? (
                   <Link

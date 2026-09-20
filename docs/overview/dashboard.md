@@ -75,8 +75,8 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 | `/` | 总览（项目与 run 汇总） |
 | `/projects/new` | 新建项目（提交后走 `CreateProject`） |
 | `/projects/:projectId` | 项目详情 + run 列表 |
-| `/projects/:projectId/runs/new` | 新建核验（提交后走 `CreateRun`） |
-| `/projects/:projectId/runs/:runId` | 审阅台（三栏：run 列表 / 图与页签 / INSPECTOR） |
+| `/projects/:projectId/runs/new` | 新建核验（提交后走 `CreateRun`；`?from=<run_id>` 可从失败的 run 预填重试） |
+| `/projects/:projectId/runs/:runId` | 审阅台（三栏：run 列表 / 图与页签 / INSPECTOR）。项目页与审阅台左栏的 **run 卡片点击即进入该 run** |
 | `/settings` | 设置（主题、Worker provider / 并发上限 / 心跳与超时 / 工具开关；M6） |
 
 ## 4. 冻结 proto 契约（Connect）

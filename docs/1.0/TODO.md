@@ -225,6 +225,12 @@
 
 ## 已完成（近期）
 
+- **前端 · run 卡片可点击进入审阅台**：`layout/RunList.tsx` 卡片标题在有 `projectId` 时渲染为
+  `<Link>` 到 `/projects/:id/runs/:runId`（此前卡片从未可点，旧 run 只能靠 URL 进入）；「重试」链接
+  保持同级兄弟（不嵌套 `<a>`）；`Console` 左栏三处 `RunList` 均已传 `projectId`，点击即**切换 run**。
+  测试：`layout.test.tsx`（标题链接/无项目退化）、`routes.test.tsx`（Project 页点卡片 → Console 加载该
+  run）。`dashboard.md §3` 同步。前端 `typecheck`/`lint`/`format:check`/`test`(108)/`build` 全绿。
+
 - **前端图渲染修复 · live 布局 + 节点标签预览**：新增 `frontend/src/graph/layout.ts`
   （`layoutRunDetail`：无 `Fact.position` 时按溯源深度分层兜底，origin 顶 / goal 其上 / facts 成行，
   确定性、不重叠；`hasPosition`）；`graph/mapping.ts` 逐节点**混合**取坐标（有坐标用原值）+

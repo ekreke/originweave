@@ -137,6 +137,23 @@ describe('RunList', () => {
     expect(screen.getByText('completed')).toBeInTheDocument()
   })
 
+  it('links each card title to the run console when given a project', () => {
+    render(
+      <MemoryRouter>
+        <RunList runs={sampleRuns()} projectId="p" />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: '已完成核验' })).toHaveAttribute(
+      'href',
+      '/projects/p/runs/run_008',
+    )
+  })
+
+  it('renders a plain title without a project', () => {
+    render(<RunList runs={sampleRuns()} />)
+    expect(screen.queryByRole('link', { name: '已完成核验' })).not.toBeInTheDocument()
+  })
+
   it('offers a retry link for a failed run when given a project', () => {
     render(
       <MemoryRouter>
@@ -151,11 +168,17 @@ describe('RunList', () => {
 
   it('does not offer retry for active runs or without a project', () => {
     const { rerender } = render(
-      <RunList runs={[run({ id: 'run_ok', status: 'completed' })]} projectId="p" />,
+      <MemoryRouter>
+        <RunList runs={[run({ id: 'run_ok', status: 'completed' })]} projectId="p" />
+      </MemoryRouter>,
     )
     expect(screen.queryByRole('link', { name: '重试' })).not.toBeInTheDocument()
 
-    rerender(<RunList runs={[run({ id: 'run_bad', status: 'stopped' })]} />)
+    rerender(
+      <MemoryRouter>
+        <RunList runs={[run({ id: 'run_bad', status: 'stopped' })]} />
+      </MemoryRouter>,
+    )
     expect(screen.queryByRole('link', { name: '重试' })).not.toBeInTheDocument()
   })
 
