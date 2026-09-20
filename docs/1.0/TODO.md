@@ -244,6 +244,20 @@
   （避免与 `/projects/new` 路由冲突）、`registry.get` 错误经 `_lookup_project` 归一、`ProjectRegistry.write`
   改**原子写**（temp+`os.replace`）。`make lint` + `make test`（396 passed, 1 skipped）+ 前端
   `typecheck/lint/format:check/test`(89)/`build` 全绿。
+- **UI 修复 · 设置页边框 + 项目核验「重试」**：
+  - **设置页**：`presentation.css` 里 4 处用了未定义的 `rgb(var(--c-line))`（`tokens.css` 只有
+    `--c-hairline`）→ 边框声明非法、`input`/`select` 全无边框；改为 `--c-hairline`，并给
+    `.settings-form select` 补 `cursor`/`min-width` 与 `:focus-visible`（accent 描边），与输入框观感一致。
+  - **重试**：`proto` 的 `RunDetail` 增 `string source_text = 15`（`server/service.py` 读
+    `input/document.md`，缺失为空；`convert.run_detail_pb` 透传），`dashboard.md §4.2` 同步；
+    `RunList` 对 `failed`/`stopped` 的 run 显示「重试」链接 →
+    `/projects/:id/runs/new?from=<runId>`（新增 `projectId` prop，`Project`/`Console` 传入）；
+    `NewRun` 用 `?from=` 经 `useRun` 预填 `title`（`重试：<原title>`）/`source_text`/`goal`
+    （`edited ?? loaded`，纯渲染、无 effect）。
+  - 测试：server `test_get_run_includes_source_text_for_retry` / `..._empty_without_input`；前端
+    `layout.test.tsx`（failed/stopped 才显示重试、需 `projectId`）、`routes.test.tsx`（`?from=` 预填）。
+    `make lint` + `make test`（395 passed, 1 skipped）+ 前端 `typecheck`/`lint`/`test`(86)/`build`/
+    `format:check` 全绿。
 
 - **M5a · 实体关系图领域/事件/reducer**：`blackboard.py` 增 `Entity`/`Relation`/`EntityGraph`（字段对齐
   `product-overview §4`）、`EntityType`/`EntityStatus`/`RelationStatus`/`RelationType` + frozenset、

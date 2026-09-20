@@ -117,7 +117,8 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 `entity_graph?`（`analysis` 含 relation 时） · `deviations[]` · `events[]` ·
 `waiting_for?`（仅 `status = awaiting_human`） · `report?`（未产出时为空） ·
 `decisions[]`（`HUMAN_INPUT` 裁决记录） · `sessions[]`（M6：一次 Worker 调用的会话，含原始
-输入/输出与步骤链，由 run dir `sessions/*.json` 读取）。
+输入/输出与步骤链，由 run dir `sessions/*.json` 读取） · `source_text`（资料 A 正文，读自
+`input/document.md`；用于「重试」预填，缺失时为空串）。
 
 **Replay（`at_event`）**：`GetRun` 带 `at_event=k`（1..N）时，服务端用 `reduce(events[:k])`
 折算 board —— `run`/`origin`/`goal`/`facts`/`intents`/`hints`/`edges`/`deviations`/`report`/

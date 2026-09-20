@@ -276,6 +276,8 @@ message RunDetail {
   optional Report report = 12;
   repeated HumanDecision decisions = 13;
   repeated Session sessions = 14;
+  // Document A text (input/document.md), for the "retry" flow; empty when absent.
+  string source_text = 15;
 }
 
 // ---------------------------------------------------------------- service

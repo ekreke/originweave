@@ -1,20 +1,42 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
-import { useCreateRun } from '@/api/hooks'
+import { useCreateRun, useRun } from '@/api/hooks'
 
 // New-run form (CreateRun). Only the "text" source is supported (url lands later) and
 // analysis is fixed to "provenance" (relation/both land in M5). Budget overrides are
 // optional; unset fields fall back to [worker].budget on the server. A run started in
 // `originweave ui --run` (read-only) is rejected by the server and surfaced inline.
+//
+// With `?from=<runId>` (the run list's "retry") the form is prefilled from that run's
+// inputs — GetRun returns its source_text plus the static title/goal.
 export function NewRun() {
   const { projectId } = useParams()
+  const [searchParams] = useSearchParams()
+  const fromId = searchParams.get('from')
   const navigate = useNavigate()
   const createRun = useCreateRun()
+  const source = useRun(fromId ?? undefined)
+  const sourceDetail = source.data
 
-  const [title, setTitle] = useState('')
-  const [sourceText, setSourceText] = useState('')
-  const [goal, setGoal] = useState('')
+  // Mirror the source run's inputs until the user edits a field; `edited ?? loaded`
+  // keeps render pure (no effect, no cascading render). The title is prefixed once,
+  // even if the source title was itself a retry.
+  const sourceTitle = sourceDetail?.run?.title ?? fromId ?? ''
+  const loaded = {
+    title: sourceTitle
+      ? sourceTitle.startsWith('重试：')
+        ? sourceTitle
+        : `重试：${sourceTitle}`
+      : '',
+    sourceText: sourceDetail?.sourceText ?? '',
+    goal: sourceDetail?.run?.goal ?? '',
+  }
+  const [edited, setEdited] = useState<{ title?: string; sourceText?: string; goal?: string }>({})
+  const title = edited.title ?? loaded.title
+  const sourceText = edited.sourceText ?? loaded.sourceText
+  const goal = edited.goal ?? loaded.goal
+
   const [auto, setAuto] = useState(false)
   const [showBudget, setShowBudget] = useState(false)
   const [maxSteps, setMaxSteps] = useState('')
@@ -65,8 +87,13 @@ export function NewRun() {
       <div className="panel">
         <div className="panel-hd">
           <h2>新建核验</h2>
-          <span className="cnt mono">CreateRun</span>
+          <span className="cnt mono">{fromId ? `重试 run ${fromId}` : 'CreateRun'}</span>
         </div>
+        {source.isError ? (
+          <p className="form-error">
+            无法加载来源 run {fromId}：{source.error.message}
+          </p>
+        ) : null}
         <form className="new-run" onSubmit={submit}>
           <label>
             <div className="cnt">标题（可选）</div>
@@ -75,7 +102,7 @@ export function NewRun() {
               aria-label="run title"
               placeholder="run 标题"
               value={title}
-              onChange={(event) => setTitle(event.target.value)}
+              onChange={(event) => setEdited({ ...edited, title: event.target.value })}
             />
           </label>
           <label>
@@ -86,7 +113,7 @@ export function NewRun() {
               rows={8}
               placeholder="粘贴资料 A 的正文…"
               value={sourceText}
-              onChange={(event) => setSourceText(event.target.value)}
+              onChange={(event) => setEdited({ ...edited, sourceText: event.target.value })}
             />
           </label>
           <label>
@@ -96,7 +123,7 @@ export function NewRun() {
               aria-label="goal"
               placeholder="判定标准"
               value={goal}
-              onChange={(event) => setGoal(event.target.value)}
+              onChange={(event) => setEdited({ ...edited, goal: event.target.value })}
             />
           </label>
           <div className="cnt">sourceType: text（url 暂不支持） · analysis: provenance</div>

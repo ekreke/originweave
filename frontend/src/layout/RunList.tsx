@@ -1,15 +1,23 @@
+import { Link } from 'react-router-dom'
+
 import type { Run } from '@/gen/originweave/v1/originweave_pb'
 
+// Terminal states whose inputs can be re-submitted as a new run.
+const RETRYABLE = new Set(['failed', 'stopped'])
+
 // Presentation-only run list; the caller supplies data (and its loading/error
-// state) from the server.
+// state) from the server. A retryable run (failed/stopped) offers a "retry" link
+// that opens the new-run form prefilled from that run's inputs.
 export function RunList({
   runs,
   loading,
   error,
+  projectId,
 }: {
   runs?: Run[]
   loading?: boolean
   error?: boolean
+  projectId?: string
 }) {
   if (loading) {
     return (
@@ -62,7 +70,17 @@ export function RunList({
           >
             <div className="run-card-hd">
               <span className="t">{run.title || run.id}</span>
-              <span className={`status-badge status-${run.status}`}>{run.status}</span>
+              <span className="run-card-actions">
+                {projectId && RETRYABLE.has(run.status) ? (
+                  <Link
+                    className="btn run-retry"
+                    to={`/projects/${projectId}/runs/new?from=${encodeURIComponent(run.id)}`}
+                  >
+                    重试
+                  </Link>
+                ) : null}
+                <span className={`status-badge status-${run.status}`}>{run.status}</span>
+              </span>
             </div>
             <div className="m mono">
               {run.id} · facts {run.facts} · dev {run.deviations} · conf {run.confidence.toFixed(2)}{' '}

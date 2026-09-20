@@ -300,6 +300,7 @@ export function sampleRunDetail(): RunDetail {
       id: 'run_009',
       title: 'Copilot 生产力核验',
       status: 'awaiting_human',
+      goal: '判定 55% 是否忠实于一手研究',
       facts: 4,
       deviations: 1,
       intents: counts(2, 1),
@@ -329,6 +330,7 @@ export function sampleRunDetail(): RunDetail {
       event({ id: '4', type: 'FAILED', message: 'worker crashed', tone: 'danger' }),
     ],
     waitingFor: { gate: 'confirm-claim', question: '确认核心论点？' },
+    sourceText: 'Document A text.',
     hints: [hint({ id: 'h1', text: '优先核对原始 benchmark' })],
     sessions: [
       session({ id: 'sess_003', intentId: 'i2', task: 'Explore', worker: 'worker-1' }),

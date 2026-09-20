@@ -590,7 +590,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px 16px;
-  border: 1px solid rgb(var(--c-line));
+  border: 1px solid rgb(var(--c-hairline));
   border-radius: 4px;
   padding: 12px;
 }
@@ -614,12 +614,24 @@
 .settings-form input,
 .settings-form select {
   padding: 5px 8px;
-  border: 1px solid rgb(var(--c-line));
+  border: 1px solid rgb(var(--c-hairline));
   border-radius: 3px;
-  background: rgb(var(--c-bg));
-  color: rgb(var(--c-fg));
+  background: rgb(var(--c-panel));
+  color: rgb(var(--c-ink));
   font-family: inherit;
   font-size: 12px;
+}
+
+.settings-form select {
+  cursor: pointer;
+  min-width: 8rem;
+}
+
+.settings-form input:focus-visible,
+.settings-form select:focus-visible {
+  outline: none;
+  border-color: rgb(var(--c-accent));
+  box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.25);
 }
 
 .settings-form input[readonly] {
@@ -637,7 +649,7 @@
   align-items: center;
   gap: 6px !important;
   font-size: 12px;
-  color: rgb(var(--c-fg));
+  color: rgb(var(--c-ink));
 }
 
 .settings-actions {
@@ -653,7 +665,7 @@
 
 .session {
   margin: 6px 0;
-  border: 1px solid rgb(var(--c-line));
+  border: 1px solid rgb(var(--c-hairline));
   border-radius: 4px;
   padding: 6px 8px;
 }
@@ -671,8 +683,8 @@
   padding: 8px;
   max-height: 220px;
   overflow: auto;
-  background: rgb(var(--c-bg));
-  border: 1px solid rgb(var(--c-line));
+  background: rgb(var(--c-panel));
+  border: 1px solid rgb(var(--c-hairline));
   border-radius: 3px;
   font-size: 11px;
   white-space: pre-wrap;
@@ -716,4 +728,16 @@
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.run-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.run-retry {
+  padding: 2px 7px;
+  font-size: 10.5px;
+  text-decoration: none;
 }

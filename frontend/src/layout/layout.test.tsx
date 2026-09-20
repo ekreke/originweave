@@ -1,9 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import { Inspector } from '@/layout/Inspector'
 import { RunList } from '@/layout/RunList'
-import { hint, sampleRunDetail, sampleRuns } from '@/test/fixtures'
+import { hint, run, sampleRunDetail, sampleRuns } from '@/test/fixtures'
 
 const detail = sampleRunDetail()
 
@@ -134,5 +135,39 @@ describe('RunList', () => {
     expect(screen.getByTestId('run-card-run_009')).toHaveClass('run-card-alert')
     expect(screen.getByTestId('run-card-run_008')).not.toHaveClass('run-card-alert')
     expect(screen.getByText('completed')).toBeInTheDocument()
+  })
+
+  it('offers a retry link for a failed run when given a project', () => {
+    render(
+      <MemoryRouter>
+        <RunList runs={[run({ id: 'run_bad', status: 'failed' })]} projectId="p" />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: '重试' })).toHaveAttribute(
+      'href',
+      '/projects/p/runs/new?from=run_bad',
+    )
+  })
+
+  it('does not offer retry for active runs or without a project', () => {
+    const { rerender } = render(
+      <RunList runs={[run({ id: 'run_ok', status: 'completed' })]} projectId="p" />,
+    )
+    expect(screen.queryByRole('link', { name: '重试' })).not.toBeInTheDocument()
+
+    rerender(<RunList runs={[run({ id: 'run_bad', status: 'stopped' })]} />)
+    expect(screen.queryByRole('link', { name: '重试' })).not.toBeInTheDocument()
+  })
+
+  it('offers retry for a stopped run too', () => {
+    render(
+      <MemoryRouter>
+        <RunList runs={[run({ id: 'run_stop', status: 'stopped' })]} projectId="p" />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: '重试' })).toHaveAttribute(
+      'href',
+      '/projects/p/runs/new?from=run_stop',
+    )
   })
 })

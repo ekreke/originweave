@@ -322,6 +322,17 @@ describe('new run', () => {
 
     expect(await screen.findByText('project not found')).toBeInTheDocument()
   })
+
+  it('prefills the form from the source run when retrying (?from=)', async () => {
+    renderAt('/projects/copilot-productivity/runs/new?from=run_009')
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('run title')).toHaveValue('重试：Copilot 生产力核验'),
+    )
+    expect(screen.getByLabelText('source text')).toHaveValue('Document A text.')
+    expect(screen.getByLabelText('goal')).toHaveValue('判定 55% 是否忠实于一手研究')
+    expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_009' })
+  })
 })
 
 describe('settings', () => {

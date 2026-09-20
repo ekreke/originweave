@@ -22,7 +22,7 @@ export function Project() {
       ) : isError ? (
         <div className="empty">无法加载该项目的 run。</div>
       ) : (
-        <RunList runs={runs} />
+        <RunList runs={runs} projectId={projectId} />
       )}
     </div>
   )

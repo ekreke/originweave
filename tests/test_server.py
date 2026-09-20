@@ -347,6 +347,30 @@ async def test_pinned_run_supports_at_event(tmp_path: Path) -> None:
     assert full.json()["runDetail"]["run"]["status"] == "completed"
 
 
+async def test_get_run_includes_source_text_for_retry(tmp_path: Path) -> None:
+    # A bad Bootstrap reply fails the run; failed/stopped runs expose source_text so
+    # the UI can retry them.
+    ctx = _ctx(tmp_path, "not json")
+    async with _client_for(ctx) as client:
+        run = await _create_run(client, auto=True)
+        await ctx.scheduler.wait(str(run["id"]))
+        detail = (await _post(client, "GetRun", {"runId": str(run["id"])})).json()["runDetail"]
+        await ctx.scheduler.drain()
+
+    assert detail["run"]["status"] == "failed"
+    # CreateRun writes input/document.md; GetRun exposes it verbatim for the retry flow.
+    assert detail["sourceText"] == "Copilot cut task time by 55%."
+
+
+async def test_get_run_source_text_is_empty_without_input(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+
+    async with _client(tmp_path) as client:
+        detail = (await _post(client, "GetRun", {"runId": "run_001"})).json()["runDetail"]
+
+    assert detail.get("sourceText", "") == ""
+
+
 async def test_projects_list_and_get(tmp_path: Path) -> None:
     ProjectRegistry(tmp_path / "projects", tmp_path / "runs").write(Project(id="p", name="P"))
 

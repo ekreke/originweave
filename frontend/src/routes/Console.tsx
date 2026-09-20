@@ -83,7 +83,12 @@ export function Console() {
   if (notFound) {
     return (
       <div className="console">
-        <RunList runs={runs.data} loading={runs.isLoading} error={runs.isError} />
+        <RunList
+          runs={runs.data}
+          loading={runs.isLoading}
+          error={runs.isError}
+          projectId={projectId}
+        />
         <NotFound />
         <Inspector />
       </div>
@@ -93,7 +98,12 @@ export function Console() {
   if (run.isError) {
     return (
       <div className="console">
-        <RunList runs={runs.data} loading={runs.isLoading} error={runs.isError} />
+        <RunList
+          runs={runs.data}
+          loading={runs.isLoading}
+          error={runs.isError}
+          projectId={projectId}
+        />
         <section className="col" aria-label="run console">
           <div className="empty">无法加载 run：{run.error.message}</div>
         </section>
@@ -128,7 +138,12 @@ export function Console() {
 
   return (
     <div className="console">
-      <RunList runs={runs.data} loading={runs.isLoading} error={runs.isError} />
+      <RunList
+        runs={runs.data}
+        loading={runs.isLoading}
+        error={runs.isError}
+        projectId={projectId}
+      />
       <section className="col" aria-label="run console">
         <div className="tabs" role="tablist">
           {TABS.map((name) => (

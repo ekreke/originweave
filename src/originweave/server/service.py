@@ -49,6 +49,8 @@ _RESERVED_PROJECT_IDS: frozenset[str] = frozenset({"new"})
 _MAX_SEARCH_RESULTS = 50
 # Synthetic project for a pinned run without run.json (e.g. the committed sample).
 _SAMPLE_PROJECT_ID = "sample"
+# Terminal states whose run can be re-submitted (the UI's "retry").
+_RETRYABLE_STATUSES = frozenset({"failed", "stopped"})
 
 
 def _first_line(text: str) -> str:
@@ -562,8 +564,28 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             events=folded,
         )
         # The board is folded to `at_event` (Replay), but the timeline keeps the full
-        # log so its length stays stable while stepping.
-        return convert.run_detail_pb(run, board, events, sessions=store.read_sessions())
+        # log so its length stays stable while stepping. `source_text` only feeds the
+        # retry flow, which is offered for terminal failures, so we skip reading the
+        # document on every (polled) GetRun of an active run.
+        source_text = (
+            self._read_source_text(store) if board.status in _RETRYABLE_STATUSES else ""
+        )
+        return convert.run_detail_pb(
+            run,
+            board,
+            events,
+            sessions=store.read_sessions(),
+            source_text=source_text,
+        )
+
+    @staticmethod
+    def _read_source_text(store: RunStore) -> str:
+        """Document A's text (``input/document.md``) for the retry flow; '' if absent."""
+        path = store.input_dir / "document.md"
+        try:
+            return path.read_text(encoding="utf-8") if path.is_file() else ""
+        except (OSError, UnicodeDecodeError):
+            return ""
 
     @staticmethod
     def _folded_events(events: list[Event], at_event: int | None) -> list[Event]:

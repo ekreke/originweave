@@ -241,6 +241,7 @@ def run_detail_pb(
     events: Sequence[Event],
     *,
     sessions: Sequence[Mapping[str, Any]] = (),
+    source_text: str = "",
 ) -> Any:
     waiting = waiting_for_pb(board.waitingFor) if board.waitingFor is not None else None
     report = derive_report(board, run_id=run.id)
@@ -256,6 +257,7 @@ def run_detail_pb(
         events=[event_pb(event) for event in events],
         decisions=[decision_pb(decision) for decision in board.decisions],
         sessions=[session_pb(session) for session in sessions],
+        source_text=source_text,
         # proto3 optional *message* fields reject direct assignment; constructor kwargs
         # work (and CopyFrom below). Same applies to entity_graph when M5 lands.
         waiting_for=waiting,
