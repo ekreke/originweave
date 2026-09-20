@@ -32,6 +32,8 @@ from .context import ServerContext
 
 # Longest auto-derived title taken from document A's first non-empty line.
 _TITLE_LIMIT = 120
+# Synthetic project for a pinned run without run.json (e.g. the committed sample).
+_SAMPLE_PROJECT_ID = "sample"
 
 
 def _first_line(text: str) -> str:
@@ -62,6 +64,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         self._ctx = context
 
     async def list_projects(self, request: Any, ctx: Any) -> Any:
+        if self._ctx.pinned_run is not None:
+            return pb.ListProjectsResponse(projects=[convert.project_pb(self._pinned_project())])
         try:
             projects = self._ctx.registry.list()
         except BlackboardError as exc:
@@ -70,17 +74,31 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
 
     async def get_project(self, request: Any, ctx: Any) -> Any:
         project_id = request.project_id
+        if self._ctx.pinned_run is not None:
+            pinned = self._pinned_project()
+            if project_id != pinned.id:
+                raise ConnectError(Code.NOT_FOUND, f"project {project_id!r} not found")
+            return pb.GetProjectResponse(project=convert.project_pb(pinned))
         project = self._lookup_project(project_id)
         if project is None:
             raise ConnectError(Code.NOT_FOUND, f"project {project_id!r} not found")
         return pb.GetProjectResponse(project=convert.project_pb(project))
 
     async def list_project_runs(self, request: Any, ctx: Any) -> Any:
+        if self._ctx.pinned_run is not None:
+            run = self._pinned_run()
+            runs = [run] if request.project_id == run.project_id else []
+            return pb.ListProjectRunsResponse(runs=[convert.run_pb(r) for r in runs])
         project_id = self._require_project_id(request.project_id)
         runs = self._collect_runs(project_id=project_id)
         return pb.ListProjectRunsResponse(runs=[convert.run_pb(run) for run in runs])
 
     async def list_runs(self, request: Any, ctx: Any) -> Any:
+        if self._ctx.pinned_run is not None:
+            run = self._pinned_run()
+            project_id = request.project_id if request.HasField("project_id") else None
+            runs = [run] if project_id in (None, run.project_id) else []
+            return pb.ListRunsResponse(runs=[convert.run_pb(r) for r in runs])
         project_id = request.project_id if request.HasField("project_id") else None
         if project_id is not None:
             project_id = self._require_project_id(project_id)
@@ -88,6 +106,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         return pb.ListRunsResponse(runs=[convert.run_pb(run) for run in runs])
 
     async def get_run(self, request: Any, ctx: Any) -> Any:
+        if self._ctx.pinned_run is not None:
+            return self._get_pinned_run(request)
         run_id = request.run_id
         if not is_run_id(run_id):
             raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
@@ -108,6 +128,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         event lands so any following ``GetRun`` can already read the board. ``auto``
         defaults to ``[hitl].auto`` when the request does not set it.
         """
+        self._reject_if_pinned()
         project_id = request.project_id
         if self._lookup_project(project_id) is None:
             raise ConnectError(Code.NOT_FOUND, f"project {project_id!r} not found")
@@ -196,6 +217,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
 
     async def add_hint(self, request: Any, ctx: Any) -> Any:
         """Append a human Hint (non-blocking, C3b)."""
+        self._reject_if_pinned()
         store = self._require_run_store(request.run_id)
         next_index = sum(1 for event in store.iter_events() if event.type == "HINT") + 1
         hint = Hint(id=f"h{next_index}", text=request.text, author="human", createdAt=now_iso())
@@ -204,6 +226,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
 
     async def submit_human_input(self, request: Any, ctx: Any) -> Any:
         """Resolve a paused gate and continue the run (C3b; fresh-engine resume)."""
+        self._reject_if_pinned()
         store = self._require_run_store(request.run_id)
         try:
             board = reduce(store.read_events())
@@ -280,6 +303,65 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         if not RunStore(self._ctx.runs_dir / run_id).events_path.is_file():
             raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
         return self._ctx.scheduler.store_for(run_id)
+
+    def _reject_if_pinned(self) -> None:
+        """Write RPCs are disabled in the single-run (``ui --run``) view (C4)."""
+        if self._ctx.pinned_run is not None:
+            raise ConnectError(Code.FAILED_PRECONDITION, "the single-run view is read-only")
+
+    def _pinned_store(self) -> RunStore:
+        path = self._ctx.pinned_run
+        assert path is not None  # only called after a pinned_run check
+        store = RunStore(path)
+        if not store.events_path.is_file():
+            raise ConnectError(Code.NOT_FOUND, f"run {path.name!r} not found")
+        return store
+
+    @staticmethod
+    def _run_id_of(store: RunStore) -> str:
+        """A pinned run's id: its ``run.json`` id, else the directory name."""
+        try:
+            meta = store.read_run_meta()
+        except BlackboardError:
+            meta = None
+        run_id = meta.get("id") if isinstance(meta, dict) else None
+        return run_id if isinstance(run_id, str) and run_id else store.root.name
+
+    def _pinned_run(self) -> Run:
+        store = self._pinned_store()
+        try:
+            run = summarize_run(
+                store, meta=store.read_run_meta(), budget=self._ctx.config.worker.budget
+            )
+        except (BlackboardError, ReduceError, OSError) as exc:
+            raise ConnectError(
+                Code.INTERNAL, f"run {store.root.name!r} is unreadable: {exc}"
+            ) from exc
+        # A run without run.json (the committed sample) has no project; put it in a
+        # synthetic one so lists and the run detail agree on the id.
+        if not run.project_id:
+            run.project_id = _SAMPLE_PROJECT_ID
+        return run
+
+    def _pinned_project(self) -> Project:
+        run = self._pinned_run()
+        return Project(
+            id=run.project_id,
+            name=run.title or "Sample",
+            run_count=1,
+            updated_at=run.updated_at,
+        )
+
+    def _get_pinned_run(self, request: Any) -> Any:
+        store = self._pinned_store()
+        if request.run_id != self._run_id_of(store):
+            raise ConnectError(Code.NOT_FOUND, f"run {request.run_id!r} not found")
+        try:
+            return pb.GetRunResponse(run_detail=self._run_detail(store))
+        except (BlackboardError, ReduceError) as exc:
+            raise ConnectError(
+                Code.INTERNAL, f"run {request.run_id!r} has a malformed event log: {exc}"
+            ) from exc
 
     def _lookup_project(self, project_id: str) -> Project | None:
         try:

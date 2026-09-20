@@ -609,3 +609,160 @@ async def test_get_run_malformed_deviation_reports_internal(tmp_path: Path) -> N
 
     assert response.status_code == 500
     assert response.json()["code"] == "internal"
+
+
+# --------------------------------------------------------------- C4: ui / static
+
+
+def _write_ui_run(root: Path, name: str = "demo") -> Path:
+    """A run directory with an event log but no run.json (like the sample)."""
+    store = RunStore(root / name)
+    store.init_layout()
+    store.append_event(
+        "PROJECT", {"origin": _ORIGIN, "goal": _GOAL}, at="2026-01-01T00:00:00+00:00"
+    )
+    store.append_event("COMPLETE", {"verdict": "ok"}, at="2026-01-01T00:00:01+00:00")
+    return store.root
+
+
+def _ui_client(tmp_path: Path, *, static_dir: Path | None, run_dir: Path | None = None):
+    app = create_app(config=Config(), root=tmp_path, static_dir=static_dir, run_dir=run_dir)
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+async def test_static_frontend_is_served_with_spa_fallback(tmp_path: Path) -> None:
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
+
+    async with _ui_client(tmp_path, static_dir=dist) as client:
+        index = await client.get("/")
+        deep_link = await client.get("/projects/p/runs/run_001")
+        missing_asset = await client.get("/assets/missing.js")
+        api = await _post(client, "ListProjects", {})
+
+    assert index.status_code == 200
+    assert "id=root" in index.text
+    assert deep_link.status_code == 200
+    assert "id=root" in deep_link.text
+    assert missing_asset.status_code == 404  # a missing asset stays a 404, not the shell
+    assert api.status_code == 200  # the API still routes under the static mount
+
+
+async def test_static_does_not_leak_files(tmp_path: Path) -> None:
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("top-secret", encoding="utf-8")
+
+    async with _ui_client(tmp_path, static_dir=dist) as client:
+        escaped = await client.get("/../secret.txt")
+        encoded = await client.get("/%2e%2e/secret.txt")
+
+    assert "top-secret" not in escaped.text
+    assert "top-secret" not in encoded.text
+
+
+async def test_without_static_dir_root_is_not_index(tmp_path: Path) -> None:
+    async with _ui_client(tmp_path, static_dir=None) as client:
+        response = await client.get("/")
+    assert response.status_code == 404
+
+
+async def test_pinned_run_is_read_only(tmp_path: Path) -> None:
+    run_dir = _write_ui_run(tmp_path, "demo")
+
+    async with _ui_client(tmp_path, static_dir=None, run_dir=run_dir) as client:
+        runs = await _post(client, "ListRuns", {})
+        detail = await _post(client, "GetRun", {"runId": "demo"})
+        missing = await _post(client, "GetRun", {"runId": "run_001"})
+        projects = await _post(client, "ListProjects", {})
+        project = await _post(client, "GetProject", {"projectId": "sample"})
+        project_runs = await _post(client, "ListProjectRuns", {"projectId": "sample"})
+        other_runs = await _post(client, "ListProjectRuns", {"projectId": "other"})
+        create = await _post(
+            client,
+            "CreateRun",
+            {"projectId": "sample", "sourceType": "text", "sourceText": "x", "goal": "g"},
+        )
+        hint = await _post(client, "AddHint", {"runId": "demo", "text": "hi"})
+        human = await _post(
+            client,
+            "SubmitHumanInput",
+            {"runId": "demo", "gate": "confirm-claim", "decision": "approve"},
+        )
+
+    assert [run["id"] for run in runs.json()["runs"]] == ["demo"]
+    assert detail.status_code == 200
+    assert detail.json()["runDetail"]["run"]["status"] == "completed"
+    assert missing.status_code == 404
+    assert [project["id"] for project in projects.json()["projects"]] == ["sample"]
+    assert project.json()["project"]["id"] == "sample"
+    assert [run["id"] for run in project_runs.json()["runs"]] == ["demo"]
+    assert other_runs.json().get("runs", []) == []
+    assert create.status_code == 400
+    assert create.json()["code"] == "failed_precondition"
+    assert hint.status_code == 400
+    assert human.status_code == 400
+
+
+async def test_pinned_run_uses_run_json_id(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "dir1")
+    store.init_layout()
+    store.write_run_meta({"id": "run_007", "project_id": "p"})
+    store.append_event(
+        "PROJECT", {"origin": _ORIGIN, "goal": _GOAL}, at="2026-01-01T00:00:00+00:00"
+    )
+
+    async with _ui_client(tmp_path, static_dir=None, run_dir=store.root) as client:
+        by_id = await _post(client, "GetRun", {"runId": "run_007"})
+        by_dir = await _post(client, "GetRun", {"runId": "dir1"})
+
+    assert by_id.status_code == 200
+    assert by_id.json()["runDetail"]["run"]["id"] == "run_007"
+    assert by_dir.status_code == 404
+
+
+async def test_lifespan_drains_background_runs(tmp_path: Path) -> None:
+    providers = Providers(
+        worker=LocalWorker(model=_SlowModel(0.05, _bootstrap("A claim"))),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+    )
+    ProjectRegistry(tmp_path / "projects", tmp_path / "runs").write(Project(id="p", name="P"))
+    app = create_app(config=Config(), providers=providers, root=tmp_path)
+
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        await _create_run(client, auto=True)  # still running at exit
+
+    # The lifespan shutdown awaited the background task to completion.
+    store = RunStore(tmp_path / "runs" / "run_001")
+    types = [event.type for event in store.read_events()]
+    assert "CONCLUDE" in types  # Bootstrap finished, not just PROJECT
+
+
+def test_ui_command_runs_uvicorn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from originweave.cli import main
+
+    run_dir = _write_ui_run(tmp_path, "demo")
+    monkeypatch.chdir(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_run(app: object, *, host: str, port: int, log_level: str) -> None:
+        captured.update(app=app, host=host, port=port, log_level=log_level)
+
+    monkeypatch.setattr("uvicorn.run", fake_run)
+
+    assert main(["ui", "--run", str(run_dir), "--port", "0"]) == 0
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 0
+    assert captured["app"] is not None
+
+
+def test_ui_command_rejects_missing_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from originweave.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    assert main(["ui", "--run", str(tmp_path / "nope")]) == 1

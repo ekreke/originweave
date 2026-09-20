@@ -10,6 +10,11 @@ Dashboard 是 run 的**审阅台**：查看溯源 DAG、事实/意图表、事�
 与 report，并在 HITL Gate 处提供人工介入。发起任务（新建核验）走 server API，
 但**执行编排由 server 拥有**，前端不触碰容器生命周期（见 `agent-design.md` 第 7 节）。
 
+`originweave ui`（M1c-1 C4）在同一端口（默认 **8765**）托管 Connect API 与 `frontend/dist`
+（存在时，含 SPA `index.html` 回退）；前端默认 `transport` base URL 即 `http://localhost:8765`。
+`--run <dir>` 进单 run 只读模式（写 RPC 被拒）；该模式下无 `run.json` 的 run（如样例）归入合成
+项目 `sample`，run id 取其 `run.json.id` 或目录名。
+
 ## 2. 视觉与布局
 
 选定风格：**Swiss / Blueprint（瑞士蓝图）**，布局为三栏控制台。图渲染用 **React Flow**

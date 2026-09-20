@@ -1,9 +1,9 @@
 """Command line entry point.
 
-``init`` / ``capabilities list`` (M0b) and ``replay`` (M0c) are wired.
-``ui`` / ``mcp`` and ``capabilities install-obscura`` remain placeholders until
-later milestones. A run is started through the server / proto API, not the CLI
-(see ``docs/overview/product-overview.md`` section 5).
+``init`` / ``capabilities list`` (M0b), ``replay`` (M0c) and ``ui`` (M1c-1 C4) are
+wired. ``mcp`` and ``capabilities install-obscura`` remain placeholders until later
+milestones. A run is started through the server / proto API, not the CLI (see
+``docs/overview/product-overview.md`` section 5).
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=_version())
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
 
-    ui = sub.add_parser("ui", help="serve the read-only run view")
+    ui = sub.add_parser("ui", help="serve the run view (read-only with --run)")
     ui.add_argument("--run", default=None)
     ui.add_argument("--port", type=int, default=8765)
 
@@ -130,6 +130,38 @@ def _cmd_capabilities(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ui(args: argparse.Namespace) -> int:
+    """Serve the read-only run view (Connect API + built frontend; M1c-1 C4)."""
+    try:
+        cfg = config.load()
+    except config.ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    # Imported lazily: the server pulls in the generated ``originweave.v1`` package,
+    # which does not exist until ``make proto`` has run.
+    from .server.app import create_app
+
+    root = Path.cwd()
+    run_dir = Path(args.run) if args.run else None
+    if run_dir is not None and not (run_dir / "events.jsonl").is_file():
+        print(f"no event log at {run_dir / 'events.jsonl'}", file=sys.stderr)
+        return 1
+    static_dir = root / "frontend" / "dist"
+    if not static_dir.is_dir():
+        print(f"note: {static_dir} not found; serving the API only", file=sys.stderr)
+    app = create_app(config=cfg, root=root, run_dir=run_dir, static_dir=static_dir)
+
+    host = "127.0.0.1"
+    suffix = f" (single run {run_dir})" if run_dir is not None else ""
+    print(f"originweave ui on http://{host}:{args.port}{suffix}")
+
+    import uvicorn
+
+    uvicorn.run(app, host=host, port=args.port, log_level="info")
+    return 0
+
+
 def _cmd_replay(args: argparse.Namespace) -> int:
     store = RunStore(Path(args.run_dir))
     if not store.events_path.is_file():
@@ -156,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_capabilities(args)
     if args.command == "replay":
         return _cmd_replay(args)
+    if args.command == "ui":
+        return _cmd_ui(args)
     print(_NOT_IMPLEMENTED.format(command=args.command), file=sys.stderr)
     return 0
 

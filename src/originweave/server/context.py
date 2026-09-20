@@ -118,6 +118,8 @@ class ServerContext:
     runs_dir: Path
     projects_dir: Path
     scheduler: RunScheduler
+    # ``originweave ui --run <dir>``: serve only this one run, read-only (C4).
+    pinned_run: Path | None = None
 
     @classmethod
     def build(
@@ -126,21 +128,28 @@ class ServerContext:
         config: Config | None = None,
         providers: Providers | None = None,
         root: Path | None = None,
+        run_dir: Path | None = None,
     ) -> ServerContext:
         """Resolve config/providers and the run + project directories.
 
         ``root`` is the base for the relative ``[run].dir`` / ``[project].dir``
-        paths (defaults to the current working directory).
+        paths (defaults to the current working directory). ``run_dir`` pins the
+        server to a single run directory (relative paths resolve against ``root``).
         """
         cfg = config if config is not None else config_module.load()
         base = Path.cwd() if root is None else Path(root)
         runs_dir = base / cfg.run.dir
+        pinned = None
+        if run_dir is not None:
+            candidate = Path(run_dir)
+            pinned = (candidate if candidate.is_absolute() else base / candidate).resolve()
         return cls(
             config=cfg,
             providers=providers if providers is not None else build_providers(cfg),
             runs_dir=runs_dir,
             projects_dir=base / cfg.project.dir,
             scheduler=RunScheduler(runs_dir=runs_dir),
+            pinned_run=pinned,
         )
 
     @property

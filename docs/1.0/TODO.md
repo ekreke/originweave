@@ -46,8 +46,12 @@
     asyncio 任务跑 `Engine.run`，返回前等 `PROJECT` 落盘 → 返回事件派生的 `running` `Run`）、
     `AddHint`→`HINT`、`SubmitHumanInput`→新建 `Engine` 调 `resume`。`server/context.py` 增
     `RunScheduler`（每 run 单例 `RunStore` + 后台任务持有/`wait`/`drain`）。
-  - **下一步 C4**：`originweave ui`（uvicorn + `frontend/dist` + `--run` 只读；端口 8765）+
-    Makefile/CI/README。
+  - **C4 `originweave ui`（已完成）**：`create_app` 把 Connect 挂到 proto path、SPA 静态挂 `/`
+    （`index.html` 回退），lifespan 收尾 `scheduler.drain()`；`cli._cmd_ui` 起 uvicorn（`frontend/dist`
+    存在即托管），`--run <dir>` 单 run 只读（`ServerContext.pinned_run`）。前端 `transport` 默认
+    端口改 8765。Makefile/README/docs 同步。
+  - **下一步 M1c-2b**：前端接线（React Query 数据层、页签/Inspector 真实数据、HITL Gate UI、
+    新建核验表单、端到端）。**M6 P3**（Settings/Search/Session proto + RPC）亦依赖 M1c-1，可并行规划。
   - 已定：proto 加 `source_text`（`url` 暂不支持）；目录式 projects；`CreateRun` 后台调度；统一端口 `8765`。
 - 随后：M1c-2（前端接线与 UI）。
 
@@ -195,6 +199,15 @@
   `blackboard-protocol §4.2`（reply `key`/`edges`/`gate`）、`§2.4`（语义边来源）、`§7`（Gate B）；
   `agent-design §3.5`。测试 `tests/test_engine_m2.py`、`tests/test_report.py`、`tests/test_server.py`；
   顺带修 live 的语义边漂移（Bootstrap `origin→claim` main-chain、Explore cite/link/evidence）。
+- **M1c-1 C4 · `originweave ui` + 静态托管**：`server/app.py` 的 `create_app` 增
+  `static_dir`/`run_dir`——Connect app 改挂 proto path（`OriginweaveServiceASGIApplication.path`），
+  `SPAStaticFiles`（`index.html` 回退）挂 `/`，`lifespan` shutdown 时 `await scheduler.drain()`；
+  `ServerContext` 增 `pinned_run`（`build(run_dir=...)`）；`service.py` 单 run 只读模式
+  （`get_run`/`list_*` 只服务 pinned run，写 RPC → `FAILED_PRECONDITION`）。`cli._cmd_ui` 起
+  `uvicorn`（`frontend/dist` 存在即托管，`--run` 进只读模式）。前端 `transport.ts` 默认端口
+  8787 → 8765。文档同步 `README.md` / `product-overview.md §5` / `agent-design.md §6` /
+  `dashboard.md §1` / `AGENTS.md`。测试 `tests/test_server.py` 增静态/SPA、pinned 只读、lifespan
+  收尾、`ui` CLI 冒烟。`make lint` + `make test` 全绿。
 
 - **M1c-1 C3b · CreateRun + 后台调度 + AddHint/SubmitHumanInput**：`server/service.py` 实现
   `create_run`（project 必须已存在；`source_type=text` + 非空 `source_text` + `goal`，否则

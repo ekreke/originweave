@@ -44,13 +44,18 @@
   配置 `[project].dir`。**C3a** 只读接线已落地——`server/context.py`（`ServerContext`/`Providers`，
   `create_app(config/providers/root)` 注入）、`server/convert.py`（→ `originweave.v1.*`），
   `service.py` 实现 `ListProjects`/`GetProject`/`ListProjectRuns`/`ListRuns`/`GetRun`。
-  **C3b–C4（CreateRun 接线 / `ui`）待做**；起 run 仍走
-  server/proto（`CreateRun` 经 `source_text` 收资料 A）。**`make proto` 是 `make lint`/`test` 的前置**
+  **C3b** 写 RPC 已落地——`CreateRun`（`source_text` → `input/document.md` + `run.json`，后台
+  asyncio 任务跑 `Engine.run`，等 `PROJECT` 落盘后返回）、`AddHint`、`SubmitHumanInput`；`server/context.py`
+  增 `RunScheduler`（每 run 单例 `RunStore` + 任务持有/`drain`）。**C4** `originweave ui` 已落地——
+  `create_app(..., static_dir, run_dir)` 把 Connect 挂在 proto path、SPA 静态挂 `/`、lifespan 收尾
+  `scheduler.drain()`；`--run <dir>` 单 run 只读（写 RPC 拒）。起 run 仍走 server/proto
+  （`CreateRun` 经 `source_text` 收资料 A）。**`make proto` 是 `make lint`/`test` 的前置**
   （无 gen 时 server 测试 `importorskip` 跳过）。
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
   `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
-- **stub（打印 “not implemented yet”、返回 0）**：`ui` / `mcp` / `capabilities install-obscura`。
-  `make demo` / `run` / `ui` 依赖这些实现（`demo` 归 M4，`ui` 归 M1c-1）。
+- **stub（打印 “not implemented yet”、返回 0）**：`mcp` / `capabilities install-obscura`。
+  `ui` 已接线（M1c-1 C4）：Connect API + `frontend/dist`（存在时，SPA 回退）统一端口 8765，
+  `--run <dir>` 单 run 只读；`make run` / `make ui` 可用。`demo` 归 M4。
   `replay` 已接线，`examples/copilot_productivity/` 已含 `events.jsonl`（M0d），`make replay`
   可不触网复现 Board。
 - 样例 fixture 由 `scripts/build_sample_fixtures.py` 确定性生成（`--check` 校验）；
