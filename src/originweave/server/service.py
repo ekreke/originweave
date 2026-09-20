@@ -20,7 +20,17 @@ from originweave.v1 import originweave_pb2 as pb
 from originweave.v1.originweave_connect import OriginweaveService
 
 from ..blackboard import BlackboardError, Fact, Hint
-from ..config import parse_duration
+from ..capabilities import CapabilityError
+from ..config import (
+    BudgetConfig,
+    CapabilityConfig,
+    Config,
+    ConfigError,
+    ModelConfig,
+    WorkerConfig,
+    parse_duration,
+)
+from ..config import save as save_config
 from ..engine import GATE_A, GATE_B, Engine, EngineError
 from ..events import Event, now_iso
 from ..persistence import Project, Run, allocate_run_id, is_run_id, summarize_run
@@ -32,6 +42,9 @@ from .context import ServerContext
 
 # Longest auto-derived title taken from document A's first non-empty line.
 _TITLE_LIMIT = 120
+# Upper bound on SearchRequest.num_results, so a client cannot ask a provider for an
+# unbounded fan-out.
+_MAX_SEARCH_RESULTS = 50
 # Synthetic project for a pinned run without run.json (e.g. the committed sample).
 _SAMPLE_PROJECT_ID = "sample"
 
@@ -55,6 +68,57 @@ def _budget_override(request: Any) -> dict[str, Any]:
     if request.HasField("max_cost"):
         budget["max_cost"] = float(request.max_cost)
     return budget
+
+
+def _config_from_settings(base: Config, settings: Any) -> Config:
+    """Build a validated :class:`Config` from an ``UpdateSettings`` request.
+
+    The ``worker`` block is all-or-nothing: proto3 scalars have no presence, so an
+    omitted scalar arrives as ``""``/``0`` and fails validation rather than silently
+    resetting a field (the client round-trips ``GetSettings``); ``tools`` is
+    authoritative, so an omitted/empty list clears it. Only the ``llm`` and
+    ``budget`` sub-messages may be omitted, in which case the current values are kept.
+    """
+    if not settings.HasField("worker"):
+        raise ConfigError("settings.worker is required")
+    worker = settings.worker
+    model = base.capability.model
+    if worker.HasField("llm"):
+        model = ModelConfig(
+            provider=worker.llm.provider,
+            model=worker.llm.model,
+            base_url=worker.llm.base_url,
+        )
+    budget = (
+        BudgetConfig(
+            max_steps=worker.budget.max_steps,
+            max_wall=worker.budget.max_wall,
+            max_cost=worker.budget.max_cost,
+        )
+        if worker.HasField("budget")
+        else base.worker.budget
+    )
+    candidate = Config(
+        hitl=base.hitl,
+        capability=CapabilityConfig(
+            search=base.capability.search,
+            prompt=base.capability.prompt,
+            model=model,
+        ),
+        worker=WorkerConfig(
+            provider=worker.provider,
+            max_concurrency=worker.max_concurrency,
+            tools=tuple(worker.tools),
+            heartbeat_interval=worker.heartbeat_interval,
+            heartbeat_timeout=worker.heartbeat_timeout,
+            heartbeat_on_timeout=worker.heartbeat_on_timeout,
+            budget=budget,
+        ),
+        run=base.run,
+        project=base.project,
+    )
+    candidate.validate()
+    return candidate
 
 
 class Service(OriginweaveService):  # type: ignore[misc]  # generated base is Any (mypy skips gen)
@@ -263,6 +327,55 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         )
         return pb.SubmitHumanInputResponse(run=convert.run_pb(run))
 
+    async def get_settings(self, request: Any, ctx: Any) -> Any:
+        """Return the live project settings (M6 P3; read-only, allowed when pinned)."""
+        return pb.GetSettingsResponse(settings=convert.settings_pb(self._ctx.config))
+
+    async def update_settings(self, request: Any, ctx: Any) -> Any:
+        """Validate, persist to ``originweave.toml`` and apply new settings (M6 P3).
+
+        New runs (and later gate resumes) pick up the rebuilt providers; a run already
+        in flight keeps the providers it started with.
+        """
+        self._reject_if_pinned()
+        try:
+            new_config = _config_from_settings(self._ctx.config, request.settings)
+        except ConfigError as exc:
+            raise ConnectError(Code.INVALID_ARGUMENT, str(exc)) from exc
+        try:
+            save_config(new_config, self._ctx.config_path)
+        except OSError as exc:
+            raise ConnectError(Code.INTERNAL, f"could not write settings: {exc}") from exc
+        # Swap the live config/providers only after the file is safely persisted, so a
+        # failed write leaves memory and disk consistent.
+        try:
+            self._ctx.apply_settings(new_config)
+        except CapabilityError as exc:
+            raise ConnectError(Code.INTERNAL, f"could not apply settings: {exc}") from exc
+        return pb.UpdateSettingsResponse(settings=convert.settings_pb(new_config))
+
+    async def search(self, request: Any, ctx: Any) -> Any:
+        """Run a retrieval through the configured search provider (M6 P3b).
+
+        Read-only, so it is allowed in the pinned single-run view too. The Pi TS
+        extension (P4) calls this so the provider choice stays in Python: switching
+        ``[capability.search]`` needs no extension change (red line 5).
+        """
+        query = request.query.strip()
+        if not query:
+            raise ConnectError(Code.INVALID_ARGUMENT, "query is required")
+        num_results = request.num_results if request.HasField("num_results") else 8
+        if num_results <= 0 or num_results > _MAX_SEARCH_RESULTS:
+            raise ConnectError(
+                Code.INVALID_ARGUMENT,
+                f"num_results must be in 1..{_MAX_SEARCH_RESULTS}, got {num_results}",
+            )
+        try:
+            text = await self._ctx.providers.search.search(query, num_results=num_results)
+        except CapabilityError as exc:
+            raise ConnectError(Code.UNAVAILABLE, str(exc)) from exc
+        return pb.SearchResponse(text=text)
+
     def _build_engine(self, store: RunStore, *, auto: bool) -> Engine:
         """Build an engine over ``store`` from the resolved config/providers."""
         worker = self._ctx.config.worker
@@ -414,7 +527,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         )
         # The board is folded to `at_event` (Replay), but the timeline keeps the full
         # log so its length stays stable while stepping.
-        return convert.run_detail_pb(run, board, events)
+        return convert.run_detail_pb(run, board, events, sessions=store.read_sessions())
 
     @staticmethod
     def _folded_events(events: list[Event], at_event: int | None) -> list[Event]:

@@ -169,9 +169,7 @@ def _parse_intent(item: Any) -> Intent:
         raise EngineError(f"invalid intent: {exc}") from exc
 
 
-def parse_result(
-    text: str, *, allow_edges: bool = False, allow_gate: bool = False
-) -> WorkerResult:
+def parse_result(text: str, *, allow_edges: bool = False, allow_gate: bool = False) -> WorkerResult:
     """Parse a worker's strict-JSON reply into a :class:`WorkerResult`.
 
     The reply must be a single JSON object (no markdown fences) carrying ``facts``,
@@ -230,9 +228,7 @@ def parse_result(
         gate_name = raw_gate.get("gate")
         question = raw_gate.get("question", "")
         if gate_name not in WORKER_GATES:
-            raise EngineError(
-                f"gate.gate must be one of {sorted(WORKER_GATES)}; got {gate_name!r}"
-            )
+            raise EngineError(f"gate.gate must be one of {sorted(WORKER_GATES)}; got {gate_name!r}")
         if not isinstance(question, str):
             raise EngineError("gate.question must be a string")
         if complete is not None:
@@ -482,6 +478,11 @@ class Engine:
     def _worker_model(self) -> str:
         # Workers may expose ``.model``; the Worker protocol only promises ``.name``.
         return getattr(self._worker, "model", None) or self._worker.name
+
+    @property
+    def _worker_self_search(self) -> bool:
+        """True when the worker owns retrieval (it has the ``search`` tool)."""
+        return "search" in getattr(self._worker, "tools", ())
 
     async def _invoke(
         self,
@@ -1065,9 +1066,7 @@ class Engine:
                 return
             for fact in outcome.facts:
                 fact.id = self._next_fact_id(fact.kind)
-            key_to_id = {
-                key: outcome.facts[index].id for key, index in outcome.fact_keys.items()
-            }
+            key_to_id = {key: outcome.facts[index].id for key, index in outcome.fact_keys.items()}
             try:
                 edges = _resolve_edges(
                     outcome.edges,
@@ -1161,10 +1160,13 @@ class Engine:
         """Execute one Intent without writing anything; return an outcome to commit.
 
         For an ``explore`` Intent the engine calls ``search`` with the intent's question
-        and passes the results to the worker via ``extra``; the worker itself never
-        touches providers. Every blackboard write happens later, in :meth:`_dispatch`.
-        The heartbeat lease covers the whole pass (search included), so a hung search
-        cannot hold a claimed Intent without a heartbeat or a timeout either.
+        and passes the results to the worker via ``extra`` -- unless the worker owns
+        retrieval (it has the ``search`` tool, e.g. Pi with ``[worker].tools=["search"]``),
+        in which case the agent searches itself and no ``extra["search"]`` is injected.
+        The worker never touches providers otherwise. Every blackboard write happens
+        later, in :meth:`_dispatch`. The heartbeat lease covers the whole pass (search
+        included), so a hung search cannot hold a claimed Intent without a heartbeat or
+        a timeout either.
         """
         async with semaphore:
             extra: dict[str, Any] = {
@@ -1177,7 +1179,7 @@ class Engine:
             }
             heartbeat = asyncio.create_task(self._heartbeat(intent.id))
             try:
-                if intent.type == "explore":
+                if intent.type == "explore" and not self._worker_self_search:
                     try:
                         # The query is the intent's auditable question (protocol 2.2).
                         extra["search"] = await asyncio.wait_for(

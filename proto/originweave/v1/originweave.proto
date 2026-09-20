@@ -189,6 +189,60 @@ message Report {
   repeated Evidence sources = 5;
 }
 
+// ---------------------------------------------------------------- worker session (M6)
+
+message SessionStep {
+  int32 seq = 1;
+  // turn-start | tool-call | tool-result | message | turn-end
+  string kind = 2;
+  string name = 3;
+  string text = 4;
+  optional bool ok = 5;
+}
+
+message Session {
+  string id = 1;
+  string run_id = 2;
+  string worker = 3;
+  string task = 4; // Bootstrap | Reason | Explore | Validate
+  optional string intent_id = 5;
+  string model = 6;
+  google.protobuf.Struct input = 7; // raw rendered input (prompt / board)
+  string output = 8;                // raw reply text
+  repeated SessionStep steps = 9;
+  string started_at = 10;
+  string ended_at = 11;
+}
+
+// ---------------------------------------------------------------- settings (M6)
+
+message WorkerBudget {
+  int32 max_steps = 1;
+  string max_wall = 2; // duration string, e.g. "10m"
+  double max_cost = 3; // USD
+}
+
+message LlmSettings {
+  string provider = 1; // openai (the only compatible provider)
+  string model = 2;
+  string base_url = 3; // empty means "use the OPENAI_BASE_URL environment variable"
+}
+
+message WorkerSettings {
+  LlmSettings llm = 1;
+  string provider = 2; // local | pi
+  int32 max_concurrency = 3;
+  repeated string tools = 4; // flat allowlist, matches [worker].tools
+  string heartbeat_interval = 5;   // e.g. "15s"
+  string heartbeat_timeout = 6;    // must be > heartbeat_interval
+  string heartbeat_on_timeout = 7; // release | fail
+  WorkerBudget budget = 8;
+}
+
+message Settings {
+  WorkerSettings worker = 1;
+}
+
 // ---------------------------------------------------------------- events
 
 message Event {
@@ -221,6 +275,7 @@ message RunDetail {
   optional WaitingFor waiting_for = 11;
   optional Report report = 12;
   repeated HumanDecision decisions = 13;
+  repeated Session sessions = 14;
 }
 
 // ---------------------------------------------------------------- service
@@ -234,6 +289,9 @@ service OriginweaveService {
   rpc CreateRun(CreateRunRequest) returns (CreateRunResponse);
   rpc AddHint(AddHintRequest) returns (AddHintResponse);
   rpc SubmitHumanInput(SubmitHumanInputRequest) returns (SubmitHumanInputResponse);
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
+  rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
 }
 
 message ListProjectsRequest {}
@@ -316,4 +374,27 @@ message SubmitHumanInputRequest {
 
 message SubmitHumanInputResponse {
   Run run = 1;
+}
+
+message GetSettingsRequest {}
+
+message GetSettingsResponse {
+  Settings settings = 1;
+}
+
+message UpdateSettingsRequest {
+  Settings settings = 1;
+}
+
+message UpdateSettingsResponse {
+  Settings settings = 1;
+}
+
+message SearchRequest {
+  string query = 1;
+  optional int32 num_results = 2;
+}
+
+message SearchResponse {
+  string text = 1;
 }

@@ -123,9 +123,7 @@ def _cmd_capabilities(args: argparse.Namespace) -> int:
     for name in sorted(WORKER_PROVIDERS):
         tools = ", ".join(worker_cfg.tools) if worker_cfg.tools else "none"
         mark = "*" if name == worker_cfg.provider else " "
-        print(
-            f" {mark} {name:<9} max_concurrency={worker_cfg.max_concurrency} · tools={tools}"
-        )
+        print(f" {mark} {name:<9} max_concurrency={worker_cfg.max_concurrency} · tools={tools}")
 
     return 0
 
@@ -150,9 +148,13 @@ def _cmd_ui(args: argparse.Namespace) -> int:
     static_dir = root / "frontend" / "dist"
     if not static_dir.is_dir():
         print(f"note: {static_dir} not found; serving the API only", file=sys.stderr)
-    app = create_app(config=cfg, root=root, run_dir=run_dir, static_dir=static_dir)
 
     host = "127.0.0.1"
+    # The Pi search extension (M6 P4) calls back this server's Search RPC; point it at
+    # the actual port unless the operator set an explicit override.
+    os.environ.setdefault("ORIGINWEAVE_SERVER_URL", f"http://{host}:{args.port}")
+    app = create_app(config=cfg, root=root, run_dir=run_dir, static_dir=static_dir)
+
     suffix = f" (single run {run_dir})" if run_dir is not None else ""
     print(f"originweave ui on http://{host}:{args.port}{suffix}")
 

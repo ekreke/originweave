@@ -16,10 +16,18 @@
     worker LLM 复用 `[capability.model]`（仅 openai 兼容）。
   - **P2 `PiWorker`（已完成）**（`capabilities/pi.py`，`pi-py-sdk`，每会话隔离，运行时缺失明确报错，
     Pi turns 计入 `max_steps`，注入 fake 测试）。
-  - P3 proto/server（Settings/Search/Session）；**P4 TS 搜索扩展回调 server `Search`**——加载机制
-    已 spike 验证（见「已完成（近期）」）；P5 前端 Settings + 会话视图；P6 容器化（并入 M3）。
-  - 依赖：P1/P2 不依赖 server；P3–P5 依赖 **M1c-1**。**P2 live 遗留**（配置目录环境变量名硬编码）
-    见「已知风险 / 缺口」，P4 接线前须先修。
+  - **P3 proto/server 已拆为 P3a/P3b/P3c（全部完成）**（`SPEC.md` M6）：**P3a** proto（`Session`/
+    `SessionStep`/`Settings`/`WorkerSettings`/`WorkerBudget`/`LlmSettings`）+ `GetSettings`/`UpdateSettings`
+    （`config.save` + `ServerContext.apply_settings` 重建 provider，后续 run 生效）；**P3b** `Search` RPC
+    （只读、provider 选择留 Python，供 P4 Pi TS 扩展回调）；**P3c** `RunDetail.sessions`（读
+    `sessions/*.json`，原始输入/输出 + 步骤链）。
+  - **P4 TS 搜索扩展（已完成）**：`src/originweave/pi_extensions/search.ts`（包内资源）注册 `search`
+    工具、回调 server `Search` RPC（`ORIGINWEAVE_SERVER_URL`，默认 `http://127.0.0.1:8765`）；
+    `PiWorker` 注入 `-e <ext>` + `--tools search` + server URL、暴露 `tools`；`explore` 检索归属改为
+    **worker 拥有 `search` 工具时 agent 自主检索、引擎不预取**；并修 P2 agent-dir 环境变量名 bug。
+    **下一步 P5 前端 Settings + 会话视图**（`GetSettings`/`UpdateSettings`/`RunDetail.sessions` 已就绪）；
+    P6 容器化（并入 M3）。
+  - 依赖：P1/P2 不依赖 server；P3–P5 依赖 **M1c-1**。
 - **M1 迭代切片**（引擎为库层、进程内 Dispatcher；`model`/`search` provider 已就绪）：
   已落地：**I1** Bootstrap、**I2a** `FAILED`/`STOPPED`、**I2** Reason、**I2b** Validate 去重、
   **I3** Explore + search（来源回链 `citation`/`source` + `Evidence`；`decompose`/`explore`
@@ -112,19 +120,20 @@
 - [ ] CLI `capabilities install-obscura` 命名：旧 `obscura_kitesurf` 占位样例已被从零构建的
       `copilot_productivity` 替换，该命令名（`product-overview.md` §5 冻结契约）语义脱节；
       是否改名留待 M3 决定
-- [ ] **M6 P4** server URL 传递：worker 如何得知 server 地址（env `ORIGINWEAVE_SERVER_URL` 默认
-      `http://127.0.0.1:8765`，vs 落 `[worker]`/`[server]` 配置）；未设置且启用 `search` 时明确报错
-- [ ] **M6 P4** 扩展文件位置与 TS 测试宿主：`runtime/pi-extensions/`（独立于 `frontend/`）；TS 测试
-      用新建 vitest 还是仅在 Python 侧断言「工具已注册/被调用」
-- [ ] **M6 P4** `explore` 检索归属：维持引擎预取（`engine.py` 调 `search` 经 `extra` 注入）还是改由
-      Pi 的 `search` 工具自主检索（影响 Evidence 可审计性与是否双重检索）
+- [x] **M6 P4** server URL 传递 → **env `ORIGINWEAVE_SERVER_URL`，默认 `http://127.0.0.1:8765`**
+      （`PiWorker` 注入 Pi 子进程；容器化改 env，不落配置）
+- [x] **M6 P4** 扩展文件位置与测试宿主 → **包内资源 `src/originweave/pi_extensions/search.ts`**
+      （dev 与镜像同一来源，`Path(__file__)` 固定路径，无运行时搜索）；测试在 **Python 侧**注入 fake
+      agent 断言 `extra_args`/`env`（不依赖 node）
+- [x] **M6 P4** `explore` 检索归属 → **改由 Pi 的 `search` 工具自主检索**：worker 拥有 `search` 工具时
+      引擎不再预取（`local` 等仍预取）；Evidence 由 agent 回复携带 `quote+url`
 
 ### M6 决策（均已定，2026-09）
 
 - [x] Worker 执行体 → **可插拔 `Worker`**，`[worker].provider = local | pi`（方案 B：Worker 一等概念）
 - [x] Pi 包 → **`pi-py-sdk`**（驱动官方 TS agent 运行时；运行时需 Node + `pi` 二进制；alpha）
 - [x] Pi 工具 → **开启且可配置**（`[worker].tools`），设置页可改；默认建议只读 + `cwd` 沙箱
-- [x] 检索 → Pi 侧 TS 扩展执行，**回调 server `Search` RPC**（provider 选择留 Python，保红线 4）
+- [x] 检索 → Pi 侧 TS 扩展执行，**回调 server `Search` RPC**（provider 选择留 Python，保红线 5）
 - [x] 设置存储 → 项目 `originweave.toml`，独立 **`[worker]`** 表（含 `max_concurrency`）
 - [x] 会话 → 每次 Worker 调用一个**隔离会话**；原始 input/output 落 `sessions/<id>.json`，
       `SESSION` 事件做轻量索引；**保留 `WORKER_STEP` 事件**（turn/tool 级，`text` 截断）
@@ -177,12 +186,17 @@
   写入/执行面（须 `cwd` 沙箱 + 白名单，默认只读 + 检索走扩展）；Pi 内部轮次需计入 `max_steps`（P2）；
   **`[worker].budget` 目前只是配置，尚未强制执行**（enforcement 归 M3）；
   `sessions/` 原始输入**不得写入任何凭据**；`WORKER_STEP` 需 `text` 截断常量防事件膨胀。
-- **M6 P2 live bug（P4 接线前须修）**：`capabilities/pi.py` 把 Pi 的 agent 配置目录环境变量硬编码为
-  `PI_CODING_AGENT_DIR`，但该变量名由 pi 构建的 `piConfig.name` 决定（`<NAME>_CODING_AGENT_DIR`）。
-  本机安装 `piConfig.name="ekreke"`，实际读 `EKREKE_CODING_AGENT_DIR`。spike 实测：硬编码名下
-  `models.json` 不加载，报 `Unknown provider "originweave-openai"`（P2 测试注入 fake agent，故未暴露）。
-  修法：按 `pi` 二进制推导 `<NAME>_CODING_AGENT_DIR`，或同时设置候选键，并在 `_require_runtime()`
-  加一条真实冒烟。
+- **M6 P2 live bug（已于 P4 修复）**：`capabilities/pi.py` 曾把 Pi 的 agent 配置目录环境变量硬编码为
+  `PI_CODING_AGENT_DIR`，但该变量名由 pi 构建的 `piConfig.name` 决定（`<NAME>_CODING_AGENT_DIR`）：
+  上游 `pi`（如本机 homebrew 0.85.1，`piConfig` 无 `name`）读 `PI_CODING_AGENT_DIR`，而改名构建
+  （spike 的 `piConfig.name="ekreke"`）读 `EKREKE_CODING_AGENT_DIR`——硬编码下 `models.json` 不加载，
+  报 `Unknown provider "originweave-openai"`。**P4 修复**：`resolve_agent_dir_env_name()` 从 `pi`
+  二进制的 `package.json`（`piConfig.name` / 旧 `n.name`）推导、缺省 `PI_CODING_AGENT_DIR` 并**同时设置**
+  （覆盖 npx/上游回退）；单测用假 `package.json` 覆盖 `ekreke`/旧 `n`/无 name/无 pi 四种情形。
+  残留（低优先）：**live 冒烟**（有 node+pi 时真实验证模型加载）未纳入单测/CI；shim 安装
+  （pnpm/npx/Windows `.cmd`）不落在包目录内，推导会回退 `PI_CODING_AGENT_DIR`（改名 shim 仍读不到，
+  可后续解析 shim 目标或 `pi --help` 里的变量名）；`resolve_agent_dir_env_name` 只接受带 `configDir`
+  或上游包名的 `package.json`，避免被上层无关包劫持。
 - **`[budget]` 退役的迁移影响**：顶层 `[budget]` 迁到 `[worker].budget` 后，含 `[budget]` 的旧
   `originweave.toml` 会因未知键报错（仓库无提交的 toml，影响小，类比 Phase R 去 `[live]`）；
   `CreateRunRequest` 的 `max_steps`/`max_wall`/`max_cost` 结构不变，但语义改为覆盖 `[worker].budget`，
@@ -219,6 +233,43 @@
   `hooks.test.ts`（`useAddHint` 入参 + invalidate）。前端 `typecheck`/`lint`/`format:check`/`test`/`build` 全绿。
   经 subagent review（无 blocker；worktree 与 develop 两份实现已按「worktree 为底 + 补回 develop 的
   IME/失败重试/空 runId 抛错」合并）。
+
+- **M6 P4 · TS 搜索扩展 + P2 agent-dir 修复**：新增包内资源
+  `src/originweave/pi_extensions/search.ts`（`pi.registerTool` 注册 `search`；`execute` POST
+  `${ORIGINWEAVE_SERVER_URL | http://127.0.0.1:8765}/originweave.v1.OriginweaveService/Search`，
+  非 2xx 抛错）。`capabilities/pi.py`：`resolve_agent_dir_env_name()`（按 `pi` 二进制 `package.json`
+  的 `piConfig.name`/旧 `n.name` 推导 `<NAME>_CODING_AGENT_DIR`，缺省并同时设 `PI_CODING_AGENT_DIR`）；
+  `_tools_args` 去掉 search 拒绝、`search` 与内建工具一并进 `--tools`；`_extension_args` 在 `tools` 含
+  `search` 时加 `-e <ext>`；`env` 注入 server URL；新增 `tools` 只读属性；`cli._cmd_ui` 启动时
+  `os.environ.setdefault("ORIGINWEAVE_SERVER_URL", http://<host>:<port>)`。`engine.py`：新增
+  `_worker_self_search`，`explore` 型 Intent 在 worker 拥有 `search` 工具时**跳过引擎预取**（否则维持）；
+  `capabilities/worker.py` `LocalWorker.tools = frozenset()`；`prompts/explore.txt` 兼容「预取/自检索」
+  两模式并要求 `quote+url`。TS 扩展用 `Type.Integer(1..50)`、先读 text 再解析（错误体非 JSON 也安全）。
+  review 加固：`_pi_package_json` 只接受带 `configDir`/上游包名的 Pi 包（避免被上层无关 `package.json`
+  劫持）、捕获 `UnicodeDecodeError`。测试：`tests/test_worker.py`（扩展接线、server 默认值、无 search
+  不加载 `-e`、`resolve_agent_dir_env_name` 参数化四例 + 无关祖先不劫持 + 派生键接线 + 包内扩展存在）、
+  `tests/test_engine.py`（自检索 worker → 引擎零预取）、`tests/test_server.py`（`ui` 导出 server URL）。
+  文档同步 `agent-design.md §2`（并修红线 5 编号）、`SPEC.md` M6 P4、TODO 决策项。
+  `make lint` + `make test`（362 passed, 1 skipped）全绿；wheel 含 `originweave/pi_extensions/search.ts`。
+
+- **M6 P3a · proto + Settings RPC**：`proto/originweave/v1/originweave.proto` 增 `Session`/`SessionStep`、
+  `Settings`/`WorkerSettings`/`WorkerBudget`/`LlmSettings`、`RunDetail.sessions=14` 与
+  `GetSettings`/`UpdateSettings`/`Search` RPC。`config.save`（校验后 `tomli_w` 原子覆写 toml，`max_cost`
+  须 finite）；`ServerContext` 增 `config_path`/`providers_factory`/`apply_settings`（先重建 provider 再换
+  config，注入的 fake provider 不被生产实现替换）；`service.get_settings`（读 `[worker]`+`[capability.model]`）、
+  `service.update_settings`（`worker` 块权威 → `Config.validate`，非法 → `INVALID_ARGUMENT`；写盘 + `apply_settings`；
+  pinned 拒绝）。`convert.py` 增 `worker_settings_pb`/`settings_pb`。文档同步 `dashboard.md §4.1/§4.2/§4.6`、
+  `product-overview.md`（`SessionStep`）。测试：`tests/test_server.py`（读写往返、重建 provider、非法值参数化负例、
+  缺 `worker` 块、pinned 只读、省略子消息回落）+ `tests/test_config.py`（`save` 往返/校验/CWD 默认路径）。
+- **M6 P3b · `Search` RPC**：`service.search`——经 `[capability.search]` 执行检索（只读、provider 选择留
+  Python，保红线 5）；空 query / `num_results<=0` → `INVALID_ARGUMENT`，provider 失败 → `UNAVAILABLE`；
+  `num_results` 默认 8。测试：fake search provider（转发入参、默认值、负例、provider 错误）。
+- **M6 P3c · `RunDetail.sessions`**：`store.read_sessions()`（glob `sessions/*.json` 按**数字后缀**排序，
+  缺目录为空，非法 JSON / 结构损坏（`input` 非对象、`steps` 非列表、`seq` 非整数）→ `BlackboardError`）；
+  `convert.session_pb`/`session_step_pb`（`input`→`Struct`，`ok` 可选）；`run_detail_pb(..., sessions=…)`；
+  `service._run_detail` 接线。测试：快照→proto 字段断言、按 id 排序、无会话为空、非法 JSON → `INTERNAL`、
+  结构损坏参数化负例。`Search` 加 `num_results` 上界（1..50）、`config.validate` 增 `model` 非空校验。
+  `make lint` + `make test`（350 passed, 1 skipped）全绿。
 
 - **M1c-2b 2b-1 · 数据层 + 只读接线**：前端加 `@tanstack/react-query`（`api/queryClient.ts` +
   `main.tsx` 的 `QueryClientProvider`），`api/hooks.ts` 提供 `useProjects`/`useProjectRuns`/`useRun`

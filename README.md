@@ -9,6 +9,10 @@
 > 确定性单测）。
 > **M1c-1（Connect server）**：**C1–C4 已落地**——proto codegen + Connect app、持久化、只读 + 写
 > RPC（`CreateRun`/`AddHint`/`SubmitHumanInput`）、`originweave ui`（只读 API + 静态托管，端口 8765）。
+> **M6 P3（Settings/Search/Session）已落地**——`GetSettings`/`UpdateSettings`（写回 `originweave.toml`）、
+> `Search`（供 Pi TS 扩展回调）、`RunDetail.sessions`（读 `sessions/*.json`）。
+> **M6 P4** 的 Pi TS 搜索扩展已落地（`src/originweave/pi_extensions/search.ts`，回调 server `Search`；
+> 修了 agent-dir 环境变量名 bug）。
 > 起 run 走 server / proto API（`CreateRun`，经 `source_text` 收资料 A），故 **CLI 无 `trace`**；
 > `mcp` 仍为占位。`frontend/` 已完成 **2b-1/2b-2/2b-3**（React Query 读真实数据、Inspector 选中 +
 > Hints、HITL Gate A/B + Replay 步进；新建表单 + 顶栏归 2b-4、端到端归 2b-5）。版本与里程碑见

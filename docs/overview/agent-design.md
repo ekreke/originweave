@@ -32,17 +32,22 @@
 `dispose`。会话原始输入/输出与步骤链落 run dir `sessions/<id>.json`（快照，类比 `sources/`），
 并由 `SESSION` / `WORKER_STEP` 事件建索引；**Engine 仍是黑板唯一写入者**，事件仍是唯一事实来源与
 重放源。Pi 的工具（`[worker].tools`）可配置，检索类工具经 TS 扩展**回调 server `Search` RPC**，
-使 `search` provider 仍可替换（红线 4）。
+使 `search` provider 仍可替换（红线 5）。
 
 **PiWorker（M6 P2）** 每次调用均创建 ephemeral Pi RPC session：使用私有临时配置目录写入
 OpenAI-compatible provider 配置，复用 `[capability.model]` 与 `OPENAI_API_KEY` /
 `OPENAI_BASE_URL`，不改写用户 `~/.pi`。该目录通过 Pi 的 agent-dir 环境变量指定，而**变量名由 pi
 构建的 `piConfig.name` 决定**（`<NAME>_CODING_AGENT_DIR`：上游 `pi` 为 `PI_CODING_AGENT_DIR`，
-改名构建会不同），实现须按实际二进制推导而非硬编码（见 `TODO.md` 已知风险）。它要求 `node` 与
-`pi` 在 `PATH`，缺失时给出安装指引；禁用自动扩展发现、skills、上下文文件，并只传递
-`[worker].tools` 的白名单。`search` 工具须等 M6 P4 的 TS 扩展（以
-`pi --no-extensions -e <ext.ts> --tools search` 显式加载）；`cwd` 仅是 P2 的工具默认根目录，
-容器级安全隔离归 M3/P6。
+改名构建会不同）——**M6 P4 已按实际二进制推导**（`capabilities/pi.py` 的
+`resolve_agent_dir_env_name`，从 `package.json` 读 `piConfig.name`/旧 `n.name`，缺省
+`PI_CODING_AGENT_DIR` 并同时设置）。它要求 `node` 与 `pi` 在 `PATH`，缺失时给出安装指引；禁用自动
+扩展发现、skills、上下文文件，并只传递 `[worker].tools` 的白名单。**M6 P4** 起 `search` 工具由包内
+TS 扩展提供（`src/originweave/pi_extensions/search.ts`，以 `pi --no-extensions -e <ext.ts>
+--tools search` 显式加载）；扩展不直连检索 provider，而是回调 server 的 `Search` RPC（地址由
+`ORIGINWEAVE_SERVER_URL` 注入，默认 `http://127.0.0.1:8765`），provider 选择留在 Python（红线 5）。
+当 worker 拥有 `search` 工具时（`[worker].provider=pi` 且 `tools` 含 `search`），`explore` 的检索由
+agent 自主执行、引擎不再预取；否则（如 `local`）维持引擎预取并经 `extra` 注入。`cwd` 仅是 P2 的
+工具默认根目录，容器级安全隔离归 M3/P6。
 
 要求：
 

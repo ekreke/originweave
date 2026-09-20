@@ -40,6 +40,27 @@ def test_write_refuses_overwrite_without_force(tmp_path: Path) -> None:
     assert config.write_default(path, force=True) == path
 
 
+def test_save_overwrites_and_roundtrips(tmp_path: Path) -> None:
+    path = tmp_path / "originweave.toml"
+    config.write_default(path)
+    edited = config.Config(worker=config.WorkerConfig(provider="local", max_concurrency=3))
+    assert config.save(edited, path) == path
+    assert config.load(path) == edited
+
+
+def test_save_rejects_invalid_config(tmp_path: Path) -> None:
+    bad = config.Config(worker=config.WorkerConfig(max_concurrency=0))
+    with pytest.raises(config.ConfigError):
+        config.save(bad, tmp_path / "originweave.toml")
+    assert not (tmp_path / "originweave.toml").exists()
+
+
+def test_save_default_path_uses_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert config.save(config.Config()) == Path("originweave.toml")
+    assert (tmp_path / "originweave.toml").is_file()
+
+
 def test_load_missing_file_returns_defaults(tmp_path: Path) -> None:
     assert config.load(tmp_path / "absent.toml") == config.Config()
 
