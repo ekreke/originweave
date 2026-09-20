@@ -182,6 +182,9 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   `src/originweave/pi_extensions/search.ts` 提供，回调 server `Search`（`ORIGINWEAVE_SERVER_URL`）。
 - **测试与工具链**：pytest `asyncio_mode = "auto"`（`pyproject.toml`），async 测试**不加**
   `@pytest.mark.asyncio`；ruff `line-length = 100`（非默认 88），mypy strict **只查 `src`**。
+  前端 `pnpm --dir frontend test` 经 `frontend/scripts/test-watchdog.mjs` 包装：vitest 的
+  `testTimeout` 杀不掉「microtask 自旋饿死定时器」的挂死（曾致 4 个 worker 烧 CPU 3.7h），
+  看门狗默认 300s 强杀进程组，`VITEST_WATCHDOG_TIMEOUT`（秒）可调。
 - **事件字段名是契约**：`Event{id,at,type,message,tone,payload}`；reducer 只消费 `type`+`payload`，
   `message`/`tone` 仅展示。已实现 16 种类型（M1 增 `FAILED`/`STOPPED` → `status=failed|stopped`
   与 `VALIDATE`（Validate pass）；M6 增 `SESSION`/`WORKER_STEP`，reducer 忽略、Board 不变）；
