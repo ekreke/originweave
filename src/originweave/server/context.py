@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,7 @@ from pathlib import Path
 from .. import config as config_module
 from ..blackboard import Board
 from ..capabilities import (
+    CapabilityError,
     PromptProvider,
     SearchProvider,
     Worker,
@@ -24,11 +26,21 @@ from ..capabilities import (
     build_search,
     build_worker,
 )
+from ..capabilities.model import BASE_URL_ENV_VAR, ENV_VAR
 from ..config import Config
 from ..persistence import ProjectRegistry
+from ..runtime import ContainerManager, ContainerWorker
+from ..runtime.container import ENV_BASE_URL, ENV_MODEL, ENV_PROVIDER, ENV_TOOLS
 from ..store import RunStore
 
 _log = logging.getLogger(__name__)
+
+
+def _container_manager_for(cfg: Config) -> ContainerManager | None:
+    """A runtime container manager when ``[worker].execution == "container"`` (M3a)."""
+    if cfg.worker.execution == "container":
+        return ContainerManager(image=cfg.worker.image)
+    return None
 
 
 @dataclass
@@ -59,8 +71,8 @@ class RunScheduler:
     instance: ``append_event`` keeps a per-instance event count, so two instances
     would hand out colliding event ids. ``store_for`` is that single point of truth.
 
-    This is the temporary in-process Dispatcher (``agent-design.md`` section 6); the
-    container Dispatcher in M3 replaces the execution backend, not this interface.
+    This is the temporary in-process scheduling (``agent-design.md`` section 6); the
+    container-per-worker backend in M3 replaces the Worker execution, not this interface.
     """
 
     runs_dir: Path
@@ -122,6 +134,8 @@ class ServerContext:
     config_path: Path = Path(config_module.CONFIG_FILENAME)
     # Rebuilds providers after UpdateSettings; tests inject a fake factory.
     providers_factory: Callable[[Config], Providers] = build_providers
+    # Runtime container manager (M3a); built when [worker].execution == "container".
+    container_manager: ContainerManager | None = None
     # ``originweave ui --run <dir>``: serve only this one run, read-only (C4).
     pinned_run: Path | None = None
 
@@ -136,6 +150,52 @@ class ServerContext:
         providers = self.providers_factory(config)
         self.config = config
         self.providers = providers
+        # Rebuild the container manager too: [worker].execution/image may have changed.
+        self.container_manager = _container_manager_for(config)
+
+    def worker_for(self, run_dir: Path) -> Worker:
+        """The Worker for one run: container-per-worker, else the in-process provider.
+
+        Container-per-worker (M3a) starts a fresh container per call, so the worker is
+        bound to the run's directory (mounted into the container); the in-process path
+        keeps using the shared provider so tests can inject a fake.
+        """
+        if self.config.worker.execution != "container":
+            return self.providers.worker
+        if self.container_manager is None:
+            raise CapabilityError(
+                "worker.execution=container but no container manager is configured"
+            )
+        return ContainerWorker(
+            manager=self.container_manager,
+            run_dir=run_dir,
+            env=self._worker_env(),
+        )
+
+    def _worker_env(self) -> dict[str, str]:
+        """Env injected into the container: worker config + credentials (env only)."""
+        model = self.config.capability.model
+        # `search` is not mounted inside the container: the Pi TS search extension would
+        # call the server at an address the container cannot reach. Retrieval therefore
+        # stays a host-side pre-fetch (the engine sees no `search` tool and pre-fetches),
+        # so container and in-process workers agree on who searches (M3a).
+        tools = tuple(tool for tool in self.config.worker.tools if tool != "search")
+        if "search" in self.config.worker.tools:
+            _log.warning(
+                "worker.tools 'search' is not mounted under execution=container; "
+                "retrieval runs as a host-side pre-fetch (M3a)"
+            )
+        env = {
+            ENV_PROVIDER: self.config.worker.provider,
+            ENV_MODEL: model.model,
+            ENV_BASE_URL: model.base_url or os.environ.get(BASE_URL_ENV_VAR, ""),
+            ENV_TOOLS: ",".join(tools),
+        }
+        for name in (ENV_VAR, BASE_URL_ENV_VAR):
+            value = os.environ.get(name)
+            if value:
+                env[name] = value
+        return env
 
     @classmethod
     def build(
@@ -186,6 +246,7 @@ class ServerContext:
             scheduler=RunScheduler(runs_dir=runs_dir),
             config_path=resolved_config_path,
             providers_factory=resolved_factory,
+            container_manager=_container_manager_for(cfg),
             pinned_run=pinned,
         )
 

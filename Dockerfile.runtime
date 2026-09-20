@@ -1,0 +1,34 @@
+# originweave runtime image (M3a): one short-lived container per Worker call.
+#
+# It carries the worker execution bodies: the local model client and, for
+# [worker].provider="pi", Node + the Pi agent runtime + the TS search extension.
+# Build it with `make image` (which first runs `make proto`); at `docker run` time the
+# server mounts the run directory and injects the worker config via environment vars.
+# Engine/Dispatcher stay in the server process -- this image only runs a worker.
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Node.js 22+ (the Pi agent runtime declares engines.node >= 22.19; Debian's
+# python:3.11-slim ships Node 20, which makes `pi` fail to load) + the Pi runtime.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+# Pin pi (reproducible) + build-time assertion: fail the image if pi cannot even run
+# (Node/pi version mismatch etc.).
+ARG PI_VERSION=0.86.0
+RUN npm install -g @earendil-works/pi-coding-agent@${PI_VERSION} \
+    && pi --version
+
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --upgrade pip && pip install .
+
+# The runner serves POST /run (one task) and GET /health (readiness) on this port.
+EXPOSE 8000
+CMD ["python", "-m", "originweave.runtime.runner"]

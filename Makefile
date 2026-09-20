@@ -9,7 +9,7 @@ RUNS_DIR ?= runs
 PORT ?= 8765
 
 .DEFAULT_GOAL := help
-.PHONY: help install run demo smoke fixtures proto test lint fmt ui replay cloc clean \
+.PHONY: help install run demo smoke image fixtures proto test lint fmt ui replay cloc clean \
 	frontend-install frontend-gen frontend-dev frontend-build frontend-lint \
 	frontend-typecheck frontend-test
 
@@ -29,6 +29,9 @@ demo: ## End-to-end sample (server + frontend; lands in M4, not wired yet)
 
 smoke: install ## Boot the server with a fake worker and drive a run end-to-end (in-process)
 	$(UV) run python scripts/smoke.py
+
+image: proto ## Build the runtime container image (M3a; requires Docker)
+	docker build -f Dockerfile.runtime -t originweave-runtime:latest .
 
 fixtures: ## Regenerate the committed sample fixtures (events.jsonl)
 	$(UV) run python scripts/build_sample_fixtures.py

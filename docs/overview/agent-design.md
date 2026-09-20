@@ -1,7 +1,7 @@
 # Agent 与运行时设计 · originweave
 
 本文定义 originweave 的**执行架构**：分层、能力抽象、黑板循环、预算控制、
-事件溯源，以及"每次 run 一个容器"的运行模型。
+事件溯源，以及"每个 Worker 调用一个临时容器"的运行模型。
 
 - 黑板元素、事件协议、HITL 的详细定义 → [`blackboard-protocol.md`](blackboard-protocol.md)
 - 架构红线（第 7 节）任何实现都不得突破。
@@ -12,7 +12,7 @@
 |---|---|
 | Frontend | UI、任务发起、监控、审阅（**不做执行编排**） |
 | Server | API、编排、持久化、调度、容器生命周期、黑板一致性 |
-| Runtime | 每个 run 一个**临时容器**，执行实际任务（内含多个 Worker） |
+| Runtime | 每个 Worker 调用一个**临时容器**（container-per-worker），执行实际任务 |
 | Deployment | server 运行在 Docker 中 |
 
 ## 2. Capability 抽象
@@ -224,34 +224,43 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 - 事件是唯一事实来源；任何视图（UI、report）都可由事件重建。
 - 人类输入（`HUMAN_INPUT`）同样是事件，重放时一并复现。
 
-## 6. Runtime：container-per-run
+## 6. Runtime：container-per-worker
 
-- 每个 run 启动一个**临时容器**执行实际任务；run 结束即销毁。
-- 容器内运行**多个平等 Worker**（运行时可配置 N ≥ 1；项目级上限见 `[worker].max_concurrency`，M6）。
+- **每个 Worker 调用一个临时容器**：一次 `Worker.run()`（Bootstrap/Reason/Explore/Validate/
+  verify）起一个容器，执行完即销毁。Engine/Dispatcher 仍在 **server 进程**内（编排 + 黑板唯一
+  写入者，红线 2/4），容器只承载**实际任务执行**（红线 3）。
+- 并发上限 `[worker].max_concurrency` = **同时并发的容器数**（= 并发 Worker 调用数，<=16）；I4 的
+  派发并发门限即作用于容器数量。
 - **Worker 执行体可插拔（M6）**：`[worker].provider=pi` 时容器内以 Pi agent 运行时执行任务，
   镜像需内置 **Node + `pi` 二进制 + TS 搜索扩展**；每次 Worker 调用一个隔离会话（见 §2 与 §5）。
-- 容器生命周期（创建/监控/回收）由 **server** 拥有，前端与 CLI 不直接管理容器。
-- 容器需要挂载该 run 的 run 目录，以写入事件与快照。
+- 容器生命周期（创建/监控/回收）由 **server 拥有**（`ContainerWorker` 每次调用起/销毁；
+  server 的 Dispatcher 决定何时调用），前端与 CLI 不直接管理容器。
+- 容器挂载该 run 的 run 目录（读 `input/`、写会话 `cwd` 沙箱产物）；**黑板事件仍由 server 的
+  Engine 写**（唯一写入者），容器内 Worker 不写协议。
 - 容器镜像与 server 镜像分离：server 常驻，runtime 短命。
 - 安全边界：容器内可触网执行检索；server 仅负责编排与持久化。
+
+> **容器池（后续优化，2026-09）**：设置 `[worker].max_concurrency` 时**预热启动** N 个 runtime
+> 容器（池），实际调用从池中取容器下发任务、调用后归还复用（而非每次 `docker run`）。M3 先落地
+> per-call 起/销毁；池化待评估（启动开销 vs 复用收益）。见 `docs/1.0/TODO.md`。
 
 `originweave ui`（M1c-1 C4）把 **Connect API 与构建产物 `frontend/dist`**（存在时，含 SPA
 `index.html` 回退）统一托管在同一端口（默认 **8765**）；带 `--run <dir>` 时进**单 run 只读模式**：
 只服务该 run，写 RPC（`CreateRun`/`AddHint`/`SubmitHumanInput`）被拒绝。前端只读视图，不拥有编排
 （红线 1）。
 
-> **M1/M1c-1 的临时态**：容器化在 M3 落地。在此之前，引擎以**库层 + 进程内 Dispatcher**
+> **M1/M1c-1 的临时态**：容器化在 M3 落地。在此之前，引擎以**库层 + 进程内 Worker**
 > 运行（M1 单测驱动；M1c-1 由 server 进程内调用以打通 proto/前端）。这是**显式、临时**的
-> 例外，红线 3 的正式满足在 M3；Dispatcher 接口必须与 M3 的容器 Dispatcher 一致，
-> 使 M3 只需替换执行后端而不改编排。
+> 例外，红线 3 的正式满足在 M3；`Worker` 接口必须与 M3 的 `ContainerWorker` 一致，
+> 使 M3 只需替换 Worker 执行后端而不改编排。
 
 ## 7. 架构红线（不可突破）
 
 1. **前端不拥有执行编排**：前端只调用 server API，不启动/调度任务。
 2. **server 拥有调度与运行时生命周期**：run 的排队、执行、停止、回收都归 server。
-3. **实际任务执行发生在临时容器**：任何执行路径都必须显式建模为 container-per-run，
-   不允许在 server 进程内直接跑重任务（M1/M1c-1 的进程内 Dispatcher 为第 6 节所述临时态，
-   正式满足在 M3）。
+3. **实际任务执行发生在临时容器**：任何执行路径都必须显式建模为 **container-per-worker**
+   （每个 Worker 调用一个容器），不允许在 server 进程内直接跑重任务（M1/M1c-1 的进程内
+   Worker 为第 6 节所述临时态，正式满足在 M3）。
 4. **provider/model/runtime 解耦**：替换检索 / prompt / model provider 不应改动编排代码。
 5. **黑板是唯一事实来源**：所有状态变更经事件写回黑板，不得旁路。
 

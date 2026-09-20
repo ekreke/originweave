@@ -30,6 +30,7 @@ make ui                  # 起只读 UI 服务（Connect API + frontend/dist，�
 make lint                # ruff check + mypy
 make test                # pytest
 make smoke               # 端到端冒烟（进程内起 server + fake worker，建 run → Gate → 记分卡）
+make image               # 烤 runtime 容器镜像（M3a；需 Docker）
 make cloc                # src/originweave 逻辑代码行数
 ```
 
@@ -54,6 +55,7 @@ make frontend-build      # tsc -b && vite build
 | `frontend-install` / `frontend-gen` / `frontend-dev` / `frontend-build` / `frontend-lint` / `frontend-typecheck` / `frontend-test` | 前端（`frontend/`，M1b）：安装 / proto 生成 / dev / 构建 / lint / tsc / vitest。 |
 | `test` | `pytest`。 |
 | `smoke` | 端到端冒烟：进程内起 server（fake worker），`CreateRun` → Gate A → 记分卡；退出码非零即失败。 |
+| `image` | 构建 runtime 容器镜像 `originweave-runtime:latest`（M3a；需 Docker）。`[worker].execution=container` 时每次 Worker 调用用它起一个容器。 |
 | `lint` | `ruff check` + `mypy`。 |
 | `fmt` | `ruff format`。 |
 | `ui` | 起只读 UI 服务：Connect API + `frontend/dist`（存在时），端口 8765；`--run` 进单 run 只读模式。 |

@@ -86,6 +86,11 @@
   **M6 P5 已落地**：Settings 页（`routes/Settings.tsx` + `settingsModel.ts`；`useSettings`/`useUpdateSettings`
   回传**全量 `[worker]` 块**）、INSPECTOR 会话视图（`SessionView`；原始输入/输出 + 步骤链）、EVENTS 按 worker
   过滤（`tabs/events.ts`）。**不接 mock**（fixture 仅测试用）。
+- **M3（进行中，见 `SPEC.md` M3）**：**M3a 已落地** —— **container-per-worker**（每个 Worker 调用一个
+  临时容器）：`runtime/{container,runner}.py`（`ContainerWorker` 每次起/销毁容器 + 容器内 `runner`
+  的 `POST /run`/`GET /health`（`runner.py`））、`Dockerfile.runtime` + `make image`、`[worker].execution`
+  （`in-process`|`container`，默认 `in-process`）+ `[worker].image`。Engine/Dispatcher 仍在 server
+  （编排 + 黑板唯一写入者），容器只跑 Worker。**容器池预热**（`max_concurrency` 预热复用）为后续优化（见 TODO）。
 - **M6（进行中，见 `SPEC.md` M6）**：把执行体抽为可插拔 **`Worker`**（`[worker].provider = local | pi`）；
   **P2 `PiWorker` 已落地**，经固定 `pi-py-sdk` 驱动官方 TS agent 运行时（运行时需 **Node + `pi` 二进制**，
   仅 CI 之外；**live 有配置目录环境变量名 bug，见「约定与坑」**）。
@@ -113,6 +118,8 @@ make test                   # pytest（addopts=-q）
 make lint                   # ruff check src tests scripts + mypy src（mypy strict，只查 src）
 make fmt                    # ruff format src tests scripts
 make proto                  # buf generate proto -> src/originweave/v1（M1c-1；需 buf + protoc-gen-connect-python）
+make image                  # 烤 runtime 容器镜像（M3a；需 Docker）；[worker].execution=container 时每次调用起一个
+make smoke                  # 端到端冒烟（进程内 fake worker → CreateRun/Gate/记分卡）
 make fixtures               # 重生成样例事件 events.jsonl（scripts/build_sample_fixtures.py，另有 --check 校验）
 make cloc                   # 仅统计 src/originweave 逻辑行数
 uv run pytest tests/test_config.py::test_default_values   # 跑单个测试
@@ -136,7 +143,8 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
 
 1. 前端不拥有执行编排（只调 server API）。
 2. server 拥有调度、持久化与运行时生命周期。
-3. 实际任务执行必须建模为 **container-per-run**，不得在 server 进程内直接跑重任务。
+3. 实际任务执行必须建模为 **container-per-worker**（每个 Worker 调用一个临时容器），
+   不得在 server 进程内直接跑重任务。
 4. 黑板是唯一事实来源，所有状态变更经事件写回，不得旁路。
 5. provider/model/runtime 解耦：替换检索 / prompt / model provider 不应改动编排代码。
 

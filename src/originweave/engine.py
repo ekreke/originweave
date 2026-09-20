@@ -6,8 +6,9 @@ only the board plus a single task directive and returns a strict-JSON result (se
 ``docs/overview/blackboard-protocol.md`` section 4.2); the engine assigns ids and the
 reducer derives the structural edges. The engine is not exposed via the CLI.
 
-This is the M1/M1c-1 temporary form: container-per-run lands in M3, so the dispatcher
-runs in-process here (``docs/overview/agent-design.md`` section 6).
+The worker here runs in-process; container-per-worker (``[worker].execution=container``,
+M3a) is the production form and swaps the Worker backend without changing the engine
+(``docs/overview/agent-design.md`` section 6).
 """
 
 from __future__ import annotations

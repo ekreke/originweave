@@ -107,6 +107,10 @@ def _config_from_settings(base: Config, settings: Any) -> Config:
         ),
         worker=WorkerConfig(
             provider=worker.provider,
+            # execution/image are not exposed via the Settings RPC; keep the current
+            # values when rebuilding the worker block from a settings update (M3a).
+            execution=base.worker.execution,
+            image=base.worker.image,
             max_concurrency=worker.max_concurrency,
             tools=tuple(worker.tools),
             heartbeat_interval=worker.heartbeat_interval,
@@ -380,7 +384,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         """Build an engine over ``store`` from the resolved config/providers."""
         worker = self._ctx.config.worker
         return Engine(
-            worker=self._ctx.providers.worker,
+            # container-per-worker (M3a) binds the worker to this run; in-process
+            # returns the shared provider (tests inject a fake).
+            worker=self._ctx.worker_for(store.root),
             search=self._ctx.providers.search,
             prompt=self._ctx.providers.prompt,
             store=store,

@@ -27,6 +27,8 @@ ALLOWED_SEARCH_PROVIDERS: frozenset[str] = frozenset({"exa", "parallel"})
 ALLOWED_PROMPT_PROVIDERS: frozenset[str] = frozenset({"local", "langfuse"})
 ALLOWED_MODEL_PROVIDERS: frozenset[str] = frozenset({"openai"})
 ALLOWED_WORKER_PROVIDERS: frozenset[str] = frozenset({"local", "pi"})
+# Where a Worker call executes (M3a): in-process (temporary) or one container per call.
+ALLOWED_WORKER_EXECUTION: frozenset[str] = frozenset({"in-process", "container"})
 # Pi tool allowlist (M6); ``search`` is the TS extension tool, the rest are Pi built-ins.
 ALLOWED_WORKER_TOOLS: frozenset[str] = frozenset(
     {"search", "read", "grep", "find", "ls", "bash", "edit", "write"}
@@ -55,6 +57,8 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
     "worker": frozenset(
         {
             "provider",
+            "execution",
+            "image",
             "max_concurrency",
             "tools",
             "heartbeat_interval",
@@ -128,8 +132,13 @@ class BudgetConfig:
 
 @dataclass(frozen=True)
 class WorkerConfig:
-    provider: str = "pi"  # local | pi
-    # Per-run cap on concurrent workers (enforced by the dispatcher, M6).
+    provider: str = "pi"  # local | pi (the execution body inside the container)
+    # Where a Worker call runs (M3a): "in-process" (temporary, no Docker needed) or
+    # "container" (one container per call, red line 3).
+    execution: str = "in-process"  # in-process | container
+    # Runtime image used when execution == "container" (M3a; build it with `make image`).
+    image: str = "originweave-runtime:latest"
+    # Cap on concurrent workers (== concurrent containers under container-per-worker, M6).
     max_concurrency: int = 1
     # Pi tool allowlist; empty means "no tools" (M6).
     tools: tuple[str, ...] = ()
@@ -178,6 +187,8 @@ class Config:
             },
             "worker": {
                 "provider": self.worker.provider,
+                "execution": self.worker.execution,
+                "image": self.worker.image,
                 "max_concurrency": self.worker.max_concurrency,
                 "tools": list(self.worker.tools),
                 "heartbeat_interval": self.worker.heartbeat_interval,
@@ -220,6 +231,12 @@ class Config:
             raise ConfigError(
                 f"unknown worker provider {worker!r}; "
                 f"expected one of {sorted(ALLOWED_WORKER_PROVIDERS)}"
+            )
+        execution = self.worker.execution
+        if execution not in ALLOWED_WORKER_EXECUTION:
+            raise ConfigError(
+                f"unknown worker.execution {execution!r}; "
+                f"expected one of {sorted(ALLOWED_WORKER_EXECUTION)}"
             )
         if self.worker.max_concurrency <= 0:
             raise ConfigError(
@@ -387,6 +404,16 @@ def from_dict(data: Mapping[str, Any]) -> Config:
                 worker.get("provider"),
                 "worker.provider",
                 defaults.worker.provider,
+            ),
+            execution=_as_str(
+                worker.get("execution"),
+                "worker.execution",
+                defaults.worker.execution,
+            ),
+            image=_as_str(
+                worker.get("image"),
+                "worker.image",
+                defaults.worker.image,
             ),
             max_concurrency=_as_int(
                 worker.get("max_concurrency"),

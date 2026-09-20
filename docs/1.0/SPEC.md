@@ -313,11 +313,16 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 
 ## M3 · agent runtime 与 capabilities
 
-目标：真实执行走 container-per-run（容器内多 Worker）；能力经 MCP 暴露；
-支持异步 Hint 与停止/恢复。（`search`/`model`/prompt provider 已提前至 M1。）
+目标：真实执行走 **container-per-worker**（每个 Worker 调用一个临时容器；Engine/Dispatcher
+仍在 server 进程内编排并写黑板）；能力经 MCP 暴露；支持异步 Hint 与停止/恢复。
+（`search`/`model`/prompt provider 已提前至 M1。）
 
-- [ ] Docker runtime：每次 run 一个临时容器，内含 N≥1 Worker，挂载 run dir，run 结束销毁
-- [ ] server 侧容器生命周期管理（创建/监控/回收）与 Dispatcher 接入（协议唯一写入者）
+- [x] Docker runtime：每次 Worker 调用一个临时容器（container-per-worker），挂载 run dir，调用结束销毁；
+      并发上限见 `[worker].max_concurrency`；镜像内置 Node + `pi` + TS 扩展 — **M3a**：`Dockerfile.runtime`、
+      `make image`、`runtime/container.py`（`ContainerWorker`）、`runtime/runner.py`
+- [ ] 容器池（后续优化）：`[worker].max_concurrency` 预热 N 个容器、调用时复用（先 per-call 起/销毁）
+- [x] server 侧容器生命周期管理（创建/监控/回收）与 Dispatcher 接入（协议唯一写入者）— **M3a**：
+      `ContainerWorker` 每次起/销毁容器（`docker run/rm`）+ `GET /health` 就绪轮询；Engine 仍为唯一写入者
 - [ ] 预算执行：`max_steps` / `max_wall` / `max_cost` 触顶即停并落盘中间态
 - [ ] 可控性：随时停止/恢复，状态完整保留；Intent 心跳超时释放
 - [ ] 异步 Hint 注入（`author=human|agent`）不阻塞 run
@@ -330,7 +335,7 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 > **Phase R 调整**：原「`search`/`prompt`/`model` provider 真实接入」条目中的
 > `search` 与 `model` **已提前至 M1**；M3 起不再有离线/录制回放。
 
-验收：一次真实 run 在临时容器内完成；容器随 run 结束被回收；预算触顶、停止/恢复、
+验收：一次真实 run 的每个 Worker 调用在临时容器内完成并随调用结束回收；预算触顶、停止/恢复、
 Hint 注入、Gate C 行为均可观测。
 
 ---
@@ -344,7 +349,8 @@ Hint 注入、Gate C 行为均可观测。
 - [ ] 文档一致性回归：`overview/`、`proto/` 与本文件术语/契约无漂移
 
 验收：从 UI 发起一次核验并看到由抽象论点拆解出的 DAG + 记分卡，可在 Gate 处人工介入；
-`replay` 复现同一结论；架构红线未被突破（前端不编排、server 拥有调度、执行在临时容器内）。
+`replay` 复现同一结论；架构红线未被突破（前端不编排、server 拥有调度、执行在临时容器内
+（container-per-worker））。
 
 ---
 

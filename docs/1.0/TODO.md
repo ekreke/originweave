@@ -7,7 +7,8 @@
 
 - **M2 · 偏差记分卡（已完成）**（进度真相见 `SPEC.md` M2；详情见「已完成（近期）」）：
   verify 派发 + compare pass + deviation 记分 + 严格 `COMPLETE` + `report.md` + Gate B。
-  **下一步**：**M3**（容器化 runtime）或 **M5**（实体关系图）；M6 仅剩 **P6 容器化（并入 M3）**。
+  **下一步**：**M3** 进行中（**M3a 容器化 runtime 已完成**；待做 **M3b** 预算执行 + 可控性 →
+  **M3c** 异步 Hint + Gate C → **M3d** langfuse + capabilities + mcp → **M3e** 集成测试）；其后 **M5**。
 - **M6 · Pi Worker、可配置工具与会话**（用户新增；进度真相见 `SPEC.md` M6）。计划 P0–P6：
   - **P0 契约/文档（已完成）**、**P1 Worker 抽象 + 会话 + 事件（已完成）**：`capabilities/worker.py`、
     `Engine(worker=...)`、`[worker]` 配置、`SESSION`/`WORKER_STEP` 事件、run dir `sessions/`。
@@ -149,13 +150,20 @@
 
 ## 已知风险 / 缺口
 
+- **M3 container-per-worker（M3a）**：每次 Worker 调用起/销毁一个容器（`docker run` + `rm`），有
+  启动开销（Bootstrap/Reason/Validate/Explore 各一次）。**容器池预热（后续优化）**：设置
+  `[worker].max_concurrency` 时预热 N 个容器、调用时复用，见 `agent-design.md §6`。启用
+  `[worker].execution=container` 需 Docker + `make image`（默认 `in-process`，无 Docker 也可用；
+  `container` 下缺 Docker/镜像应明确报错，不静默降级）。
+
 - **M1c-1 C3b**：`SubmitHumanInput` 目前**同步 await** 整个续跑周期（Reason→dispatch 可能数秒~数十秒），
   与 SPEC 字面一致但会阻塞该 RPC；若需非阻塞可后续改为后台任务 + 前端轮询。同因，客户端取消该请求会让
   `CancelledError` 穿透 `_continue`，可能停在「Intent 已 `claimed` 无终态」的中间态（完整恢复归 M3）。
   后台引擎若在写 `FAILED` 前抛异常（设计上不应发生），run 会停在 `running`（`RunScheduler` 仅记 warning）。
   **单进程/单事件循环前提**：`allocate_run_id` 与 `RunStore` 的内存 `_count` 只在单 loop 下保证 id 唯一；
   `RunScheduler` 持有一个进程内 `RunStore` 表（`Agent` 与 `AddHint` 共用同一实例），C4 起 uvicorn **不得用
-  多 worker**，否则重复 id 会破坏「黑板=唯一事实来源」（M3 容器化后再解除）。
+  多 worker**，否则重复 id 会破坏「黑板=唯一事实来源」。（M3 的 container-per-worker 只把 **Worker**
+  移出进程，`RunStore`/Engine 仍在 server，故该约束 M3 后仍成立；解除需另行设计。）
 
 - **I6 收敛只按「新 Fact」触发重跑**：被 `RELEASE` 退回 `open` 的 Intent 不会单独重派（无新 Fact 时
   循环即停）；完整的 Intent 重试/调度归 M3。进度判据目前只看 `facts`，M5 引入 `entities`/`relations`
@@ -208,6 +216,15 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M3a · container-per-worker runtime**：新增 `src/originweave/runtime/`（`ContainerWorker` 每次
+  `Worker.run()` 起/销毁一个容器、`ContainerManager` 走 `docker` CLI、容器内 `runner.py` 暴露
+  `POST /run`+`GET /health`）、`Dockerfile.runtime` + `make image`、`[worker].execution`
+  （`in-process`|`container`，默认 `in-process`）+ `[worker].image`；`ServerContext.worker_for(run_dir)`
+  按 execution 返回 per-run worker，Engine/Dispatcher 仍在 server（编排 + 黑板唯一写入者），容器只跑
+  Worker。契约改 **container-per-run → container-per-worker**（`AGENTS.md` 红线 3、`agent-design.md §6`、
+  `blackboard-protocol.md §9`、`SPEC.md` M3、`docs/README.md`、`milestones.md`）。测试 `tests/test_runtime.py`
+  （fake manager + `httpx.MockTransport` + 真容器 `skipif` 用例）。`make lint`/`test`(381) 全绿。
 
 - **M6 P5 · 前端 Settings + 会话视图 + EVENTS 过滤**：`routes/Settings.tsx`（分组表单：worker provider/
   max_concurrency、LLM model/base_url（provider 与密钥只读）、budget、tools 多选、heartbeat）+

@@ -65,7 +65,7 @@ docs/
 3. **架构红线**（任何改动都不得突破）：
    - 前端不拥有执行编排（frontend does not own execution orchestration）。
    - server 拥有调度、持久化与运行时生命周期。
-   - 实际任务执行发生在**每次 run 一个临时容器**（container-per-run）中。
+   - 实际任务执行发生在**每个 Worker 调用一个临时容器**（container-per-worker）中。
    - provider/model/runtime 解耦（替换 provider 不改编排代码）。
    - 黑板是唯一事实来源，所有状态变更经事件写回，不得旁路。
 4. **文档语言**：中文，代码标识符与字段名保留英文。

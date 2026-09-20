@@ -449,6 +449,7 @@ Worker A 写入新 Fact  →  图变化（环境更新）  →  Worker B 下一�
 ## 9. 与架构红线的对齐
 
 - 黑板的持久化与一致性归 **Server**（对应"server 拥有调度与持久化"）。
-- Dispatcher 承担调度与容器生命周期（对应"server 拥有运行时生命周期"）。
-- Worker 全部运行在**每次 run 一个临时容器**内（container-per-run）。
+- 容器生命周期由 server 侧承担（`ServerContext`/`ContainerWorker`，M3a；对应"server 拥有运行时生命周期"）。
+- Worker **每次调用**运行在**一个临时容器**内（container-per-worker）；Engine/Dispatcher 仍在
+  server 进程内编排并写黑板。
 - 前端只读由黑板派生的视图，**不拥有执行编排**。
