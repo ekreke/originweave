@@ -92,13 +92,19 @@ class Worker(Protocol):
 
 
 def board_payload(board: Board) -> dict[str, Any]:
-    """Render the board slice a worker observes (the Observe step)."""
+    """Render the board slice a worker observes (the Observe step).
+
+    ``decisions`` carries the human Gate rulings (Gate A/B) so a resumed worker can see
+    the arbitration it must honour; ``waitingFor`` is omitted because a worker only runs
+    when no gate is pending.
+    """
     return {
         "origin": board.origin.to_dict(),
         "goal": board.goal.to_dict(),
         "facts": [fact.to_dict() for fact in board.facts],
         "intents": [intent.to_dict() for intent in board.intents],
         "hints": [hint.to_dict() for hint in board.hints],
+        "decisions": [decision.to_dict() for decision in board.decisions],
     }
 
 

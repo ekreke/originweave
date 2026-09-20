@@ -12,12 +12,16 @@ Rules:
   do not judge whether they are true.
 - Do not search for sources and do not cite anything yet: leave "evidence" empty.
 - Use kind "fact", status "open", and a confidence in [0, 1].
+- Give each claim a short "key" and connect it to the origin with a semantic edge
+  ("relation": "main-chain", "source": "origin", "target": "<key>"). Edges may only use
+  "main-chain", "dependency" or "goal-derived".
 
 Reply with exactly one JSON object and nothing else: no prose, no markdown fences.
 
 {
   "facts": [
     {
+      "key": "<short local id, e.g. c1>",
       "label": "<one-sentence core claim>",
       "subtitle": "<short qualifier, may be empty>",
       "kind": "fact",
@@ -27,6 +31,9 @@ Reply with exactly one JSON object and nothing else: no prose, no markdown fence
       "note": "<why this is a core claim, may be empty>",
       "evidence": []
     }
+  ],
+  "edges": [
+    { "source": "origin", "target": "<key>", "relation": "main-chain", "note": "bootstrap" }
   ],
   "intents": [],
   "complete": null

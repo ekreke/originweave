@@ -515,3 +515,97 @@ async def test_create_run_records_budget_override_and_analysis(tmp_path: Path) -
     assert meta is not None
     assert meta["analysis"] == "provenance"
     assert meta["budget"] == {"max_steps": 7, "max_wall": "3m", "max_cost": 1.5}
+
+
+# ------------------------------------------------------------------- M2: report
+
+
+def _write_run_with_deviation(runs_dir: Path, run_id: str) -> None:
+    store = RunStore(runs_dir / run_id)
+    store.init_layout()
+    store.write_run_meta({"id": run_id, "project_id": "p", "title": "T", "goal": "g"})
+    at = "2026-01-01T00:00:0{}"
+    store.append_event("PROJECT", {"origin": _ORIGIN, "goal": _GOAL}, at=at.format(0))
+    store.append_event(
+        "INTENT",
+        {"intent": {"id": "i1", "type": "decompose", "from": "f1", "question": "q"}},
+        at=at.format(1),
+    )
+    store.append_event(
+        "EXECUTE", {"intentId": "i1", "worker": "w", "model": "x"}, at=at.format(2)
+    )
+    deviation = {
+        "id": "d1",
+        "kind": "deviation",
+        "label": "wrong attribution",
+        "subtitle": "severity=high \u00b7 confidence=0.90",
+        "role": "none",
+        "status": "flagged",
+        "confidence": 0.9,
+        "note": "note",
+        "evidence": [
+            {
+                "id": "ev1",
+                "quote": "55%",
+                "sourceTitle": "Lab",
+                "url": "https://example.com/lab",
+                "locator": "p.1",
+            }
+        ],
+    }
+    store.append_event("CONCLUDE", {"intentId": "i1", "facts": [deviation]}, at=at.format(3))
+    store.append_event("COMPLETE", {"verdict": "\u90e8\u5206\u504f\u5dee"}, at=at.format(4))
+
+
+async def test_get_run_exposes_report_and_deviations(tmp_path: Path) -> None:
+    _write_run_with_deviation(tmp_path / "runs", "run_001")
+
+    async with _client(tmp_path) as client:
+        response = await _post(client, "GetRun", {"runId": "run_001"})
+
+    detail = response.json()["runDetail"]
+    assert detail["deviations"][0]["id"] == "d1"
+    assert detail["deviations"][0]["severity"] == "high"
+    assert detail["report"]["verdict"] == "\u90e8\u5206\u504f\u5dee"
+    assert detail["report"]["findings"][0]["nodeId"] == "d1"
+
+
+async def test_submit_human_input_approves_gate_b(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "run_001")
+    store.init_layout()
+    store.write_run_meta({"id": "run_001", "project_id": "p", "goal": "g"})
+    at = "2026-01-01T00:00:0{}"
+    store.append_event("PROJECT", {"origin": _ORIGIN, "goal": _GOAL}, at=at.format(0))
+    store.append_event(
+        "REQUEST_HUMAN", {"gate": "arbitrate", "question": "which source?"}, at=at.format(1)
+    )
+
+    ctx = _ctx(tmp_path, NO_REASON)  # the resumed Reason proposes nothing
+    async with _client_for(ctx) as client:
+        response = await _post(
+            client,
+            "SubmitHumanInput",
+            {"runId": "run_001", "gate": "arbitrate", "decision": "approve"},
+        )
+        await ctx.scheduler.drain()
+
+    assert response.status_code == 200
+    events = RunStore(tmp_path / "runs" / "run_001").read_events()
+    decisions = [event for event in events if event.type == "HUMAN_INPUT"]
+    assert len(decisions) == 1
+    assert decisions[0].payload["gate"] == "arbitrate"
+
+
+async def test_get_run_malformed_deviation_reports_internal(tmp_path: Path) -> None:
+    _write_run_with_deviation(tmp_path / "runs", "run_001")
+    events_path = tmp_path / "runs" / "run_001" / "events.jsonl"
+    events_path.write_text(
+        events_path.read_text(encoding="utf-8").replace("severity=high", "no-severity"),
+        encoding="utf-8",
+    )
+
+    async with _client(tmp_path) as client:
+        response = await _post(client, "GetRun", {"runId": "run_001"})
+
+    assert response.status_code == 500
+    assert response.json()["code"] == "internal"

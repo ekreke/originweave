@@ -17,6 +17,7 @@ from originweave.v1 import originweave_pb2 as pb
 from ..blackboard import Board, Edge, Evidence, Fact, Hint, HumanDecision, Intent, WaitingFor
 from ..events import Event
 from ..persistence import Project, Run
+from ..report import Deviation, Report, derive_report
 
 
 def evidence_pb(evidence: Evidence) -> Any:
@@ -99,6 +100,27 @@ def decision_pb(decision: HumanDecision) -> Any:
     )
 
 
+def deviation_pb(deviation: Deviation) -> Any:
+    return pb.Deviation(
+        id=deviation.id,
+        title=deviation.title,
+        summary=deviation.summary,
+        severity=deviation.severity,
+        confidence=deviation.confidence,
+        node_id=deviation.nodeId,
+    )
+
+
+def report_pb(report: Report) -> Any:
+    return pb.Report(
+        run_id=report.runId,
+        verdict=report.verdict,
+        summary=report.summary,
+        findings=[deviation_pb(finding) for finding in report.findings],
+        sources=[evidence_pb(source) for source in report.sources],
+    )
+
+
 def event_pb(event: Event) -> Any:
     payload = struct_pb2.Struct()
     json_format.ParseDict(event.payload, payload)
@@ -151,7 +173,8 @@ def run_pb(run: Run) -> Any:
 
 def run_detail_pb(run: Run, board: Board, events: Sequence[Event]) -> Any:
     waiting = waiting_for_pb(board.waitingFor) if board.waitingFor is not None else None
-    return pb.RunDetail(
+    report = derive_report(board, run_id=run.id)
+    detail = pb.RunDetail(
         run=run_pb(run),
         origin=fact_pb(board.origin),
         goal=fact_pb(board.goal),
@@ -159,9 +182,13 @@ def run_detail_pb(run: Run, board: Board, events: Sequence[Event]) -> Any:
         intents=[intent_pb(intent) for intent in board.intents],
         hints=[hint_pb(hint) for hint in board.hints],
         edges=[edge_pb(edge) for edge in board.edges],
+        deviations=[deviation_pb(finding) for finding in report.findings],
         events=[event_pb(event) for event in events],
         decisions=[decision_pb(decision) for decision in board.decisions],
-        # proto3 optional *message* fields reject direct assignment; constructor
-        # kwargs work. Same applies to report/entity_graph when later populated.
+        # proto3 optional *message* fields reject direct assignment; constructor kwargs
+        # work (and CopyFrom below). Same applies to entity_graph when M5 lands.
         waiting_for=waiting,
     )
+    if report.verdict or report.findings:
+        detail.report.CopyFrom(report_pb(report))
+    return detail

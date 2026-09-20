@@ -19,11 +19,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .blackboard import BlackboardError, Board, Evidence, Fact, Intent
+from .blackboard import BlackboardError, Board, Edge, Evidence, Fact, Intent
 from .capabilities.base import CapabilityError, PromptProvider, PromptTemplate, SearchProvider
 from .capabilities.worker import TaskKind, Worker, WorkerReply
 from .events import Event, now_iso
 from .reduce import reduce
+from .report import SEVERITY_STATUS, ReportError, derive_report, parse_severity, render_report
 from .store import RunStore
 
 # Default worker label for the serial passes (Bootstrap/Reason/Validate). Dispatch
@@ -34,8 +35,10 @@ WORKER_ID = "worker-1"
 # Intent so the pass is auditable and dispatchable like any other.
 BOOTSTRAP_QUESTION = "Extract document A's core abstract claim(s) (Bootstrap)."
 
-# HITL gate identifiers (frozen in proto/...:303-309): Gate A confirms the core claim.
+# HITL gate identifiers (frozen in proto/...:303-309): Gate A confirms the core claim,
+# Gate B (verify) arbitrates a source conflict (M2). Gate C (review) lands in M3.
 GATE_A = "confirm-claim"
+GATE_B = "arbitrate"
 
 # Human-readable id prefix per Fact.kind, so replayed ids read as f1/c1/s1/... .
 _PREFIX: dict[str, str] = {
@@ -47,13 +50,28 @@ _PREFIX: dict[str, str] = {
     "deviation": "d",
 }
 
-# Intent types the dispatcher can execute in this slice. A "verify" Intent needs the
-# compare capability (M2), so it stays open until then instead of failing the run.
-DISPATCHABLE_TYPES: tuple[str, ...] = ("explore", "decompose")
+# Intent types the dispatcher can execute. A "verify" Intent runs the compare pass
+# (M2), which scores deviations rather than chasing sources.
+DISPATCHABLE_TYPES: tuple[str, ...] = ("explore", "decompose", "verify")
 
 # What an "explore" Intent may produce (blackboard-protocol.md section 2.2): it chases
 # citations/sources. "decompose" yields sub-claims, checked separately via Fact.role.
 _EXPLORE_FACT_KINDS: frozenset[str] = frozenset({"citation", "source"})
+
+# What a "verify" Intent must produce (M2): exactly one compare node plus 0..N deviations.
+_COMPARE_KIND = "compare"
+_DEVIATION_KIND = "deviation"
+# Fact kinds a "verify" Intent may write; the compare node is checked separately.
+_VERIFY_FACT_KINDS: frozenset[str] = frozenset({_COMPARE_KIND, _DEVIATION_KIND})
+
+# Semantic edge relations a worker may carry in its reply (M2). Structural edges
+# (spawns/resolves/decomposes) are derived by the reducer and must never be supplied
+# (blackboard-protocol.md section 2.4).
+SEMANTIC_RELATIONS: frozenset[str] = frozenset({"main-chain", "dependency", "goal-derived"})
+
+# HITL gates a worker may request through its reply. Gate A is engine-issued after
+# Bootstrap; Gate B (arbitrate) is requested by a verify pass. Gate C (review) is M3.
+WORKER_GATES: frozenset[str] = frozenset({"arbitrate"})
 
 
 class EngineError(ValueError):
@@ -69,17 +87,29 @@ class WorkerResult:
     """Parsed worker reply; ids are placeholders until the engine assigns them.
 
     Bootstrap writes ``facts``; Reason writes ``intents`` (and may set ``complete``);
-    Explore writes the facts behind one Intent.
+    Explore writes the facts behind one Intent. A reply may also carry semantic
+    ``edges`` (section 2.4) and, for a verify pass, a ``gate`` request (Gate B).
+    ``fact_keys`` maps a worker-local ``key`` to the index of the fact it names, so
+    edges can reference facts from the same reply before real ids are assigned.
     """
 
     facts: list[Fact] = field(default_factory=list)
     intents: list[Intent] = field(default_factory=list)
     complete: str | None = None
+    edges: list[dict[str, Any]] = field(default_factory=list)
+    gate: dict[str, str] | None = None
+    fact_keys: dict[str, int] = field(default_factory=dict)
 
 
-def _parse_fact(item: Any, ev_seq: int) -> tuple[Fact, int]:
+def _parse_fact(item: Any, ev_seq: int) -> tuple[Fact, int, str | None]:
     if not isinstance(item, dict):
         raise EngineError("each fact must be a JSON object")
+    raw_key = item.get("key")
+    key: str | None = None
+    if raw_key is not None:
+        if not isinstance(raw_key, str) or not raw_key:
+            raise EngineError("fact.key must be a non-empty string")
+        key = raw_key
     raw_evidence = item.get("evidence", [])
     if not isinstance(raw_evidence, list):
         raise EngineError("fact.evidence must be a list")
@@ -93,15 +123,41 @@ def _parse_fact(item: Any, ev_seq: int) -> tuple[Fact, int]:
             evidence.append(Evidence.from_dict({**entry, "id": f"ev{ev_seq}"}))
         except BlackboardError as exc:
             raise EngineError(f"invalid evidence: {exc}") from exc
-    # Fact.from_dict re-parses its own evidence, so drop the raw list first; the id
-    # below is a placeholder that Engine replaces with a deterministic one.
-    body = {key: value for key, value in item.items() if key != "evidence"}
+    # Fact.from_dict re-parses its own evidence, so drop the raw list first; ``key`` is a
+    # worker-local reference (not a Fact field) and is dropped too. The id below is a
+    # placeholder that Engine replaces with a deterministic one.
+    body = {k: v for k, v in item.items() if k not in ("evidence", "key")}
     try:
         fact = Fact.from_dict({**body, "id": "?"})
     except BlackboardError as exc:
         raise EngineError(f"invalid fact: {exc}") from exc
     fact.evidence = evidence
-    return fact, ev_seq
+    return fact, ev_seq, key
+
+
+def _parse_edge(item: Any) -> dict[str, Any]:
+    """Parse one semantic edge from a worker reply (section 2.4).
+
+    ``source``/``target`` may be an existing fact id or a ``key`` naming a fact from
+    the same reply; they are resolved to real ids later by :func:`_resolve_edges`.
+    """
+    if not isinstance(item, dict):
+        raise EngineError("each edge must be a JSON object")
+    source = item.get("source")
+    target = item.get("target")
+    relation = item.get("relation")
+    note = item.get("note", "")
+    if not isinstance(source, str) or not source:
+        raise EngineError("edge.source must be a non-empty string")
+    if not isinstance(target, str) or not target:
+        raise EngineError("edge.target must be a non-empty string")
+    if relation not in SEMANTIC_RELATIONS:
+        raise EngineError(
+            f"edge.relation must be one of {sorted(SEMANTIC_RELATIONS)}; got {relation!r}"
+        )
+    if not isinstance(note, str):
+        raise EngineError("edge.note must be a string")
+    return {"source": source, "target": target, "relation": relation, "note": note}
 
 
 def _parse_intent(item: Any) -> Intent:
@@ -113,12 +169,16 @@ def _parse_intent(item: Any) -> Intent:
         raise EngineError(f"invalid intent: {exc}") from exc
 
 
-def parse_result(text: str) -> WorkerResult:
+def parse_result(
+    text: str, *, allow_edges: bool = False, allow_gate: bool = False
+) -> WorkerResult:
     """Parse a worker's strict-JSON reply into a :class:`WorkerResult`.
 
     The reply must be a single JSON object (no markdown fences) carrying ``facts``,
     ``intents`` and ``complete``; enum values are validated against the blackboard
-    domains. Malformed replies raise :class:`EngineError`.
+    domains. An Explore reply may additionally carry semantic ``edges`` (section 2.4)
+    and a ``gate`` request (Gate B); ``allow_edges``/``allow_gate`` bound which tasks
+    may. Malformed replies raise :class:`EngineError`.
     """
     try:
         data = json.loads(text)
@@ -128,15 +188,23 @@ def parse_result(text: str) -> WorkerResult:
         raise EngineError("worker reply must be a JSON object")
     raw_facts = data.get("facts", [])
     raw_intents = data.get("intents", [])
+    raw_edges = data.get("edges", [])
     if not isinstance(raw_facts, list):
         raise EngineError("'facts' must be a list")
     if not isinstance(raw_intents, list):
         raise EngineError("'intents' must be a list")
+    if not isinstance(raw_edges, list):
+        raise EngineError("'edges' must be a list")
 
     facts: list[Fact] = []
+    fact_keys: dict[str, int] = {}
     ev_seq = 0  # shared across facts so evidence ids stay unique within a reply
-    for item in raw_facts:
-        fact, ev_seq = _parse_fact(item, ev_seq)
+    for index, item in enumerate(raw_facts):
+        fact, ev_seq, key = _parse_fact(item, ev_seq)
+        if key is not None:
+            if key in fact_keys:
+                raise EngineError(f"duplicate fact.key {key!r}")
+            fact_keys[key] = index
         facts.append(fact)
     intents = [_parse_intent(item) for item in raw_intents]
 
@@ -148,7 +216,80 @@ def parse_result(text: str) -> WorkerResult:
     elif raw_complete is not None:
         raise EngineError("'complete' must be an object or null")
 
-    return WorkerResult(facts=facts, intents=intents, complete=complete)
+    if raw_edges and not allow_edges:
+        raise EngineError("this task must not carry 'edges'")
+    edges = [_parse_edge(item) for item in raw_edges]
+
+    raw_gate = data.get("gate")
+    gate: dict[str, str] | None = None
+    if raw_gate is not None:
+        if not allow_gate:
+            raise EngineError("this task must not carry 'gate'")
+        if not isinstance(raw_gate, dict):
+            raise EngineError("'gate' must be an object")
+        gate_name = raw_gate.get("gate")
+        question = raw_gate.get("question", "")
+        if gate_name not in WORKER_GATES:
+            raise EngineError(
+                f"gate.gate must be one of {sorted(WORKER_GATES)}; got {gate_name!r}"
+            )
+        if not isinstance(question, str):
+            raise EngineError("gate.question must be a string")
+        if complete is not None:
+            raise EngineError("a reply must not carry both 'gate' and 'complete'")
+        if intents:
+            raise EngineError("a reply must not carry both 'gate' and 'intents'")
+        gate = {"gate": gate_name, "question": question}
+
+    return WorkerResult(
+        facts=facts,
+        intents=intents,
+        complete=complete,
+        edges=edges,
+        gate=gate,
+        fact_keys=fact_keys,
+    )
+
+
+def _resolve_edges(
+    raw_edges: Sequence[Mapping[str, Any]],
+    fact_ids: Sequence[str],
+    key_to_id: Mapping[str, str],
+    board: Board,
+    *,
+    intent_id: str,
+) -> list[Edge]:
+    """Turn a worker's raw semantic edges into :class:`Edge` objects with real ids.
+
+    ``source``/``target`` resolve from a worker-local ``key`` (a fact in this reply) or
+    an existing board fact id; anything else is a malformed reply. Self-loops are
+    rejected. Ids are ``<intent>-e<position>``, deterministic for a given reply.
+    """
+    existing = {"origin", "goal"} | {fact.id for fact in board.facts}
+    for key in key_to_id:
+        if key in existing:
+            raise EngineError(f"fact.key {key!r} shadows an existing fact id")
+    known = existing | set(fact_ids)
+    edges: list[Edge] = []
+    for position, raw in enumerate(raw_edges):
+        source = key_to_id.get(str(raw["source"]), str(raw["source"]))
+        target = key_to_id.get(str(raw["target"]), str(raw["target"]))
+        if source not in known:
+            raise EngineError(f"edge.source {raw['source']!r} is not a known fact or key")
+        if target not in known:
+            raise EngineError(f"edge.target {raw['target']!r} is not a known fact or key")
+        if source == target:
+            raise EngineError(f"edge cannot be a self-loop on {source!r}")
+        edges.append(
+            Edge(
+                id=f"{intent_id}-e{position + 1}",
+                source=source,
+                target=target,
+                relation=str(raw["relation"]),
+                note=str(raw["note"]),
+            )
+        )
+    return edges
 
 
 @dataclass
@@ -188,6 +329,9 @@ def parse_validation(text: str, count: int, known_intent_ids: set[str]) -> Valid
         raise EngineError(f"validate reply is not valid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise EngineError("validate reply must be a JSON object")
+    if data.get("facts") or data.get("edges") or data.get("gate") is not None:
+        # Validate classifies candidate Intents; facts/edges/gate belong to other tasks.
+        raise EngineError("validate reply must carry only 'keep' and 'drop'")
     raw_keep = data.get("keep", [])
     raw_drop = data.get("drop", [])
     if not isinstance(raw_keep, list):
@@ -257,6 +401,9 @@ class _ExploreOutcome:
     intent_id: str
     worker: str
     facts: list[Fact] = field(default_factory=list)
+    edges: list[dict[str, Any]] = field(default_factory=list)
+    gate: dict[str, str] | None = None
+    fact_keys: dict[str, int] = field(default_factory=dict)
     reply: WorkerReply | None = None
     session_id: str = ""
     started: str = ""
@@ -498,7 +645,8 @@ class Engine:
         needs a fact-supersession event the contract does not have yet, so the board is
         unchanged (``blackboard-protocol.md`` section 7). The board is the source of truth
         for where we paused, and the id counters are rebuilt from it, so resuming works
-        even on a fresh ``Engine`` over the same run directory.
+        even on a fresh ``Engine`` over the same run directory. Gate A (``confirm-claim``)
+        and Gate B (``arbitrate``, M2) are supported.
         """
         if decision not in ("approve", "edit", "reject"):
             raise EngineError(f"unknown decision {decision!r}; expected approve|edit|reject")
@@ -507,9 +655,10 @@ class Engine:
         if board.status != "awaiting_human" or board.waitingFor is None:
             raise EngineError("no human gate is awaiting input")
         gate = board.waitingFor.gate
-        if gate != GATE_A:
+        if gate not in (GATE_A, GATE_B):
             raise EngineError(f"unsupported gate {gate!r}")
         self._restore_counters(board, events)
+        label = "Gate A" if gate == GATE_A else "Gate B"
         self._store.append_event(
             "HUMAN_INPUT",
             {
@@ -519,10 +668,10 @@ class Engine:
                 "targets": list(targets),
                 "author": "human",
             },
-            message=f"Gate A: {decision}",
+            message=f"{label}: {decision}",
         )
         if decision == "reject":
-            self._store.append_event("STOPPED", {"reason": "Gate A rejected by human"})
+            self._store.append_event("STOPPED", {"reason": f"{label} rejected by human"})
             return reduce(self._store.read_events())
         return await self._continue()
 
@@ -594,6 +743,41 @@ class Engine:
             if rounds >= self._max_rounds:
                 return board
 
+    def _goal_satisfied(self, board: Board) -> bool:
+        """Whether the structural stop condition holds (M2, protocol section 4.3 step 8).
+
+        A run may complete only when the goal is *provenance-complete*: every main-claim
+        was decomposed into sub-claims, every sub-claim has been chased (an ``explore``
+        pass) or judged (a ``verify`` pass), and at least one compare pass scored
+        deviations. This keeps Reason from declaring completion while gaps remain.
+        """
+        decomposed: set[str] = set()
+        handled: set[str] = set()
+        for intent in board.intents:
+            if not intent.producedFacts:
+                continue
+            if intent.type == "decompose":
+                decomposed.add(intent.from_)
+            elif intent.type in ("explore", "verify"):
+                # A sub-claim counts as handled once chased or judged; a pass that found
+                # nothing still counts as an attempt, so an unsourceable sub-claim does
+                # not block completion forever.
+                handled.add(intent.from_)
+        if not any(fact.kind == _COMPARE_KIND for fact in board.facts):
+            return False
+        for fact in board.facts:
+            if fact.role == "main-claim" and fact.id not in decomposed:
+                return False
+            if fact.role == "sub-claim" and fact.id not in handled:
+                return False
+        return True
+
+    def _write_report(self) -> None:
+        """Write ``report.md`` for a completed run (a derived artifact, never an event)."""
+        board = reduce(self._store.read_events())
+        report = derive_report(board, run_id=self._store.root.name)
+        self._store.write_report(render_report(report))
+
     async def _bootstrap(self) -> None:
         try:
             template = await self._prompt.get("bootstrap")
@@ -609,7 +793,15 @@ class Engine:
             self._store.append_event("FAILED", {"reason": str(exc)})
             return
         try:
-            result = parse_result(reply.text)
+            result = parse_result(reply.text, allow_edges=True)
+            if result.intents:
+                raise EngineError("Bootstrap must not produce intents")
+            for fact in result.facts:
+                if fact.kind != "fact" or fact.role != "main-claim":
+                    raise EngineError(
+                        "Bootstrap must produce fact/main-claim facts; "
+                        f"got kind={fact.kind!r} role={fact.role!r}"
+                    )
         except EngineError as exc:
             # An unusable reply ends the run; keep the session for the audit.
             self._fail(
@@ -638,9 +830,33 @@ class Engine:
         # Worker replies carry no ids; assign deterministic ones before writing back.
         for fact in result.facts:
             fact.id = self._next_fact_id(fact.kind)
+        key_to_id = {key: result.facts[index].id for key, index in result.fact_keys.items()}
+        try:
+            edges = _resolve_edges(
+                result.edges,
+                [fact.id for fact in result.facts],
+                key_to_id,
+                board,
+                intent_id=intent.id,
+            )
+        except EngineError as exc:
+            self._fail(
+                exc,
+                reply=reply,
+                session_id=session_id,
+                task="Bootstrap",
+                intent_id=intent.id,
+                started=started,
+                ended=ended,
+            )
+            return
         self._store.append_event(
             "CONCLUDE",
-            {"intentId": intent.id, "facts": [fact.to_dict() for fact in result.facts]},
+            {
+                "intentId": intent.id,
+                "facts": [fact.to_dict() for fact in result.facts],
+                "edges": [edge.to_dict() for edge in edges],
+            },
         )
         self._record_session(
             reply,
@@ -714,7 +930,14 @@ class Engine:
                 started=started,
                 ended=ended,
             )
+            if not self._goal_satisfied(board):
+                # The model judged the goal met, but the structural stop condition is not
+                # satisfied yet (every claim decomposed and sourced, deviations scored).
+                # Keep the run going instead of completing early; a later round can still
+                # complete once the gaps are filled (blackboard-protocol section 4.3).
+                return
             self._store.append_event("COMPLETE", {"verdict": result.complete})
+            self._write_report()
             return
 
         decisions: list[IntentDecision] | None = None
@@ -763,12 +986,14 @@ class Engine:
         """Run one dispatch round: every open Intent the engine can execute.
 
         The round works on a snapshot of the board as Reason left it (a later Reason
-        round handles the facts it produces, I6); ``verify`` Intents stay open until M2
-        wires the compare capability. Every pending Intent is claimed up front (id
-        order), then the Explore passes run concurrently, bounded by ``max_concurrency``.
-        Outcomes are committed back in id order, so the Board (fact ids and structural
-        edges) is deterministic even though completion order is not; the round stops
-        committing at the first hard failure.
+        round handles the facts it produces, I6). ``explore``/``decompose`` chase
+        sources; ``verify`` runs the compare pass and scores deviations (M2). Every
+        pending Intent is claimed up front (id order), then the passes run concurrently,
+        bounded by ``max_concurrency``. Outcomes are committed back in id order, so the
+        Board (fact ids and semantic edges) is deterministic even though completion
+        order is not; the round stops committing at the first hard failure. A verify
+        pass may request **Gate B** through its reply; the round then commits every fact
+        first and pauses afterwards, so the gate loses nothing.
         """
         board = reduce(self._store.read_events())
         pending = [
@@ -779,12 +1004,20 @@ class Engine:
         if not pending:
             return
         try:
-            # Fetched once for the whole round; a missing template is a provider
-            # failure, written before any Intent is claimed.
-            template = await self._prompt.get("explore")
+            # Fetched once for the whole round; a missing template is a provider failure,
+            # written before any Intent is claimed. Each kind is fetched only when needed.
+            templates: dict[str, PromptTemplate] = {}
+            if any(intent.type != "verify" for intent in pending):
+                templates["explore"] = await self._prompt.get("explore")
+            if any(intent.type == "verify" for intent in pending):
+                templates["verify"] = await self._prompt.get("compare")
         except (CapabilityError, FileNotFoundError) as exc:
             self._store.append_event("FAILED", {"reason": str(exc)})
             return
+
+        def template_for(intent: Intent) -> PromptTemplate:
+            return templates["verify"] if intent.type == "verify" else templates["explore"]
+
         # Claim each Intent up front, in id order, with a deterministic worker label;
         # a later provider/worker failure is then auditable as "claimed, then ...".
         workers = [self._worker_label(index) for index in range(len(pending))]
@@ -797,12 +1030,15 @@ class Engine:
         semaphore = asyncio.Semaphore(self._max_concurrency)
         outcomes = await asyncio.gather(
             *(
-                self._guarded_run_explore(intent, board, template, worker, session_id, semaphore)
+                self._guarded_run_explore(
+                    intent, board, template_for(intent), worker, session_id, semaphore
+                )
                 for intent, worker, session_id in zip(pending, workers, session_ids, strict=True)
             )
         )
         # Worker replies carry no ids; assign them at commit time, in id order, so the
-        # resulting fact ids never depend on which Explore happened to finish first.
+        # resulting fact ids never depend on which pass happened to finish first.
+        gate: dict[str, str] | None = None
         for outcome in outcomes:
             if outcome.error is not None:
                 if (
@@ -829,13 +1065,41 @@ class Engine:
                 return
             for fact in outcome.facts:
                 fact.id = self._next_fact_id(fact.kind)
+            key_to_id = {
+                key: outcome.facts[index].id for key, index in outcome.fact_keys.items()
+            }
+            try:
+                edges = _resolve_edges(
+                    outcome.edges,
+                    [fact.id for fact in outcome.facts],
+                    key_to_id,
+                    board,
+                    intent_id=outcome.intent_id,
+                )
+            except EngineError as exc:
+                # An edge that cannot be resolved is a malformed reply: terminal, and
+                # the session is kept for the audit, like any other bad reply.
+                self._fail(
+                    exc,
+                    reply=outcome.reply,
+                    session_id=outcome.session_id,
+                    task="Explore",
+                    intent_id=outcome.intent_id,
+                    started=outcome.started,
+                    ended=outcome.ended,
+                    worker=outcome.worker,
+                )
+                return
             self._store.append_event(
                 "CONCLUDE",
                 {
                     "intentId": outcome.intent_id,
                     "facts": [fact.to_dict() for fact in outcome.facts],
+                    "edges": [edge.to_dict() for edge in edges],
                 },
             )
+            if gate is None and outcome.gate is not None:
+                gate = outcome.gate
             assert outcome.reply is not None  # a success outcome always carries a reply
             self._record_session(
                 outcome.reply,
@@ -845,6 +1109,14 @@ class Engine:
                 started=outcome.started,
                 ended=outcome.ended,
                 worker=outcome.worker,
+            )
+        if gate is not None:
+            # Gate B: a verify pass hit an ambiguity or source conflict it cannot settle.
+            # Every fact of the round is already committed, so pausing loses nothing.
+            self._store.append_event(
+                "REQUEST_HUMAN",
+                {"gate": gate["gate"], "question": gate["question"]},
+                message="Gate B: arbitrate a source conflict",
             )
 
     async def _guarded_run_explore(
@@ -933,11 +1205,13 @@ class Engine:
                 with contextlib.suppress(asyncio.CancelledError):
                     await heartbeat
             try:
-                result = parse_result(reply.text)
+                result = parse_result(reply.text, allow_edges=True, allow_gate=True)
                 if result.intents:
                     raise EngineError("Explore must not produce intents; direction is Reason's job")
                 if result.complete is not None:
                     raise EngineError("Explore must not judge completion; that is Reason's job")
+                if result.gate is not None and intent.type != "verify":
+                    raise EngineError("only a verify pass may request a human gate")
                 self._check_explored_facts(intent, result.facts)
             except EngineError as exc:
                 # An unusable reply ends the run; keep the session for the audit.
@@ -954,6 +1228,9 @@ class Engine:
                 intent_id=intent.id,
                 worker=worker,
                 facts=result.facts,
+                edges=result.edges,
+                gate=result.gate,
+                fact_keys=result.fact_keys,
                 reply=reply,
                 session_id=session_id,
                 started=started,
@@ -975,6 +1252,9 @@ class Engine:
 
     def _check_explored_facts(self, intent: Intent, facts: list[Fact]) -> None:
         """Check a batch of produced facts against what the Intent type may yield."""
+        if intent.type == "verify":
+            self._check_verified_facts(intent, facts)
+            return
         for fact in facts:
             if intent.type == "decompose":
                 if fact.kind != "fact" or fact.role != "sub-claim":
@@ -998,6 +1278,55 @@ class Engine:
                 raise EngineError(
                     f"explore intent {intent.id}: {fact.kind} fact "
                     f"{fact.label!r} needs at least one evidence entry"
+                )
+
+    def _check_verified_facts(self, intent: Intent, facts: list[Fact]) -> None:
+        """Check a verify pass: exactly one compare node plus well-formed deviations (M2).
+
+        The compare node is the pass's own summary and must be ``verified``. Every
+        deviation needs evidence and a ``severity=`` subtitle whose level maps to its
+        ``status`` (high flags; medium/low are left for review). The frozen shape is the
+        sample fixture (``examples/copilot_productivity``).
+        """
+        compares = [fact for fact in facts if fact.kind == _COMPARE_KIND]
+        if len(compares) != 1:
+            raise EngineError(
+                f"verify intent {intent.id} must produce exactly one {_COMPARE_KIND} fact; "
+                f"got {len(compares)}"
+            )
+        for fact in facts:
+            if fact.kind == _COMPARE_KIND:
+                if fact.role != "none" or fact.status != "verified":
+                    raise EngineError(
+                        f"verify intent {intent.id}: {_COMPARE_KIND} fact must be "
+                        f"role=none/status=verified; got role={fact.role!r} "
+                        f"status={fact.status!r}"
+                    )
+                continue
+            if fact.kind != _DEVIATION_KIND:
+                raise EngineError(
+                    f"verify intent {intent.id} must produce {sorted(_VERIFY_FACT_KINDS)} "
+                    f"facts; got kind={fact.kind!r}"
+                )
+            if fact.role != "none":
+                raise EngineError(
+                    f"verify intent {intent.id} must produce role=none deviations; "
+                    f"got {fact.label!r} with role={fact.role!r}"
+                )
+            if not fact.evidence:
+                raise EngineError(
+                    f"verify intent {intent.id}: deviation {fact.label!r} needs at least "
+                    "one evidence entry"
+                )
+            try:
+                severity = parse_severity(fact)
+            except ReportError as exc:
+                raise EngineError(str(exc)) from exc
+            expected = SEVERITY_STATUS[severity]
+            if fact.status != expected:
+                raise EngineError(
+                    f"verify intent {intent.id}: deviation severity={severity} must have "
+                    f"status={expected}; got {fact.status!r}"
                 )
 
     async def _validate(self, candidates: list[Intent], board: Board) -> ValidationResult:
@@ -1061,6 +1390,7 @@ __all__ = [
     "BOOTSTRAP_QUESTION",
     "DISPATCHABLE_TYPES",
     "GATE_A",
+    "GATE_B",
     "Engine",
     "EngineError",
     "IntentDecision",

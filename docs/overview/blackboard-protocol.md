@@ -104,8 +104,9 @@ Edge { id, source, target, relation, note }
 - **结构性边**由 reducer 自动推导：`spawns`（`intent.from → intent`）、
   `resolves`（`intent → producedFacts`）、`decomposes`（`decompose` 型 intent 的
   `from → producedFacts`）。
-- **语义性边**（`main-chain` / `dependency` / `goal-derived`）无法从字段推出，
-  必须由事件 `payload.edges` 显式携带。
+- **语义性边**（`main-chain` / `dependency` / `goal-derived`）无法从字段推出，必须由事件
+  `payload.edges` 显式携带——由 Worker 在 reply 的 `edges` 中给出（`source`/`target` 可用 `key`
+  引用同批新 Fact），引擎分配 id 后解析并写入 `CONCLUDE`（§4.2）。
 
 ### 2.5 HumanDecision（人工裁决记录）
 ```text
@@ -173,25 +174,34 @@ Write Back → 把结论写回黑板（Fact + Evidence）
 | `Explore` | 认领一条 Intent，执行探索，产出结论 | 一个 Fact（`extract`/`relate` 时产出 Entity/Relation） |
 | `Validate` | 对 `Reason` 产出的候选 Intent 判重/取舍（独立 pass） | 每个候选的 keep / drop（drop → `dropped` Intent） |
 
-Worker 的结构化输出（**冻结**）：Worker 只返回**一个 JSON 对象**——不含 id、不含边；id 与结构性
-边由 Dispatcher / reducer 分配与推导（§2.4）。`kind`/`role`/`status`/`type` 取值域见 §2，
-非法即视为解析失败。
+Worker 的结构化输出（**冻结**）：Worker 只返回**一个 JSON 对象**——不含 id；id 与**结构性**边由
+Dispatcher / reducer 分配与推导（§2.4），**语义**边由 Worker 显式携带（`edges`，见下）。`kind`/
+`role`/`status`/`type` 取值域见 §2，非法即视为解析失败。
 
 ```json
 {
   "facts": [
-    { "label": "...", "subtitle": "...", "kind": "fact", "role": "main-claim",
+    { "key": "c1", "label": "...", "subtitle": "...", "kind": "fact", "role": "main-claim",
       "status": "open", "confidence": 0.8, "note": "...",
       "evidence": [ { "quote": "...", "sourceTitle": "...", "url": "...", "locator": "..." } ] }
   ],
+  "edges": [ { "source": "origin", "target": "c1", "relation": "main-chain", "note": "..." } ],
+  "gate": { "gate": "arbitrate", "question": "..." },
   "intents": [ { "type": "decompose", "from": "f1", "question": "..." } ],
   "complete": { "verdict": "..." }
 }
 ```
 
-- `complete` 为 `null` 表示未判定完成。
+- `complete` 为 `null` 表示未判定完成；`gate` 为 `null` 表示无需人工介入。
 - 一次 `Bootstrap` 的 `facts` 为 **0..N 个 `role=main-claim`**——资料 A 可能含**多个**核心抽象
   论点（`kind=fact`）；`Explore` 通常产出 1 个 Fact（`extract`/`relate` 时产 Entity/Relation，归 M5）。
+- **`key`**（M2，可选，仅限本 reply 内唯一）：新 Fact 的本地引用，供 `edges` 引用**同批** Fact；引擎
+  分配真实 id 后丢弃，**不写入 `Fact`**。
+- **`edges`**（M2，可选）：语义边 `main-chain | dependency | goal-derived`（结构边由 reducer 派生，
+  携带结构边即失败）。`source`/`target` 取黑板已有 Fact id 或本 reply 的 `key`；`Bootstrap` 与
+  `Explore` 可携带，`Reason`/`Validate` 携带即失败。
+- **`gate`**（M2，可选）：`gate` 仅 `arbitrate`（Gate B），与 `complete`/`intents` 互斥；**仅
+  `Explore`（verify 型）可携带**。
 
 `Validate` 指令的输出是**另一套 schema**（对候选 Intent 的取舍，而非新事实）：
 
@@ -213,13 +223,19 @@ question}`）一起经 `extra` 注入 worker 的 user 消息——**provider 选
 worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` 落会话快照。产出的 Fact 必须
 匹配 Intent 类型：`explore` → `citation`/`source`（`role=none` 且**至少一条** `Evidence`），
 `decompose` → `fact`/`sub-claim`。回复夹带 `intents` / `complete`、kind/role 不符或证据缺失
-均视为失败。`verify` 型 Intent 依赖 `compare`（M2），派发时保持 `open`。
+均视为失败。
+
+`verify` 型 Intent（M2）改为**派发**：引擎用 `prompts/compare.txt` 指令、**不检索**，让 Worker 在
+已有 facts × sources × goal 上评分偏差，产出**恰好一个** `compare`（`role=none`、`status=verified`）
+与 0..N 个 `deviation`（`role=none`、≥1 条 `Evidence`、`subtitle` 形如
+`severity=<high|medium|low> · confidence=<c>` 且 `status` 与之匹配：high→`flagged`、medium/low→
+`review`）。verify pass 可经 `gate` 请求 **Gate B**（§7）。
 
 各任务（Bootstrap / Reason / Explore / Validate）的**非法回复与模板缺失一律写 `FAILED` 终态
 事件**（原始回复经会话快照留痕，供审计），不向调用方抛异常——失败的因果链完整落在事件日志里，
 `replay` 可复现到死亡点。
 
-**派发（I4）**：一轮派发把快照上所有 `open` 且 `type∈{explore,decompose}` 的 Intent 先按 id 序
+**派发（I4）**：一轮派发把快照上所有 `open` 且 `type∈{explore,decompose,verify}` 的 Intent 先按 id 序
 统一写 `EXECUTE` 认领（worker 标签按序 `worker-1..N`），再以 `[worker].max_concurrency` 为上限
 并发执行。每个 Explore pass 的原始结果先缓存在内存，**提交阶段按 Intent id 序**分配 Fact id、
 写 `CONCLUDE`/`SESSION`——因此完成顺序不影响 Board（结构确定）；首个硬失败（provider/解析/超时
@@ -229,11 +245,12 @@ worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` �
 
 **收敛（I6）**：派发轮结束后，若产生了新 Fact，则对**新增 facts** 再跑一次 Reason（`REASON.start` 的
 `triggerFacts` 只记自上次 Reason 以来的新增 facts），如此循环（Stigmergy）。循环终止于：Reason 写
-`COMPLETE`（→ `completed`）／Reason 未产出可派发的 `open` Intent（死胡同，如仅剩 `verify`，run 保持
-`running`）／本轮未新增 Fact（无进展）。`Engine(max_rounds=…)` 是安全阀，命中后同样保持 `running`，
-不写终态事件（真正的预算执行 → `STOPPED` 归 M3）。**注意**：被 `RELEASE` 退回 `open` 的 Intent 只有
-在后续某轮因其他新 Fact 触发 Reason 时才会被重新派发；本轮若再无新 Fact，循环即停（完整的重试/调度
-归 M3）。
+`COMPLETE`（→ `completed`）／Reason 未产出可派发的 `open` Intent（死胡同，run 保持 `running`）／本轮
+未新增 Fact（无进展）。`Engine(max_rounds=…)` 是安全阀，命中后同样保持 `running`，不写终态事件（真正
+的预算执行 → `STOPPED` 归 M3）。**M2 起 `COMPLETE` 需过严格判据**（§4.3 第 8 步）：抽象论点全部拆解、
+子断言全部被 `explore` 或 `verify` 处理（追过来源或判定过）、且已有 compare 判定偏差，否则 Reason 的
+`complete` 被忽略、run 继续（`running`）。**注意**：被 `RELEASE` 退回 `open` 的 Intent 只有在后续某轮因其他新 Fact 触发 Reason 时
+才会被重新派发；本轮若再无新 Fact，循环即停（完整的重试/调度归 M3）。
 
 ### 4.3 一道题的完整生命周期
 ```text
@@ -260,9 +277,9 @@ worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` �
 用样例 `examples/copilot_productivity`（资料 A 是宣传文，含多个论点）走一遍。调用方构造
 `origin`（资料 A，`kind=origin`）与 `goal`（停止条件，`kind=goal`），调 `Engine.run(origin, goal)`：
 先跑一次 Bootstrap，再跑一次 Reason，然后派发 Reason 产出的开放 Intent（`explore` / `decompose`；
-`verify` 待 M2）。多轮 Stigmergy 收敛（新 Fact 再触发 Reason）归 I6。
+`verify` 自 M2 起派发）。多轮 Stigmergy 收敛（新 Fact 再触发 Reason）归 I6。
 
-**Bootstrap** Worker 返回（严格 JSON，无 id、无边）核心抽象论点：
+**Bootstrap** Worker 返回（严格 JSON，无 id；语义边可选）核心抽象论点：
 
 ```json
 { "facts": [
@@ -321,7 +338,7 @@ edges    origin → i1 (spawns)
 要点：**Worker 不写协议、不起 id**；**引擎是唯一写入者**且只负责「取指令 → 读图 → 调能力 →
 解析 → 发 id → 写事件」这条流水线；Reason 只能产 `open` 候选 Intent（生命周期字段由引擎重建），
 且 `complete` 与 `intents` 互斥；派发在 Reason 留下的快照上取 `open` 且
-`type∈{explore,decompose}` 的 Intent，按 id 序执行，`verify` 保持 `open`；任一 pass 写 `FAILED`
+`type∈{explore,decompose,verify}` 的 Intent，按 id 序执行；任一 pass 写 `FAILED`
 即确定性中止。示例为单轮快照；真实运行时每轮 dispatch 产生新 Fact 后会再跑 Reason（I6 收敛），
 见 §4.2。**所有"事实"都在 append-only 事件日志里**，Board 永远由 `reduce` 折出，故可重放。
 
@@ -399,7 +416,9 @@ Worker A 写入新 Fact  →  图变化（环境更新）  →  Worker B 下一�
 三个关键 Gate：
 - **Gate A · 论点确认**（Bootstrap 之后、Reason 之前）：确认核心抽象论点（`role=main-claim`）
   后再去拆解。gate id = `confirm-claim`。
-- **Gate B · 歧义裁决**（verify 阶段，置信度低或来源冲突时）：人工定夺口径/取值。gate id = `arbitrate`。
+- **Gate B · 歧义裁决**（verify 阶段，置信度低或来源冲突时）：人工定夺口径/取值。gate id =
+  `arbitrate`。**M2**：由 verify 型 `Explore` pass 在 reply 的 `gate` 字段中请求（引擎写
+  `REQUEST_HUMAN{gate:"arbitrate"}`，本轮已提交的 facts 不丢）；`resume` 支持 `arbitrate`。
 - **Gate C · 最终审阅**（记分卡产出前）：确认结论，或要求重查（产生新 Intent）。gate id = `review`。
 
 **程序化挂起/恢复（M1，库层）**：非 auto 时，`Engine.run` 在 Bootstrap 产出 main-claim 后写

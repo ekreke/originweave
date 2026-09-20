@@ -21,10 +21,11 @@ from originweave.v1.originweave_connect import OriginweaveService
 
 from ..blackboard import BlackboardError, Fact, Hint
 from ..config import parse_duration
-from ..engine import GATE_A, Engine, EngineError
+from ..engine import GATE_A, GATE_B, Engine, EngineError
 from ..events import now_iso
 from ..persistence import Project, Run, allocate_run_id, is_run_id, summarize_run
 from ..reduce import ReduceError, reduce
+from ..report import ReportError
 from ..store import RunStore
 from . import convert
 from .context import ServerContext
@@ -95,7 +96,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
         try:
             return pb.GetRunResponse(run_detail=self._run_detail(store))
-        except (BlackboardError, ReduceError) as exc:
+        except (BlackboardError, ReduceError, ReportError) as exc:
             raise ConnectError(
                 Code.INTERNAL, f"run {run_id!r} has a malformed event log: {exc}"
             ) from exc
@@ -218,9 +219,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
                 Code.INVALID_ARGUMENT,
                 f"gate {request.gate!r} does not match the pending gate {pending!r}",
             )
-        if pending != GATE_A:
-            # Gate B/C do not exist until M2/M3; a matching-but-unknown gate is not a
-            # client argument error, so report it as unimplemented rather than 400.
+        if pending not in (GATE_A, GATE_B):
+            # Gate C (review) lands in M3; a matching-but-unknown gate is not a client
+            # argument error, so report it as unimplemented rather than 400.
             raise ConnectError(Code.UNIMPLEMENTED, f"gate {pending!r} is not supported yet")
         if request.decision not in ("approve", "edit", "reject"):
             raise ConnectError(Code.INVALID_ARGUMENT, f"unknown decision {request.decision!r}")

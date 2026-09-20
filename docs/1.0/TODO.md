@@ -5,6 +5,9 @@
 
 ## 下一个任务
 
+- **M2 · 偏差记分卡（已完成）**（进度真相见 `SPEC.md` M2；详情见「已完成（近期）」）：
+  verify 派发 + compare pass + deviation 记分 + 严格 `COMPLETE` + `report.md` + Gate B。
+  **下一步候选**：M1c-1 **C4**（`originweave ui`）、**M1c-2b**（前端接线）、**M3**（容器化 runtime）。
 - **M6 · Pi Worker、可配置工具与会话**（用户新增；进度真相见 `SPEC.md` M6）。计划 P0–P6：
   - **P0 契约/文档（已完成）**、**P1 Worker 抽象 + 会话 + 事件（已完成）**：`capabilities/worker.py`、
     `Engine(worker=...)`、`[worker]` 配置、`SESSION`/`WORKER_STEP` 事件、run dir `sessions/`。
@@ -20,7 +23,7 @@
 - **M1 迭代切片**（引擎为库层、进程内 Dispatcher；`model`/`search` provider 已就绪）：
   已落地：**I1** Bootstrap、**I2a** `FAILED`/`STOPPED`、**I2** Reason、**I2b** Validate 去重、
   **I3** Explore + search（来源回链 `citation`/`source` + `Evidence`；`decompose`/`explore`
-  派发分支，`verify` 留待 M2；`engine.py`、`prompts/explore.txt`）、
+  派发分支，`verify` 后随 M2 落地；`engine.py`、`prompts/explore.txt`）、
   **I4** 并发派发 + 心跳/超时（`engine.py` `_dispatch`/`_run_explore`/`_heartbeat`；
   `[worker].heartbeat_{interval,timeout,on_timeout}`、`max_concurrency<=16`）、
   **I5** HITL Gate A（`engine.py` `run`/`resume`；`REQUEST_HUMAN`/`HUMAN_INPUT`，`auto` 跳过）、
@@ -180,6 +183,18 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M2 · 偏差记分卡（路线 B）**：库层新增 `src/originweave/report.py`（`Deviation`/`Report`、
+  `parse_severity`、`derive_report`、`render_report`）；`engine.py` —— **verify 型 Intent 派发**
+  （`prompts/compare.txt`、不检索、`_check_verified_facts` 校验 compare/deviation）、**语义边**
+  （reply `edges` + `key` 引用同批 Fact，`_resolve_edges`；Bootstrap/Explore 携带，Reason/Validate
+  携带即失败）、**严格 `COMPLETE`**（`_goal_satisfied`：论点全拆解、子断言回链或 `open`、已有
+  compare，否则 Reason 的 complete 被忽略）、**Gate B**（reply `gate` → `REQUEST_HUMAN{arbitrate}`；
+  `resume` 放行 `arbitrate`）；`store.write_report` 落 `report.md`（派生物，`replay` 不重写）；server
+  `convert.py` 填 `RunDetail.report`/`deviations`、`service.py` 放行 `arbitrate`。**契约**：
+  `blackboard-protocol §4.2`（reply `key`/`edges`/`gate`）、`§2.4`（语义边来源）、`§7`（Gate B）；
+  `agent-design §3.5`。测试 `tests/test_engine_m2.py`、`tests/test_report.py`、`tests/test_server.py`；
+  顺带修 live 的语义边漂移（Bootstrap `origin→claim` main-chain、Explore cite/link/evidence）。
 
 - **M1c-1 C3b · CreateRun + 后台调度 + AddHint/SubmitHumanInput**：`server/service.py` 实现
   `create_run`（project 必须已存在；`source_type=text` + 非空 `source_text` + `goal`，否则

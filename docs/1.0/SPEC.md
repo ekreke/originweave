@@ -104,7 +104,7 @@ API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）�
 - [x] 任务指令：`Reason`（产出候选 Intent）— `engine.py` + `prompts/reason.txt`
 - [x] 任务指令：`Explore`（认领 Intent 并执行探索）— `engine.py` + `prompts/explore.txt`
 - [x] 任务指令：`Validate`（独立判重 pass）— `engine.py` + `prompts/validate.txt`
-- [ ] Intent 三型调度分支：`decompose` / `explore` / `verify`（decompose/explore 已随 I3 落地，`verify` 待 M2 `compare`）
+- [x] Intent 三型调度分支：`decompose` / `explore` / `verify`（decompose/explore 随 I3，`verify` 随 M2 `compare` 落地）
 - [x] 抽象论点抽取：`Bootstrap` → `main-claim` — `engine.py` + `prompts/bootstrap.txt`
 - [x] 抽象论点拆解：`Intent(decompose)` → `sub-claim` — `engine.py`（`_run_explore` 派发分支）+ `prompts/explore.txt`
 - [x] 来源回链：`citation` / `source` 节点与 `Evidence{quote,sourceTitle,url,locator}` 登记 — `engine.py`（explore 分支调 `search`，结果经 `extra` 注入 worker）+ `prompts/explore.txt`
@@ -115,7 +115,7 @@ API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）�
 - [x] HITL 机制与 **Gate A（论点确认）**：`REQUEST_HUMAN`/`HUMAN_INPUT`，run → `awaiting_human`（程序化挂起/恢复；交互归 M1c-2）— `engine.py` `run`（Bootstrap 后写 `REQUEST_HUMAN{gate:"confirm-claim"}`）/`resume`（`approve|edit|reject`；reject→`STOPPED`）
 - [x] 自动路径：`[hitl].auto=true`（或 M1c-1 的 `CreateRunRequest.auto`）跳过 Gate — `Engine(auto=...)` + `run(auto=...)`
 - [x] 失败/停止事件：`FAILED` / `STOPPED` → `status=failed|stopped`（`events.py`/`reduce.py`；`paused` 随 M3）
-- [ ] 单测：注入 **fake provider**，对 fixture 输入产出确定性 Board/DAG（节点/边/证据断言）
+- [x] 单测：注入 **fake provider**，对 fixture 输入产出确定性 Board/DAG（节点/边/证据断言）— `tests/test_engine_m2.py::test_scored_run_is_deterministic`
 
 验收：对 `copilot_productivity` 样例，核心抽象论点被拆解为子断言，每条子断言可回溯到
 至少一条带 `quote+url` 的证据或标记为 `open`；≥2 Worker 并发时无 Intent 重复执行；
@@ -250,13 +250,13 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 
 目标：`Intent(verify)` / `compare(facts × sources × goal)` 输出偏差分类与 report。
 
-- [ ] `compare` 引擎节点（`compare` kind）汇总 facts × sources × goal
-- [ ] deviation 分类（篡改 / 改写 / 省略 / 归因错误 / 时间错置等）与 `deviation` 节点
-- [ ] 每项 deviation 带 `severity(high|medium|low)` 与 `confidence`
-- [ ] goal 重定义生效：抽象论点全部拆解 + 回链 + 偏差判定完成才 `COMPLETE`
-- [ ] 整体 `verdict` 与 `Report{summary,findings,sources}` 生成（run dir `report.md`）
-- [ ] **Gate B（歧义裁决）**：置信度低/来源冲突时发起 `REQUEST_HUMAN`
-- [ ] 单测：对样例给出预期偏差集合与阈值行为
+- [x] `compare` 引擎节点（`compare` kind）汇总 facts × sources × goal — `engine.py` `_check_verified_facts` + `prompts/compare.txt`
+- [x] deviation 分类（篡改 / 改写 / 省略 / 归因错误 / 时间错置等）与 `deviation` 节点 — verify pass 产出，`engine.py` `_check_verified_facts`
+- [x] 每项 deviation 带 `severity(high|medium|low)` 与 `confidence` — `Fact.subtitle`（`severity=… · confidence=…`）+ `report.parse_severity`
+- [x] goal 重定义生效：抽象论点全部拆解 + 回链 + 偏差判定完成才 `COMPLETE` — `engine.py` `_goal_satisfied`
+- [x] 整体 `verdict` 与 `Report{summary,findings,sources}` 生成（run dir `report.md`）— `report.py` `derive_report`/`render_report` + `store.write_report`
+- [x] **Gate B（歧义裁决）**：置信度低/来源冲突时发起 `REQUEST_HUMAN` — verify reply `gate` → `REQUEST_HUMAN{arbitrate}`；`resume` 支持 `arbitrate`
+- [x] 单测：对样例给出预期偏差集合与阈值行为 — `tests/test_engine_m2.py`、`tests/test_report.py`、`tests/test_server.py`
 
 验收：run dir 产出 `report.md`（含 verdict、逐条 deviation 与来源清单），并经 server
 `RunDetail.report` 暴露；Gate B 可对冲突来源人工裁决并继续。

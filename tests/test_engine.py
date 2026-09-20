@@ -149,6 +149,17 @@ def _explore_reply(*facts: dict[str, object]) -> str:
     return json.dumps({"facts": list(facts), "intents": [], "complete": None})
 
 
+def _compare_reply(*deviations: dict[str, object]) -> str:
+    compare = {
+        "label": "compare (facts x sources x goal)",
+        "kind": "compare",
+        "role": "none",
+        "status": "verified",
+        "confidence": 0.8,
+    }
+    return json.dumps({"facts": [compare, *deviations], "intents": [], "complete": None})
+
+
 def _sub_claim(label: str) -> dict[str, object]:
     return {
         "label": label,
@@ -662,12 +673,28 @@ async def test_explore_decompose_produces_sub_claims(tmp_path: Path) -> None:
     assert ("f1", "f3", "decomposes") in relations
 
 
-async def test_explore_leaves_verify_intents_open(tmp_path: Path) -> None:
+async def test_verify_intent_is_dispatched_to_compare(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
+    compare_reply = json.dumps(
+        {
+            "facts": [
+                {
+                    "label": "compare (facts x sources x goal)",
+                    "kind": "compare",
+                    "role": "none",
+                    "status": "verified",
+                    "confidence": 0.8,
+                }
+            ],
+            "intents": [],
+            "complete": None,
+        }
+    )
     model = _FakeModel(
         _bootstrap("A claim"),
         _reason({"type": "verify", "from": "f1", "question": "Compare f1 with its source."}),
         _validate(0),
+        compare_reply,
     )
     engine = Engine(
         worker=LocalWorker(model=model),
@@ -678,12 +705,11 @@ async def test_explore_leaves_verify_intents_open(tmp_path: Path) -> None:
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
-    # "verify" needs the compare capability (M2): it stays open, unclaimed.
-    assert len(model.calls) == 3
+    # M2: a "verify" Intent now runs the compare pass instead of staying open (I3).
     verify = board.intents[1]
     assert verify.type == "verify"
-    assert verify.status == "open"
-    assert verify.claimedBy is None
+    assert verify.status == "done"
+    assert [fact.kind for fact in board.facts].count("compare") == 1
     assert board.status == "running"
 
 
@@ -1214,14 +1240,8 @@ async def test_run_auto_false_override_pauses(tmp_path: Path) -> None:
 
 
 async def test_gate_a_suspends_even_without_main_claims(tmp_path: Path) -> None:
-    # Bootstrap returning a non-claim fact must not silently bypass the human.
-    no_claim = json.dumps(
-        {
-            "facts": [{"label": "x", "kind": "fact", "role": "none", "status": "open"}],
-            "intents": [],
-            "complete": None,
-        }
-    )
+    # Bootstrap finding no claim must not silently bypass the human.
+    no_claim = json.dumps({"facts": [], "intents": [], "complete": None})
     store = RunStore(tmp_path / "run_001")
     engine = Engine(
         worker=LocalWorker(model=_FakeModel(no_claim)),
@@ -1412,16 +1432,22 @@ async def test_stigmergy_runs_multiple_rounds_until_complete(tmp_path: Path) -> 
         _reason({"type": "explore", "from": "f2", "question": "Source f2."}),
         _validate(0),
         _explore_reply(_source_fact("Primary source")),
+        # M2: the goal is "provenance-complete + deviations scored", so a compare pass
+        # must run before Reason may complete.
+        _reason({"type": "verify", "from": "f2", "question": "Compare f2."}),
+        _validate(0),
+        _compare_reply(),
         _complete("部分偏差"),
     ).run(origin=_origin(), goal=_goal())
 
     assert board.status == "completed"
     assert board.verdict == "部分偏差"
-    assert [fact.id for fact in board.facts] == ["f1", "f2", "s1"]
+    assert [fact.id for fact in board.facts] == ["f1", "f2", "s1", "p1"]
     assert [(i.id, i.status) for i in board.intents] == [
         ("i1", "done"),
         ("i2", "done"),
         ("i3", "done"),
+        ("i4", "done"),
     ]
     # Each Reason round is recorded with only the facts added since the last one.
     triggers = [
@@ -1429,7 +1455,7 @@ async def test_stigmergy_runs_multiple_rounds_until_complete(tmp_path: Path) -> 
         for event in store.read_events()
         if event.type == "REASON" and event.payload["phase"] == "start"
     ]
-    assert triggers == [["f1"], ["f2"], ["s1"]]
+    assert triggers == [["f1"], ["f2"], ["s1"], ["p1"]]
 
 
 async def test_stigmergy_stops_at_dead_end(tmp_path: Path) -> None:
@@ -1601,19 +1627,26 @@ async def test_missing_prompt_fails_run(tmp_path: Path, missing: str) -> None:
     assert store.read_events()[-1].type == "FAILED"
 
 
-async def test_reason_complete_writes_complete(tmp_path: Path) -> None:
+async def test_reason_complete_without_supporting_structure_is_ignored(
+    tmp_path: Path,
+) -> None:
     store = RunStore(tmp_path / "run_001")
     reason = json.dumps({"facts": [], "intents": [], "complete": {"verdict": "部分偏差"}})
     board = await _engine(store, _bootstrap("A claim"), reason).run(origin=_origin(), goal=_goal())
 
-    assert board.status == "completed"
-    assert board.verdict == "部分偏差"
+    # M2: a bare "complete" no longer ends the run. The structural stop condition
+    # (every claim decomposed and sourced, deviations scored) must hold first, so the
+    # run stays "running" and no COMPLETE is written.
+    assert board.status == "running"
     events = store.read_events()
-    assert events[-1].type == "COMPLETE"
-    assert events[-2].type == "SESSION"
-    assert events[-3].type == "REASON"
-    assert events[-3].payload["phase"] == "end"
-    assert events[-3].payload["triggerFacts"] == ["f1"]
+    assert all(event.type != "COMPLETE" for event in events)
+    ends = [
+        event
+        for event in events
+        if event.type == "REASON" and event.payload["phase"] == "end"
+    ]
+    assert len(ends) == 1
+    assert ends[0].payload["triggerFacts"] == ["f1"]
 
 
 async def test_reason_rejects_intents_and_complete_together(tmp_path: Path) -> None:

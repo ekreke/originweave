@@ -155,16 +155,17 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 ### 3.5 协调与并发
 - **Stigmergy（间接协调）**：Worker 不互相通信，只通过往黑板写 Fact 改变环境，
   其他 Worker 下轮读图感知并调整策略。
-- **多 Worker 并发（I4）**：一轮派发内，所有 `open` 的 `explore`/`decompose` Intent 先按 id 序
-  统一 `EXECUTE` 认领，再以 `[worker].max_concurrency` 为上限并发执行；结果仍按 Intent id 序
+- **多 Worker 并发（I4）**：一轮派发内，所有 `open` 的 `explore`/`decompose`/`verify` Intent 先按
+  id 序统一 `EXECUTE` 认领，再以 `[worker].max_concurrency` 为上限并发执行；结果仍按 Intent id 序
   **提交回写**（分配 Fact id、写 `CONCLUDE`），故并发不改变 Board 结构（确定性）。`verify` 型
-  Intent 需 `compare`（M2），派发时保持 `open`。
+  （M2）走 compare pass（不检索），产出 compare + deviation。
 - **心跳/超时释放（I4）**：执行期间引擎按 `[worker].heartbeat_interval` 写 `HEARTBEAT`；调用超过
   `[worker].heartbeat_timeout` 时按 `heartbeat_on_timeout` 写 `RELEASE`（Intent 回 `open`）或
   `FAILED`（终止 run）。心跳由引擎（唯一写入者）代发，Worker 不自行认领/心跳（红线 5）。
 - **收敛（I6，Stigmergy）**：每个 dispatch 轮产生新 Fact 后，对新增 facts 再跑一次 Reason，循环至
   Reason 判定 `COMPLETE`、死胡同（无可派发 Intent）或本轮无新 Fact。`Engine(max_rounds=…)` 为安全阀
-  （命中保持 `running`）；真正的预算 `STOPPED` 归 M3。
+  （命中保持 `running`）；真正的预算 `STOPPED` 归 M3。**M2 起** `COMPLETE` 需过严格判据（论点全部
+  拆解、子断言回链或 `open`、已有 compare），否则被忽略；完成后落 run dir `report.md`。
 - **Dispatcher**：调度与容器生命周期，是协议的唯一写入者；Worker 不直接认领
   Intent、不发心跳，只接收 prompt 并返回结构化结果。
 

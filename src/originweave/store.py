@@ -133,6 +133,16 @@ class RunStore:
         path.write_text(content, encoding="utf-8")
         return path
 
+    def write_report(self, content: str) -> Path:
+        """Write the rendered deviation scorecard as ``report.md``.
+
+        Not an event: the report is a *derivation* from the board, so it can always be
+        rebuilt from ``events.jsonl`` (M2). ``replay`` never calls this.
+        """
+        self._root.mkdir(parents=True, exist_ok=True)
+        self.report_path.write_text(content, encoding="utf-8")
+        return self.report_path
+
     def write_session(self, session_id: str, session: Mapping[str, Any]) -> Path:
         """Write the raw session snapshot for one worker call (M6).
 

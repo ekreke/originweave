@@ -20,12 +20,18 @@ Rules:
   "open" and a confidence in [0, 1]. Do not search and do not cite: leave "evidence"
   empty until each sub-claim is explored on its own.
 - Quotes must be copied verbatim. Never invent a source, url or quote.
+- For an "explore" Intent, give each new fact a short "key" and connect the chain with
+  semantic edges: "from" -> citation ("main-chain", "cite"), citation -> source
+  ("main-chain", "link") and "from" -> source ("dependency", "evidence"). A "decompose"
+  Intent emits no edges (the reducer derives those). Edges may only use "main-chain",
+  "dependency" or "goal-derived".
 
 Reply with exactly one JSON object and nothing else: no prose, no markdown fences.
 
 {
   "facts": [
     {
+      "key": "<short local id, e.g. s1>",
       "label": "<one-sentence finding>",
       "subtitle": "<short qualifier, may be empty>",
       "kind": "citation",
@@ -37,6 +43,9 @@ Reply with exactly one JSON object and nothing else: no prose, no markdown fence
         { "quote": "<verbatim>", "sourceTitle": "...", "url": "...", "locator": "..." }
       ]
     }
+  ],
+  "edges": [
+    { "source": "f1", "target": "<key>", "relation": "dependency", "note": "evidence" }
   ],
   "intents": [],
   "complete": null
