@@ -269,6 +269,7 @@ export function sampleRunDetail(): RunDetail {
       event({ id: '4', type: 'FAILED', message: 'worker crashed', tone: 'danger' }),
     ],
     waitingFor: { gate: 'confirm-claim', question: '确认核心论点？' },
+    hints: [hint({ id: 'h1', text: '优先核对原始 benchmark' })],
   })
 }
 

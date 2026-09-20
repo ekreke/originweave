@@ -445,11 +445,6 @@
   color: rgb(var(--c-accent));
 }
 
-.hint-text {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 .hint-form {
   display: flex;
   gap: 6px;
@@ -458,4 +453,19 @@
 .hint-form input {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.hint-error {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: rgb(var(--c-danger));
+}
+
+.selected-row {
+  background: rgb(var(--c-accent) / 0.12);
+}
+
+.hint-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

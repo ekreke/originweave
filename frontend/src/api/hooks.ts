@@ -38,7 +38,7 @@ export function useRun(runId: string | undefined) {
 }
 
 // Writing a Hint is non-blocking (the server appends a HINT event and the run keeps
-// going). Refetch the run so the new hint appears in the Inspector right away.
+// going). Refetch the run so the new hint shows up in the Inspector right away.
 export function useAddHint(runId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({

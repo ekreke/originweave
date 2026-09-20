@@ -1,5 +1,5 @@
 import { Code, ConnectError } from '@connectrpc/connect'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '@/App'
@@ -27,9 +27,7 @@ beforeEach(() => {
   mocks.listProjects.mockReset().mockResolvedValue({ projects: sampleProjects() })
   mocks.listProjectRuns.mockReset().mockResolvedValue({ runs: sampleRuns() })
   mocks.getRun.mockReset().mockResolvedValue({ runDetail: sampleRunDetail() })
-  mocks.addHint
-    .mockReset()
-    .mockResolvedValue({ hint: { id: 'h1', text: 'x', author: 'human', createdAt: '' } })
+  mocks.addHint.mockReset().mockResolvedValue({ hint: undefined })
 })
 
 describe('overview', () => {
@@ -85,31 +83,42 @@ describe('console', () => {
     renderAt('/projects/copilot-productivity/runs/run_009')
     expect(await screen.findByText(/无法加载 run/)).toBeInTheDocument()
   })
-})
 
-describe('inspector selection and hints', () => {
-  it('shows a fact detail with verbatim evidence when a FACTS row is clicked', async () => {
+  it('drives the Inspector from a graph node selection', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    fireEvent.click(await screen.findByTestId('fact-node-f1'))
+
+    const inspector = within(screen.getByLabelText('inspector'))
+    expect(inspector.getByText('verbatim quote from the source')).toBeInTheDocument()
+  })
+
+  it('drives the Inspector from a FACTS row selection', async () => {
     renderAt('/projects/copilot-productivity/runs/run_009')
     await screen.findByText('Copilot 提升 55% 生产率')
 
     fireEvent.click(screen.getByRole('tab', { name: 'FACTS' }))
     fireEvent.click(screen.getByText('Copilot 提升 55% 生产率'))
 
-    expect(await screen.findByText('verbatim quote from the source')).toBeInTheDocument()
+    const inspector = within(screen.getByLabelText('inspector'))
+    expect(inspector.getByText('verbatim quote from the source')).toBeInTheDocument()
+    // The selected row is highlighted.
+    const row = within(screen.getByRole('table')).getByText('Copilot 提升 55% 生产率').closest('tr')
+    expect(row).toHaveClass('selected-row')
   })
 
-  it('shows an intent detail when an INTENTS row is clicked', async () => {
+  it('drives the Inspector from an INTENTS row selection', async () => {
     renderAt('/projects/copilot-productivity/runs/run_009')
     await screen.findByText('Copilot 提升 55% 生产率')
 
     fireEvent.click(screen.getByRole('tab', { name: 'INTENTS' }))
     fireEvent.click(screen.getByText('拆解核心论点'))
 
-    // The Inspector's intent detail is the only place showing claimedBy.
-    expect(await screen.findByText('worker-1')).toBeInTheDocument()
+    const inspector = within(screen.getByLabelText('inspector'))
+    expect(inspector.getByText('claimed by')).toBeInTheDocument()
+    expect(inspector.getByText('worker-1')).toBeInTheDocument()
   })
 
-  it('submits a Hint through AddHint', async () => {
+  it('submits a hint through AddHint', async () => {
     renderAt('/projects/copilot-productivity/runs/run_009')
     await screen.findByText('Copilot 提升 55% 生产率')
 

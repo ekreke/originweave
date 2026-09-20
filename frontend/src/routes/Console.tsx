@@ -43,12 +43,20 @@ function NotFound() {
 export function Console() {
   const { projectId, runId } = useParams()
   const [tab, setTab] = useState<Tab>('GRAPH')
-  const [selectionId, setSelectionId] = useState<string | null>(null)
+  // Selection is tagged with the run it came from: navigating to another run
+  // (same component instance) must not resolve the old id against the new board,
+  // where fact/intent ids are re-numbered and collide.
+  const [selected, setSelected] = useState<{ run: string | undefined; id: string | null }>({
+    run: runId,
+    id: null,
+  })
   const run = useRun(runId)
   const runs = useProjectRuns(projectId)
   const addHint = useAddHint(runId)
   const detail = run.data
+  const selectionId = selected.run === runId ? selected.id : null
   const selection = resolveSelection(detail, selectionId)
+  const select = (id: string | null) => setSelected({ run: runId, id })
 
   const notFound = run.error instanceof ConnectError && run.error.code === Code.NotFound
 
@@ -77,11 +85,11 @@ export function Console() {
   function renderTab() {
     switch (tab) {
       case 'GRAPH':
-        return <GraphTab detail={detail} onSelect={setSelectionId} />
+        return <GraphTab detail={detail} onSelect={select} />
       case 'FACTS':
-        return <FactsTab facts={detail?.facts} onSelect={setSelectionId} />
+        return <FactsTab facts={detail?.facts} onSelect={select} selectedId={selectionId} />
       case 'INTENTS':
-        return <IntentsTab intents={detail?.intents} onSelect={setSelectionId} />
+        return <IntentsTab intents={detail?.intents} onSelect={select} selectedId={selectionId} />
       case 'EVENTS':
         return <EventsTab events={detail?.events} />
     }

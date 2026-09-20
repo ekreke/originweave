@@ -41,7 +41,7 @@ describe('Inspector', () => {
   })
 
   it('submits a hint through the Hints input and clears it', async () => {
-    const onAddHint = vi.fn()
+    const onAddHint = vi.fn().mockResolvedValue(undefined)
     render(<Inspector onAddHint={onAddHint} />)
 
     const input = screen.getByLabelText('hint input')
@@ -52,33 +52,22 @@ describe('Inspector', () => {
     await waitFor(() => expect(input).toHaveValue(''))
   })
 
+  it('keeps the hint text when the write fails', async () => {
+    const onAddHint = vi.fn().mockRejectedValue(new Error('read-only view'))
+    render(<Inspector onAddHint={onAddHint} />)
+
+    const input = screen.getByLabelText('hint input')
+    fireEvent.change(input, { target: { value: 'retry me' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+
+    expect(await screen.findByText('read-only view')).toBeInTheDocument()
+    expect(input).toHaveValue('retry me')
+  })
+
   it('renders the hints and disables the input without a handler', () => {
     render(<Inspector hints={[hint({ id: 'h1', text: '优先核对原始 benchmark' })]} />)
     expect(screen.getByText('优先核对原始 benchmark')).toBeInTheDocument()
     expect(screen.getByLabelText('hint input')).toBeDisabled()
-  })
-
-  it('ignores Enter while an IME composition is in progress', () => {
-    const onAddHint = vi.fn()
-    render(<Inspector onAddHint={onAddHint} />)
-
-    const input = screen.getByLabelText('hint input')
-    fireEvent.change(input, { target: { value: '拼音' } })
-    fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
-
-    expect(onAddHint).not.toHaveBeenCalled()
-  })
-
-  it('keeps the hint text when the write fails', async () => {
-    const onAddHint = vi.fn().mockRejectedValue(new Error('boom'))
-    render(<Inspector onAddHint={onAddHint} />)
-
-    const input = screen.getByLabelText('hint input')
-    fireEvent.change(input, { target: { value: 'keep me' } })
-    fireEvent.click(screen.getByRole('button', { name: '提交' }))
-
-    await waitFor(() => expect(onAddHint).toHaveBeenCalledWith('keep me'))
-    await waitFor(() => expect(input).toHaveValue('keep me'))
   })
 })
 

@@ -194,15 +194,17 @@
 
 ## 已完成（近期）
 
-- **M1c-2b 2b-2 · INSPECTOR 交互（选中联动 + Hints）**：`Console` 加 `selectionId` +
-  `resolveSelection`（`origin`/`goal` 锚点优先、`intents` 兜底、未命中 `null`）；`GraphTab`
-  `onSelect` + `FactsTab`/`IntentsTab` 行 `onSelect` → `Inspector` 详情；`api/hooks.ts` 加
-  `useAddHint`（`AddHint` mutation + invalidate `['run', runId]`；空 `runId` 抛错）；`Inspector`
-  加 `hints`/`onAddHint` + `HintsPanel`（受控输入、Enter 提交、**IME 组合态守卫**、失败保留文本、
-  pending 防重入）。`presentation.css` 加选中/提示样式。测试 `routes.test.tsx`（选中联动 + Hint
-  提交）、`layout.test.tsx`（提交清空 / IME / 失败保留 / 无 handler 禁用）、`hooks.test.ts`
-  （`useAddHint`）。前端 `typecheck`/`lint`/`format:check`/`test`(40)/`build` 全绿；`originweave ui`
-  冒烟通过。经 subagent review（无 blocker；已修 IME、失败保留文本、pending、长文本溢出等）。
+- **M1c-2b 2b-2 · INSPECTOR 交互（选中联动 + Hints）**：`Console` 加 `resolveSelection`（`origin`/`goal`
+  锚点优先、`intents` 兜底、未命中 `null`）+ **带 runId 标记的选中态**（跨 run 自动失效，避免同 id 碰撞）；
+  `GraphTab` `onSelect` + `FactsTab`/`IntentsTab` 行 `onSelect`（行键盘可达 Enter/Space + `selected-row`
+  高亮、`selectedId`）→ `Inspector` 详情；`api/hooks.ts` 加 `useAddHint`（`AddHint` mutation + invalidate
+  `['run', runId]`；空 `runId` 抛错）；`Inspector` 加 `hints`/`onAddHint` + `HintsPanel`（受控输入、Enter
+  提交、**IME 组合态守卫**、失败保留文本 + 内联错误、pending 防重入；无 hints 且无 handler 时不渲染）。
+  `presentation.css` 加 `.selectable-row`/`.selected-row`/`.hints*`。测试 `routes.test.tsx`（图节点/FACTS/
+  INTENTS 选中 → Inspector、Hint 提交）、`layout.test.tsx`（提交清空 / IME / 失败保留 / 无 handler 禁用）、
+  `hooks.test.ts`（`useAddHint` 入参 + invalidate）。前端 `typecheck`/`lint`/`format:check`/`test`/`build` 全绿。
+  经 subagent review（无 blocker；worktree 与 develop 两份实现已按「worktree 为底 + 补回 develop 的
+  IME/失败重试/空 runId 抛错」合并）。
 
 - **M1c-2b 2b-1 · 数据层 + 只读接线**：前端加 `@tanstack/react-query`（`api/queryClient.ts` +
   `main.tsx` 的 `QueryClientProvider`），`api/hooks.ts` 提供 `useProjects`/`useProjectRuns`/`useRun`

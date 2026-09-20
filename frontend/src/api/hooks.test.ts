@@ -9,11 +9,13 @@ const mocks = vi.hoisted(() => ({ addHint: vi.fn() }))
 
 vi.mock('@/api/client', () => ({ client: mocks }))
 
+let queryClient: QueryClient
+
 function wrapper({ children }: { children: ReactNode }) {
-  const client = new QueryClient({
+  queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return createElement(QueryClientProvider, { client }, children)
+  return createElement(QueryClientProvider, { client: queryClient }, children)
 }
 
 describe('awaitingPollInterval', () => {
@@ -26,12 +28,10 @@ describe('awaitingPollInterval', () => {
 
 describe('useAddHint', () => {
   beforeEach(() => {
-    mocks.addHint
-      .mockReset()
-      .mockResolvedValue({ hint: { id: 'h1', text: 'x', author: 'human', createdAt: '' } })
+    mocks.addHint.mockReset().mockResolvedValue({ hint: undefined })
   })
 
-  it('calls AddHint with the run id and text', async () => {
+  it('calls AddHint with the run id and the trimmed-by-caller text', async () => {
     const { result } = renderHook(() => useAddHint('run_001'), { wrapper })
 
     result.current.mutate('check it')
@@ -39,5 +39,14 @@ describe('useAddHint', () => {
     await waitFor(() =>
       expect(mocks.addHint).toHaveBeenCalledWith({ runId: 'run_001', text: 'check it' }),
     )
+  })
+
+  it('refetches the run after adding a hint', async () => {
+    const { result } = renderHook(() => useAddHint('run_001'), { wrapper })
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+
+    result.current.mutate('check it')
+
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['run', 'run_001'] }))
   })
 })

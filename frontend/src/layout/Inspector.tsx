@@ -2,9 +2,9 @@ import { useState } from 'react'
 
 import type { Fact, Hint, Intent, WaitingFor } from '@/gen/originweave/v1/originweave_pb'
 
-// Presentation-only inspector: node detail, verbatim evidence, intent counts, the
-// Hints input and the HITL gate card. Gate decisions are surfaced via `onDecision`
-// and hints via `onAddHint`; submitting them over RPC is the console's job.
+// Presentation-only inspector: node detail, verbatim evidence, intent/hint counts and
+// the HITL gate card. Gate decisions are surfaced via `onDecision` and hints via
+// `onAddHint`; submitting them over RPC is the console's job.
 
 export type InspectorSelection = { type: 'fact'; fact: Fact } | { type: 'intent'; intent: Intent }
 
@@ -20,8 +20,8 @@ export interface InspectorProps {
 }
 
 // A non-blocking Hint input: submit reports the text upward and clears it only after
-// the write resolves (a failure keeps the text so the user can retry). Without an
-// `onAddHint` handler the control stays disabled (read-only contexts).
+// the write resolves (a failure keeps the text so the user can retry and shows the
+// error). Without an `onAddHint` handler the control stays disabled (read-only).
 function HintsPanel({
   hints,
   onAddHint,
@@ -31,15 +31,19 @@ function HintsPanel({
 }) {
   const [text, setText] = useState('')
   const [pending, setPending] = useState(false)
+  const [error, setError] = useState('')
+
   const submit = async () => {
     const value = text.trim()
     if (!value || !onAddHint || pending) return
     setPending(true)
+    setError('')
     try {
       await onAddHint(value)
       setText('')
-    } catch {
+    } catch (cause) {
       // Keep the text so the user can retry after a failed write.
+      setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setPending(false)
     }
@@ -70,7 +74,10 @@ function HintsPanel({
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
             // Ignore Enter while an IME composition is in progress (Chinese input).
-            if (event.key === 'Enter' && !event.nativeEvent.isComposing) void submit()
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              void submit()
+            }
           }}
         />
         <button
@@ -82,6 +89,7 @@ function HintsPanel({
           提交
         </button>
       </div>
+      {error ? <p className="hint-error">{error}</p> : null}
     </div>
   )
 }
@@ -221,7 +229,9 @@ export function Inspector({
         </div>
       ) : null}
 
-      <HintsPanel hints={hints} onAddHint={onAddHint} />
+      {onAddHint || (hints && hints.length > 0) ? (
+        <HintsPanel hints={hints} onAddHint={onAddHint} />
+      ) : null}
 
       {isEmpty ? <div className="empty">无选中项。</div> : null}
     </div>
