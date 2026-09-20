@@ -14,9 +14,9 @@
 > **M6 P4** 的 Pi TS 搜索扩展已落地（`src/originweave/pi_extensions/search.ts`，回调 server `Search`；
 > 修了 agent-dir 环境变量名 bug）。
 > 起 run 走 server / proto API（`CreateRun`，经 `source_text` 收资料 A），故 **CLI 无 `trace`**；
-> `mcp` 仍为占位。`frontend/` 已完成 **2b-1/2b-2/2b-3**（React Query 读真实数据、Inspector 选中 +
-> Hints、HITL Gate A/B + Replay 步进；新建表单 + 顶栏归 2b-4、端到端归 2b-5）。版本与里程碑见
-> `milestones.md`。
+> `mcp` 仍为占位。`frontend/` 已完成 **M1c-2b 2b-1–2b-5**（React Query 读真实数据、Inspector 选中 +
+> Hints、HITL Gate A/B + Replay 步进、新建核验表单 + 运行徽标；端到端冒烟见 `make smoke`）。
+> 版本与里程碑见 `milestones.md`。
 
 ## 快速开始
 
@@ -28,6 +28,7 @@ uv run originweave replay examples/copilot_productivity   # 重放样例事件�
 make ui                  # 起只读 UI 服务（Connect API + frontend/dist，端口 8765）
 make lint                # ruff check + mypy
 make test                # pytest
+make smoke               # 端到端冒烟（进程内起 server + fake worker，建 run → Gate → 记分卡）
 make cloc                # src/originweave 逻辑代码行数
 ```
 
@@ -51,6 +52,7 @@ make frontend-build      # tsc -b && vite build
 | `proto` | 由 `proto/` 生成 server Python 代码（需 `buf` + `protoc-gen-connect-python`；M1c-1）。 |
 | `frontend-install` / `frontend-gen` / `frontend-dev` / `frontend-build` / `frontend-lint` / `frontend-typecheck` / `frontend-test` | 前端（`frontend/`，M1b）：安装 / proto 生成 / dev / 构建 / lint / tsc / vitest。 |
 | `test` | `pytest`。 |
+| `smoke` | 端到端冒烟：进程内起 server（fake worker），`CreateRun` → Gate A → 记分卡；退出码非零即失败。 |
 | `lint` | `ruff check` + `mypy`。 |
 | `fmt` | `ruff format`。 |
 | `ui` | 起只读 UI 服务：Connect API + `frontend/dist`（存在时），端口 8765；`--run` 进单 run 只读模式。 |

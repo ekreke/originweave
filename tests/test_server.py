@@ -1203,3 +1203,134 @@ async def test_get_run_structurally_bad_session_reports_internal(
 
     assert response.status_code == 500, response.text
     assert response.json()["code"] == "internal"
+
+
+# ----------------------------------------------------- M1c-2b 2b-5 end-to-end
+
+
+async def test_end_to_end_create_run_to_scorecard(tmp_path: Path) -> None:
+    """Full path with a fake provider: CreateRun → Gate A → verify → COMPLETE + report.md."""
+    bootstrap = json.dumps(
+        {
+            "facts": [
+                {
+                    "label": "Copilot cut task time by 55%",
+                    "kind": "fact",
+                    "role": "main-claim",
+                    "status": "open",
+                    "confidence": 0.6,
+                }
+            ],
+            "intents": [],
+            "complete": None,
+        }
+    )
+    reason_decompose = json.dumps(
+        {
+            "facts": [],
+            "intents": [{"type": "decompose", "from": "f1", "question": "Split f1."}],
+            "complete": None,
+        }
+    )
+    keep = json.dumps({"keep": [0], "drop": []})
+    sub_claim = json.dumps(
+        {
+            "facts": [
+                {
+                    "label": "the 55% figure is well scoped",
+                    "kind": "fact",
+                    "role": "sub-claim",
+                    "status": "open",
+                    "confidence": 0.5,
+                }
+            ],
+            "intents": [],
+            "complete": None,
+        }
+    )
+    reason_verify = json.dumps(
+        {
+            "facts": [],
+            "intents": [{"type": "verify", "from": "f2", "question": "Compare f2."}],
+            "complete": None,
+        }
+    )
+    compare = json.dumps(
+        {
+            "facts": [
+                {
+                    "key": "cmp",
+                    "label": "compare (facts x sources x goal)",
+                    "kind": "compare",
+                    "role": "none",
+                    "status": "verified",
+                    "confidence": 0.8,
+                },
+                {
+                    "key": "dev1",
+                    "label": "wrong attribution",
+                    "kind": "deviation",
+                    "role": "none",
+                    "status": "flagged",
+                    "confidence": 0.9,
+                    "subtitle": "severity=high \u00b7 confidence=0.90",
+                    "evidence": [
+                        {
+                            "quote": "55%",
+                            "sourceTitle": "Lab study",
+                            "url": "https://example.com/lab",
+                            "locator": "p.1",
+                        }
+                    ],
+                },
+            ],
+            "edges": [
+                {"source": "f2", "target": "cmp", "relation": "dependency", "note": "verify"},
+                {"source": "goal", "target": "dev1", "relation": "goal-derived", "note": "dev"},
+            ],
+            "intents": [],
+            "complete": None,
+        }
+    )
+    complete = json.dumps(
+        {"facts": [], "intents": [], "complete": {"verdict": "\u90e8\u5206\u504f\u5dee"}}
+    )
+
+    ctx = _ctx(
+        tmp_path,
+        bootstrap,
+        reason_decompose,
+        keep,
+        sub_claim,
+        reason_verify,
+        keep,
+        compare,
+        complete,
+    )
+
+    async with _client_for(ctx) as client:
+        run = await _create_run(client)  # auto defaults to [hitl].auto = False
+        run_id = str(run["id"])
+        await ctx.scheduler.wait(run_id)
+
+        paused = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
+        assert paused["run"]["status"] == "awaiting_human"
+        assert paused["waitingFor"]["gate"] == "confirm-claim"
+
+        approved = await _post(
+            client,
+            "SubmitHumanInput",
+            {"runId": run_id, "gate": "confirm-claim", "decision": "approve"},
+        )
+        assert approved.status_code == 200, approved.text
+        await ctx.scheduler.drain()
+
+        detail = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
+
+    assert detail["run"]["status"] == "completed"
+    kinds = [fact["kind"] for fact in detail["facts"]]
+    assert "compare" in kinds
+    assert "deviation" in kinds
+    assert detail["report"]["verdict"] == "\u90e8\u5206\u504f\u5dee"
+    assert detail["deviations"][0]["severity"] == "high"
+    assert (tmp_path / "runs" / run_id / "report.md").is_file()

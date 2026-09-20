@@ -279,3 +279,25 @@ describe('new run', () => {
     expect(await screen.findByText('project not found')).toBeInTheDocument()
   })
 })
+
+describe('end to end', () => {
+  it('creates a run, renders its DAG, and resolves the gate', async () => {
+    renderAt('/projects/copilot-productivity/runs/new')
+
+    fireEvent.change(screen.getByLabelText('source text'), { target: { value: 'doc A' } })
+    fireEvent.change(screen.getByLabelText('goal'), { target: { value: 'g' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建并进入审阅台' }))
+
+    // Navigation lands on the console, which draws the DAG from GetRun.
+    expect(await screen.findByTestId('fact-node-f1')).toBeInTheDocument()
+    expect(screen.getByTestId('fact-node-origin')).toBeInTheDocument()
+
+    // The pending gate is offered and a decision goes through SubmitHumanInput.
+    fireEvent.click(screen.getByRole('button', { name: 'approve' }))
+    await waitFor(() =>
+      expect(mocks.submitHumanInput).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: 'run_009', gate: 'confirm-claim', decision: 'approve' }),
+      ),
+    )
+  })
+})

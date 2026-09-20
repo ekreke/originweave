@@ -282,8 +282,11 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 
 ### 2b-5 · 端到端与冒烟
 
-- [ ] 端到端：起 server → 建 run → 前端看到 DAG → Gate 处人工介入（测试以 fake provider 驱动）+ 冒烟
-- [ ] CI / 文档同步（`Makefile` / `README.md`）
+- [x] 端到端：起 server → 建 run → 前端看到 DAG → Gate 处人工介入（测试以 fake provider 驱动）+ 冒烟 —
+      `tests/test_server.py`（`test_end_to_end_create_run_to_scorecard`：CreateRun→Gate A→verify→COMPLETE+`report.md`）、
+      `scripts/smoke.py`（`make smoke`，进程内 fake worker）、`frontend/src/routes/routes.test.tsx`（NewRun→DAG→Gate 串联）
+- [x] CI / 文档同步（`Makefile` / `README.md`）— `.github/workflows/ci.yml`（`python` job 加 `make smoke`）、
+      `Makefile`（`smoke` target）、`README.md`
 
 约束：前端只调 RPC、不编排；RELATIONS/ENTITIES 页签归 M5；不改 `proto/`；fixture 只进测试文件。
 验收：从前端发起一次核验（样例），看到由抽象论点拆解出的 DAG，可在 Gate 处人工介入；

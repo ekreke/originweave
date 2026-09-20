@@ -41,6 +41,9 @@ jobs:
       - name: Test
         run: uv run pytest
 
+      - name: Smoke (fake worker, in-process)
+        run: make smoke
+
   proto:
     runs-on: ubuntu-latest
     steps:

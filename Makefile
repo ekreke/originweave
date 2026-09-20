@@ -9,7 +9,7 @@ RUNS_DIR ?= runs
 PORT ?= 8765
 
 .DEFAULT_GOAL := help
-.PHONY: help install run demo fixtures proto test lint fmt ui replay cloc clean \
+.PHONY: help install run demo smoke fixtures proto test lint fmt ui replay cloc clean \
 	frontend-install frontend-gen frontend-dev frontend-build frontend-lint \
 	frontend-typecheck frontend-test
 
@@ -26,6 +26,9 @@ run: install ## Start the local test env
 demo: ## End-to-end sample (server + frontend; lands in M4, not wired yet)
 	@echo "make demo lands in M4 (server + frontend; see docs/1.0/SPEC.md)."
 	@echo "Use 'make replay' to replay the sample event log."
+
+smoke: install ## Boot the server with a fake worker and drive a run end-to-end (in-process)
+	$(UV) run python scripts/smoke.py
 
 fixtures: ## Regenerate the committed sample fixtures (events.jsonl)
 	$(UV) run python scripts/build_sample_fixtures.py

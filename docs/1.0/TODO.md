@@ -7,8 +7,8 @@
 
 - **M2 · 偏差记分卡（已完成）**（进度真相见 `SPEC.md` M2；详情见「已完成（近期）」）：
   verify 派发 + compare pass + deviation 记分 + 严格 `COMPLETE` + `report.md` + Gate B。
-  **下一步**：**M1c-2b** 前端接线（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 / 2b-2 / 2b-3 已完成**，
-  下一步 **2b-4** 新建核验表单 + 顶栏）。其后 M3（容器化 runtime）；M6 P3（Settings/Search/Session proto）可并行规划。
+  **下一步**：**M1c-2b 前端接线（`SPEC.md` 2b-1–2b-5 已全部完成）**；其后 **M3**（容器化 runtime）、
+  **M5**（实体关系图）；M6 P5（前端 Settings/会话视图）待做。
 - **M6 · Pi Worker、可配置工具与会话**（用户新增；进度真相见 `SPEC.md` M6）。计划 P0–P6：
   - **P0 契约/文档（已完成）**、**P1 Worker 抽象 + 会话 + 事件（已完成）**：`capabilities/worker.py`、
     `Engine(worker=...)`、`[worker]` 配置、`SESSION`/`WORKER_STEP` 事件、run dir `sessions/`。
@@ -58,14 +58,14 @@
     （`index.html` 回退），lifespan 收尾 `scheduler.drain()`；`cli._cmd_ui` 起 uvicorn（`frontend/dist`
     存在即托管），`--run <dir>` 单 run 只读（`ServerContext.pinned_run`）。前端 `transport` 默认
     端口改 8765。Makefile/README/docs 同步。
-  - **下一步 M1c-2b**（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 / 2b-2 / 2b-3 已完成**，下一步 **2b-4**）：
+  - **M1c-2b**（`SPEC.md` 的 **2b-1–2b-5**，**全部已完成**）：
     **2b-1**（已完成）数据层 + 只读接线（`@tanstack/react-query`、`QueryClientProvider`、`api/hooks.ts`
     的 `useProjects`/`useProjectRuns`/`useRun`、`Overview`/`Project`/`AppShell`/`Console` 接真实数据 +
     `awaiting_human` 轮询、`transport` 默认同源）；**2b-2**（已完成）INSPECTOR 选中联动 + Hints
     （`useAddHint`；`Console.resolveSelection` 含 `origin`/`goal`；FACTS/INTENTS 行选中）；
     **2b-3**（已完成）HITL UI（Gate A/B → `submitHumanInput`）+ Replay 步进（**服务端折算**
-    `GetRun(at_event=k)`，proto 增 `at_event`）；**2b-4** 新建核验表单 + 顶栏；
-    **2b-5** 端到端 + 冒烟 + CI/文档。**M6 P3**（Settings/Search/Session proto + RPC）亦依赖 M1c-1，可并行规划。
+    `GetRun(at_event=k)`，proto 增 `at_event`）；**2b-4**（已完成）新建核验表单 + 顶栏；
+    **2b-5**（已完成）端到端 + 冒烟 + CI/文档。**M6 P3**（Settings/Search/Session proto + RPC）已落地。
   - 已定：proto 加 `source_text`（`url` 暂不支持）；目录式 projects；`CreateRun` 后台调度；统一端口 `8765`。
 
 ## 待确认决策
@@ -165,9 +165,9 @@
 - 免费搜索走第三方公开 MCP 端点（`mcp.exa.ai` / `search.parallel.ai`），可能限流或变更；
   已兼容普通 JSON 与 SSE 两种响应。
 - 旧 `originweave.toml`（含 `[live]`）会因未知键报错（仓库无提交的 toml，影响小）。
-- 前端 `frontend/` 已入库（M1b 脚手架），并已完成 **M1c-2b 的 2b-1/2b-2/2b-3**
-  （React Query 读真实数据、Inspector 选中 + Hints、HITL Gate A/B + Replay 步进）；**新建核验表单 + 顶栏
-  归 2b-4、端到端与冒烟归 2b-5**；仍**不接 mock**（fixture 仅测试用）。
+- 前端 `frontend/` 已入库（M1b 脚手架），**M1c-2b 2b-1–2b-5 全部完成**（React Query 读真实数据、
+  Inspector 选中 + Hints、HITL Gate A/B + Replay 步进、新建核验表单 + 运行徽标、`make smoke` 端到端冒烟）；
+  仍**不接 mock**（fixture 仅测试用）。
 - `Makefile` 的 `demo` target 依赖 M4 的 server + 前端，现阶段只打印提示（不执行）。
 - **契约重排**把 server API 与前端从 M4 提前到 **M1b/M1c-1/M1c-2**，M4 收缩为端到端 / Deployment / 文档回归；
   期间 `dashboard.md §4` 已由 REST 改为 proto，`product-overview.md §5` 已移除 `trace`。
@@ -207,6 +207,18 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M1c-2b 2b-5 · 端到端与冒烟**：`tests/test_server.py` 增 `test_end_to_end_create_run_to_scorecard`
+  （fake provider：`CreateRun(auto=false)` → Gate A → `SubmitHumanInput approve` → Reason/Explore/verify
+  → `COMPLETE` + `report.md`，断言 facts 含 compare/deviation、`report.verdict`、`deviations`）；新增
+  `scripts/smoke.py` + `make smoke`（进程内 `create_app` + fake worker，`CreateRun→Gate→GetRun`，退出码）；
+  CI `python` job 加 `make smoke`；前端 `routes.test.tsx` 加 NewRun→DAG→Gate 串联；README/Makefile 同步。
+  `make lint`/`test`(367)/`smoke` + 前端 `typecheck`/`lint`/`format`/`test`(61)/`build` 全绿。
+
+- **M1c-2b 2b-4 · 新建核验表单 + 运行徽标**：`api/hooks.ts` 增 `useCreateRun`（`sourceType='text'`/
+  `analysis='provenance'`，可选预算，invalidate 列表）；`NewRun` 重写（`title`/`source_text`/`goal`/`auto`
+  + 可选预算，校验 → `navigate` 到 Console，行内报错）；`Console` 中栏 header 徽标行（`status` +
+  `steps`/`tok`/`cost`/`intents`）；`presentation.css` 表单/徽标 + `queued/paused/stopped/open` 配色。
 
 - **M1c-2b 2b-3 · HITL UI + Replay（服务端折算）**：INSPECTOR 抽出 `GateCard`（修正说明输入 + pending
   禁用 + 失败行内报错），`Console` 经 `useSubmitHumanInput`（`SubmitHumanInput` + invalidate
