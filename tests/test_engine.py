@@ -11,7 +11,7 @@ import pytest
 from originweave.blackboard import Fact
 from originweave.capabilities.base import PromptTemplate, ProviderError
 from originweave.capabilities.model import ChatMessage
-from originweave.capabilities.worker import LocalWorker
+from originweave.capabilities.worker import LocalWorker, WorkerReply, render_messages
 from originweave.engine import Engine, EngineError, parse_result, parse_validation
 from originweave.reduce import reduce, render_canonical
 from originweave.store import RunStore
@@ -57,6 +57,33 @@ class _RecordingSearch:
     async def search(self, query: str, *, num_results: int = 8) -> str:
         self.queries.append(query)
         return self.result
+
+
+class _SelfSearchWorker:
+    """A worker that owns retrieval (declares the ``search`` tool), like Pi."""
+
+    name = "self-search"
+    tools = frozenset({"search"})
+
+    def __init__(self, *replies: str) -> None:
+        self._replies = list(replies)
+        self.payloads: list[dict[str, object]] = []
+
+    async def run(
+        self,
+        task: str,
+        template: PromptTemplate,
+        board: object,
+        *,
+        extra: object = None,
+    ) -> WorkerReply:
+        messages = render_messages(task, template, board, extra=extra)  # type: ignore[arg-type]
+        self.payloads.append(json.loads(messages[1].content))
+        text = self._replies.pop(0) if self._replies else NO_REASON
+        return WorkerReply(
+            text=text,
+            input={"system": messages[0].content, "user": messages[1].content},
+        )
 
 
 class _ConcurrencyModel:
@@ -643,6 +670,25 @@ async def test_explore_passes_intent_and_search_to_worker(tmp_path: Path) -> Non
         "question": "Source f1.",
     }
     assert payload["search"] == "S1: the lab study."
+
+
+async def test_worker_with_search_tool_skips_engine_prefetch(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    search = _RecordingSearch(result="unused")
+    worker = _SelfSearchWorker(
+        _bootstrap("A claim"),
+        _reason({"type": "explore", "from": "f1", "question": "Source f1."}),
+        _validate(0),
+        _explore_reply(_source_fact("Primary source")),
+    )
+    engine = Engine(worker=worker, search=search, prompt=_FakePrompt(), store=store, auto=True)
+    await engine.run(origin=_origin(), goal=_goal())
+
+    # The worker owns retrieval, so the engine does not call `search` itself.
+    assert search.queries == []
+    explore_payload = worker.payloads[3]
+    assert "search" not in explore_payload
+    assert explore_payload["intent"]["question"] == "Source f1."
 
 
 async def test_explore_decompose_produces_sub_claims(tmp_path: Path) -> None:
@@ -1640,11 +1686,7 @@ async def test_reason_complete_without_supporting_structure_is_ignored(
     assert board.status == "running"
     events = store.read_events()
     assert all(event.type != "COMPLETE" for event in events)
-    ends = [
-        event
-        for event in events
-        if event.type == "REASON" and event.payload["phase"] == "end"
-    ]
+    ends = [event for event in events if event.type == "REASON" and event.payload["phase"] == "end"]
     assert len(ends) == 1
     assert ends[0].payload["triggerFacts"] == ["f1"]
 
@@ -1764,7 +1806,6 @@ def test_parse_validation_rejects_malformed(reply: str) -> None:
 async def test_live_bootstrap_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from originweave import config
     from originweave.capabilities import build_model, build_prompt, build_search
-    from originweave.capabilities.worker import LocalWorker
 
     monkeypatch.chdir(REPO_ROOT)
     cfg = config.Config()

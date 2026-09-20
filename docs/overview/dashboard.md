@@ -98,9 +98,9 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 | `CreateRun` | `CreateRunRequest` | `CreateRunResponse{run}` | 新建 run（**起一次核验的唯一入口**） |
 | `AddHint` | `AddHintRequest{run_id, text}` | `AddHintResponse{hint}` | 写一条 Hint（`author=human`，非阻塞） |
 | `SubmitHumanInput` | `SubmitHumanInputRequest` | `SubmitHumanInputResponse{run}` | 提交 Gate 决策，解除 `awaiting_human` |
-| `GetSettings` | `GetSettingsRequest{}` | `GetSettingsResponse{settings}` | 读项目设置（`[worker]` 等；**M6 P3，尚未入 `proto/`**） |
-| `UpdateSettings` | `UpdateSettingsRequest{settings}` | `UpdateSettingsResponse{settings}` | 写回项目 `originweave.toml`（未知键报错；**M6 P3，尚未入 `proto/`**） |
-| `Search` | `SearchRequest{query, num_results?}` | `SearchResponse{text}` | 经 `[capability.search]` 执行检索；供 Pi 的 TS 搜索扩展回调（**M6 P4，尚未入 `proto/`**） |
+| `GetSettings` | `GetSettingsRequest{}` | `GetSettingsResponse{settings}` | 读项目设置（`[worker]` + `[capability.model]`；**M6 P3**） |
+| `UpdateSettings` | `UpdateSettingsRequest{settings}` | `UpdateSettingsResponse{settings}` | 校验后写回项目 `originweave.toml` 并应用（未知 provider/tool 报错；**M6 P3**） |
+| `Search` | `SearchRequest{query, num_results?}` | `SearchResponse{text}` | 经 `[capability.search]` 执行检索；供 Pi 的 TS 搜索扩展回调（**M6 P3，消费于 P4**） |
 
 错误沿用 Connect 的统一错误模型（`code` + `message`）。
 
@@ -111,7 +111,7 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 `entity_graph?`（`analysis` 含 relation 时） · `deviations[]` · `events[]` ·
 `waiting_for?`（仅 `status = awaiting_human`） · `report?`（未产出时为空） ·
 `decisions[]`（`HUMAN_INPUT` 裁决记录） · `sessions[]`（M6：一次 Worker 调用的会话，含原始
-输入/输出与步骤链；**P3，尚未入 `proto/`**）。
+输入/输出与步骤链，由 run dir `sessions/*.json` 读取）。
 
 ### 4.3 CreateRunRequest
 
@@ -143,33 +143,37 @@ goal, max_steps?, max_wall?, max_cost?, auto?, source_text?
 `product-overview.md` 第 4 节与
 `blackboard-protocol.md` 为准，此处不重复。
 
-### 4.6 设置与会话（M6，**P3/P5 计划，尚未入 `proto/`**）
+### 4.6 设置与会话（M6）
 
 ```text
 Settings {
   worker: WorkerSettings {
+    llm: LlmSettings { provider, model, baseUrl }   # 来自 [capability.model]；baseUrl 空 = OPENAI_BASE_URL
     provider,                         # local | pi
     maxConcurrency,                   # 本项目每次 run 的 worker 上限（>0 且 <=16）
-    tools: string[]                   # 启用的工具名单（扁平白名单，与 [worker].tools 一致）
+    tools: string[],                  # 启用的工具名单（扁平白名单，与 [worker].tools 一致）
     heartbeatInterval,                # 单次调用的 HEARTBEAT 间隔，如 "15s"（I4）
     heartbeatTimeout,                 # 调用失活阈值，如 "5m"；须 > interval（I4）
     heartbeatOnTimeout,               # release | fail（I4）
-    budget: { maxSteps, maxWall, maxCost }
+    budget: WorkerBudget { maxSteps, maxWall, maxCost }
   }
 }
 
 Session {                             # 一次 Worker 调用的历史（隔离）
   id, runId, worker, task,            # task: Bootstrap | Reason | Explore | Validate
   intentId?, model,                   # worker = worker 实例 id（如 "worker-1"）
-  input,                              # 原始输入（渲染后的 prompt / board）
+  input,                              # 原始输入（渲染后的 prompt / board，Struct）
   output,                             # 原始输出（Worker 最终回复文本）
-  steps: SessionStep[] { seq, kind, name?, text?, ok? },
+  steps: SessionStep[] { seq, kind, name, text, ok? },
   startedAt, endedAt
 }
 ```
-`GetSettings`/`UpdateSettings` 读写项目 `originweave.toml`（与 `[worker]` 单一来源）。
-会话快照落 run dir `sessions/<id>.json`；`RunDetail.sessions` 与 `SESSION`/`WORKER_STEP` 事件
-互为索引，前端 INSPECTOR 依会话展示原始输入/输出与步骤链。
+`GetSettings`/`UpdateSettings` 读写项目 `originweave.toml`：`UpdateSettings` 的 `worker` 块为**权威值**
+（逐字段写回 `[worker]`，`llm` 写回 `[capability.model]`），校验失败 → `INVALID_ARGUMENT`；
+调用后 server 重建 worker/search/prompt provider，**对后续 run 生效**（在飞的 run 保持旧 provider）。
+会话快照落 run dir `sessions/<id>.json`；`RunDetail.sessions` 直接读该快照（原始输入/输出与完整步骤链，
+样例目录无 `sessions/` 则为空），与 `SESSION`/`WORKER_STEP` 事件互为索引，前端 INSPECTOR 依会话展示。
+`Search` 为只读 RPC（`[capability.search]` 单一来源，切换 provider 不需改 Pi 扩展）。
 
 ## 5. 契约原型与样例
 

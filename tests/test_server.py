@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -16,7 +17,8 @@ import pytest
 
 pytest.importorskip("originweave.v1.originweave_connect")
 
-from originweave.capabilities import PromptTemplate  # noqa: E402
+from originweave import config as config_module  # noqa: E402
+from originweave.capabilities import PromptTemplate, ProviderError  # noqa: E402
 from originweave.capabilities.worker import LocalWorker  # noqa: E402
 from originweave.config import Config  # noqa: E402
 from originweave.persistence import Project, ProjectRegistry  # noqa: E402
@@ -531,9 +533,7 @@ def _write_run_with_deviation(runs_dir: Path, run_id: str) -> None:
         {"intent": {"id": "i1", "type": "decompose", "from": "f1", "question": "q"}},
         at=at.format(1),
     )
-    store.append_event(
-        "EXECUTE", {"intentId": "i1", "worker": "w", "model": "x"}, at=at.format(2)
-    )
+    store.append_event("EXECUTE", {"intentId": "i1", "worker": "w", "model": "x"}, at=at.format(2))
     deviation = {
         "id": "d1",
         "kind": "deviation",
@@ -732,9 +732,10 @@ async def test_lifespan_drains_background_runs(tmp_path: Path) -> None:
     ProjectRegistry(tmp_path / "projects", tmp_path / "runs").write(Project(id="p", name="P"))
     app = create_app(config=Config(), providers=providers, root=tmp_path)
 
-    async with app.router.lifespan_context(app), httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client,
+    ):
         await _create_run(client, auto=True)  # still running at exit
 
     # The lifespan shutdown awaited the background task to completion.
@@ -748,6 +749,7 @@ def test_ui_command_runs_uvicorn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     run_dir = _write_ui_run(tmp_path, "demo")
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ORIGINWEAVE_SERVER_URL", raising=False)
     captured: dict[str, object] = {}
 
     def fake_run(app: object, *, host: str, port: int, log_level: str) -> None:
@@ -766,3 +768,352 @@ def test_ui_command_rejects_missing_run(tmp_path: Path, monkeypatch: pytest.Monk
 
     monkeypatch.chdir(tmp_path)
     assert main(["ui", "--run", str(tmp_path / "nope")]) == 1
+
+
+def test_ui_command_exports_the_server_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from originweave.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ORIGINWEAVE_SERVER_URL", raising=False)
+    monkeypatch.setattr("uvicorn.run", lambda *args, **kwargs: None)
+
+    assert main(["ui", "--port", "9999"]) == 0
+    # The Pi search extension (M6 P4) reaches this server on the actual port.
+    assert os.environ["ORIGINWEAVE_SERVER_URL"] == "http://127.0.0.1:9999"
+
+
+# --------------------------------------------------------------- M6 P3: settings
+
+
+def _settings_body(**worker_overrides: object) -> dict[str, object]:
+    """A complete WorkerSettings body (UpdateSettings treats scalars as authoritative)."""
+    worker: dict[str, object] = {
+        "provider": "local",
+        "maxConcurrency": 2,
+        "tools": ["search"],
+        "heartbeatInterval": "10s",
+        "heartbeatTimeout": "1m",
+        "heartbeatOnTimeout": "release",
+        "budget": {"maxSteps": 20, "maxWall": "5m", "maxCost": 1.0},
+        "llm": {"provider": "openai", "model": "some-model", "baseUrl": ""},
+    }
+    worker.update(worker_overrides)
+    return {"worker": worker}
+
+
+async def test_get_settings_returns_the_live_config(tmp_path: Path) -> None:
+    ctx = _ctx_with(tmp_path, _providers())
+    async with _client_for(ctx) as client:
+        response = await _post(client, "GetSettings", {})
+
+    assert response.status_code == 200
+    settings = response.json()["settings"]["worker"]
+    assert settings["provider"] == "pi"  # the default
+    assert settings["maxConcurrency"] == 1
+    assert settings["llm"]["provider"] == "openai"
+    assert settings["budget"]["maxSteps"] == 60
+
+
+async def test_update_settings_writes_config_and_applies(tmp_path: Path) -> None:
+    ctx = _ctx_with(tmp_path, _providers())
+    async with _client_for(ctx) as client:
+        response = await _post(
+            client, "UpdateSettings", {"settings": _settings_body(maxConcurrency=4)}
+        )
+
+    assert response.status_code == 200, response.text
+    worker = response.json()["settings"]["worker"]
+    assert worker["provider"] == "local"
+    assert worker["maxConcurrency"] == 4
+    assert worker["tools"] == ["search"]
+
+    # Persisted to originweave.toml and reloadable as a valid config.
+    path = tmp_path / "originweave.toml"
+    assert path.is_file()
+    reloaded = config_module.load(path)
+    assert reloaded.worker.provider == "local"
+    assert reloaded.worker.max_concurrency == 4
+    assert reloaded.worker.tools == ("search",)
+    # The live context was updated too, so subsequent runs use the new settings.
+    assert ctx.config.worker.max_concurrency == 4
+
+
+async def test_update_settings_rebuilds_providers(tmp_path: Path) -> None:
+    seen: list[str] = []
+
+    def factory(cfg: Config) -> Providers:
+        seen.append(cfg.worker.provider)
+        return _providers(NO_REASON)
+
+    ProjectRegistry(tmp_path / "projects", tmp_path / "runs").write(Project(id="p", name="P"))
+    ctx = ServerContext.build(
+        config=Config(), providers=_providers(), root=tmp_path, providers_factory=factory
+    )
+    async with _client_for(ctx) as client:
+        response = await _post(client, "UpdateSettings", {"settings": _settings_body()})
+
+    assert response.status_code == 200
+    assert seen == ["local"]
+    assert ctx.providers.worker.name == "local"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"provider": "nope"},
+        {"tools": ["not-a-tool"]},
+        {"heartbeatInterval": "1m", "heartbeatTimeout": "30s"},  # interval >= timeout
+        {"maxConcurrency": 0},
+        {"budget": {"maxSteps": 0, "maxWall": "5m", "maxCost": 1.0}},
+        {"llm": {"provider": "nope", "model": "m", "baseUrl": ""}},
+        {"llm": {"provider": "openai", "model": "", "baseUrl": ""}},  # empty model
+    ],
+)
+async def test_update_settings_rejects_invalid(
+    tmp_path: Path, overrides: dict[str, object]
+) -> None:
+    ctx = _ctx_with(tmp_path, _providers())
+    async with _client_for(ctx) as client:
+        response = await _post(client, "UpdateSettings", {"settings": _settings_body(**overrides)})
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "invalid_argument"
+    assert not (tmp_path / "originweave.toml").exists()
+
+
+async def test_update_settings_requires_a_worker_block(tmp_path: Path) -> None:
+    ctx = _ctx_with(tmp_path, _providers())
+    async with _client_for(ctx) as client:
+        response = await _post(client, "UpdateSettings", {"settings": {}})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_argument"
+
+
+async def test_pinned_settings_are_read_only(tmp_path: Path) -> None:
+    run_dir = _write_ui_run(tmp_path, "demo")
+
+    async with _ui_client(tmp_path, static_dir=None, run_dir=run_dir) as client:
+        read = await _post(client, "GetSettings", {})
+        write = await _post(client, "UpdateSettings", {"settings": _settings_body()})
+
+    assert read.status_code == 200
+    assert write.status_code == 400
+    assert write.json()["code"] == "failed_precondition"
+
+
+async def test_update_settings_falls_back_for_omitted_submessages(tmp_path: Path) -> None:
+    ctx = _ctx_with(tmp_path, _providers())
+    partial = {
+        "worker": {
+            "provider": "local",
+            "maxConcurrency": 2,
+            "tools": [],
+            "heartbeatInterval": "10s",
+            "heartbeatTimeout": "1m",
+            "heartbeatOnTimeout": "fail",
+        }
+    }
+    async with _client_for(ctx) as client:
+        response = await _post(client, "UpdateSettings", {"settings": partial})
+
+    assert response.status_code == 200, response.text
+    reloaded = config_module.load(tmp_path / "originweave.toml")
+    assert reloaded.worker.provider == "local"
+    assert reloaded.worker.tools == ()
+    assert reloaded.worker.heartbeat_on_timeout == "fail"
+    # Omitted llm / budget sub-messages keep their previous values.
+    assert reloaded.capability.model == Config().capability.model
+    assert reloaded.worker.budget == Config().worker.budget
+    # Unrelated sections survive the rewrite.
+    assert reloaded.hitl == Config().hitl
+    assert reloaded.capability.search == Config().capability.search
+    assert reloaded.capability.prompt == Config().capability.prompt
+    assert reloaded.run == Config().run
+    assert reloaded.project == Config().project
+
+
+# --------------------------------------------------------------- M6 P3b: Search
+
+
+class _RecordingSearch:
+    """A fake search provider that records its calls and can be made to fail."""
+
+    name = "fake"
+
+    def __init__(self, *, text: str = "", error: Exception | None = None) -> None:
+        self._text = text
+        self._error = error
+        self.calls: list[tuple[str, int]] = []
+
+    async def search(self, query: str, *, num_results: int = 8) -> str:
+        self.calls.append((query, num_results))
+        if self._error is not None:
+            raise self._error
+        return self._text
+
+
+def _ctx_with_search(tmp_path: Path, search: _RecordingSearch) -> ServerContext:
+    providers = Providers(
+        worker=LocalWorker(model=_FakeModel()), search=search, prompt=_FakePrompt()
+    )
+    return _ctx_with(tmp_path, providers)
+
+
+async def test_search_returns_provider_text(tmp_path: Path) -> None:
+    search = _RecordingSearch(text="[1] Copilot study ...")
+    ctx = _ctx_with_search(tmp_path, search)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "Search", {"query": "copilot productivity", "numResults": 3})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["text"] == "[1] Copilot study ..."
+    assert search.calls == [("copilot productivity", 3)]
+
+
+async def test_search_defaults_to_eight_results(tmp_path: Path) -> None:
+    search = _RecordingSearch(text="x")
+    ctx = _ctx_with_search(tmp_path, search)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "Search", {"query": "q"})
+
+    assert response.status_code == 200
+    assert search.calls == [("q", 8)]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"query": ""},
+        {"query": "   "},
+        {"query": "q", "numResults": 0},
+        {"query": "q", "numResults": 999},
+    ],
+)
+async def test_search_rejects_bad_arguments(tmp_path: Path, body: dict[str, object]) -> None:
+    search = _RecordingSearch(text="x")
+    ctx = _ctx_with_search(tmp_path, search)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "Search", body)
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_argument"
+    assert search.calls == []  # the provider is never reached
+
+
+async def test_search_provider_error_is_unavailable(tmp_path: Path) -> None:
+    search = _RecordingSearch(error=ProviderError("rate limited"))
+    ctx = _ctx_with_search(tmp_path, search)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "Search", {"query": "q"})
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "unavailable"
+
+
+# --------------------------------------------------------------- M6 P3c: sessions
+
+
+def _write_session(store: RunStore, session_id: str, **overrides: object) -> None:
+    session: dict[str, object] = {
+        "id": session_id,
+        "runId": store.root.name,
+        "worker": "worker-1",
+        "task": "Explore",
+        "intentId": "i1",
+        "model": "fake",
+        "input": {"system": "S", "user": "U"},
+        "output": '{"facts": []}',
+        "steps": [
+            {"seq": 1, "kind": "turn-start", "text": "go", "ok": True},
+            {"seq": 2, "kind": "tool-call", "name": "search", "text": "q"},
+        ],
+        "startedAt": "2026-01-01T00:00:00+00:00",
+        "endedAt": "2026-01-01T00:00:01+00:00",
+    }
+    session.update(overrides)
+    store.write_session(session_id, session)
+
+
+async def test_get_run_exposes_sessions(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+    store = RunStore(tmp_path / "runs" / "run_001")
+    _write_session(store, "sess_001")
+
+    async with _client(tmp_path) as client:
+        response = await _post(client, "GetRun", {"runId": "run_001"})
+
+    sessions = response.json()["runDetail"]["sessions"]
+    assert len(sessions) == 1
+    session = sessions[0]
+    assert session["id"] == "sess_001"
+    assert session["runId"] == "run_001"
+    assert session["worker"] == "worker-1"
+    assert session["task"] == "Explore"
+    assert session["intentId"] == "i1"
+    assert session["input"]["user"] == "U"
+    assert session["output"] == '{"facts": []}'
+    assert session["startedAt"] == "2026-01-01T00:00:00+00:00"
+    assert [step["seq"] for step in session["steps"]] == [1, 2]
+    assert session["steps"][1]["name"] == "search"
+    assert session["steps"][0]["ok"] is True
+    assert "ok" not in session["steps"][1]  # unset optional is omitted
+
+
+async def test_get_run_sessions_are_sorted_by_id(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+    store = RunStore(tmp_path / "runs" / "run_001")
+    _write_session(store, "sess_002", task="Reason", intentId=None)
+    _write_session(store, "sess_001")
+
+    async with _client(tmp_path) as client:
+        response = await _post(client, "GetRun", {"runId": "run_001"})
+
+    sessions = response.json()["runDetail"]["sessions"]
+    assert [session["id"] for session in sessions] == ["sess_001", "sess_002"]
+    assert "intentId" not in sessions[1]  # omitted when null
+
+
+async def test_get_run_without_sessions_returns_empty(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+    # The run dir has a sessions/ directory (init_layout) but no snapshots.
+    async with _client(tmp_path) as client:
+        response = await _post(client, "GetRun", {"runId": "run_001"})
+
+    assert response.json()["runDetail"].get("sessions", []) == []
+
+
+async def test_get_run_malformed_session_reports_internal(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+    sessions_dir = tmp_path / "runs" / "run_001" / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    (sessions_dir / "sess_001.json").write_text("not json", encoding="utf-8")
+
+    async with _client(tmp_path) as client:
+        response = await _post(client, "GetRun", {"runId": "run_001"})
+
+    assert response.status_code == 500
+    assert response.json()["code"] == "internal"
+
+
+@pytest.mark.parametrize(
+    "session",
+    [
+        {"id": "sess_001", "input": ["not", "an", "object"]},
+        {"id": "sess_001", "steps": "not-a-list"},
+        {"id": "sess_001", "steps": [{"seq": "abc"}]},
+        {"id": "sess_001", "steps": [42]},
+    ],
+)
+async def test_get_run_structurally_bad_session_reports_internal(
+    tmp_path: Path, session: dict[str, object]
+) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+    store = RunStore(tmp_path / "runs" / "run_001")
+    store.write_session("sess_001", session)
+
+    async with _client(tmp_path) as client:
+        response = await _post(client, "GetRun", {"runId": "run_001"})
+
+    assert response.status_code == 500, response.text
+    assert response.json()["code"] == "internal"

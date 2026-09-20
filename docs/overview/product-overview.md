@@ -206,7 +206,7 @@ Session {
   intentId?,                # 派发给 Intent 的任务有；Reason/Validate 为空
   model,
   input, output,            # 原始输入（渲染后的 prompt/board）与原始输出（回复文本）
-  steps: SessionStep[],     # { seq, kind: turn-start|tool-call|tool-result|message|turn-end, name?, text?, ok? }
+  steps: SessionStep[],     # { seq, kind: turn-start|tool-call|tool-result|message|turn-end, name, text, ok? }
   startedAt, endedAt
 }
 ```

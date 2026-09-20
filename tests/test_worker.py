@@ -20,7 +20,7 @@ from originweave.blackboard import Fact
 from originweave.capabilities import PiWorker, ProviderUnavailableError, build_worker
 from originweave.capabilities.base import MissingCredentialError, PromptTemplate, ProviderError
 from originweave.capabilities.model import ChatMessage
-from originweave.capabilities.pi import PiAgentClient
+from originweave.capabilities.pi import PiAgentClient, resolve_agent_dir_env_name
 from originweave.capabilities.worker import (
     STEP_TEXT_LIMIT,
     LocalWorker,
@@ -291,20 +291,145 @@ async def test_pi_worker_disables_tools_when_none_configured(
     assert "--no-tools" in factory.configs[0].extra_args
 
 
-async def test_pi_worker_rejects_search_until_extension_exists(
+async def test_pi_worker_wires_the_search_extension(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("ORIGINWEAVE_SERVER_URL", "http://server.example:8765/")
+    agent = _FakePiAgent([])
+    factory = _FakePiFactory(agent)
+    extension = tmp_path / "search.ts"
     worker = PiWorker(
         model=config.ModelConfig(base_url="https://model.example/v1"),
-        tools=("search",),
+        tools=("search", "read"),
+        extension_path=extension,
+        agent_factory=factory,
         runtime_checker=lambda: None,
     )
 
-    with pytest.raises(ProviderUnavailableError, match="M6 P4"):
-        await worker.run(
-            "Reason", PromptTemplate(name="reason", text="SYSTEM"), await _board(tmp_path)
-        )
+    await worker.run("Reason", PromptTemplate(name="reason", text="SYSTEM"), await _board(tmp_path))
+
+    pi_config = factory.configs[0]
+    # The extension is loaded explicitly and `search` is enabled alongside the built-ins.
+    assert pi_config.extra_args[pi_config.extra_args.index("-e") + 1] == str(extension)
+    assert "--tools" in pi_config.extra_args
+    assert pi_config.extra_args[pi_config.extra_args.index("--tools") + 1] == "search,read"
+    # The server address is injected, trailing slash stripped.
+    assert pi_config.env["ORIGINWEAVE_SERVER_URL"] == "http://server.example:8765"
+    # The (default) agent-config-dir variable is always present as a fallback.
+    assert "PI_CODING_AGENT_DIR" in pi_config.env
+
+
+async def test_pi_worker_search_uses_the_server_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("ORIGINWEAVE_SERVER_URL", raising=False)
+    agent = _FakePiAgent([])
+    factory = _FakePiFactory(agent)
+    worker = PiWorker(
+        model=config.ModelConfig(base_url="https://model.example/v1"),
+        tools=("search",),
+        extension_path=tmp_path / "search.ts",
+        agent_factory=factory,
+        runtime_checker=lambda: None,
+    )
+
+    await worker.run("Reason", PromptTemplate(name="reason", text="SYSTEM"), await _board(tmp_path))
+
+    assert factory.configs[0].env["ORIGINWEAVE_SERVER_URL"] == "http://127.0.0.1:8765"
+
+
+async def test_pi_worker_without_search_does_not_load_the_extension(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    agent = _FakePiAgent([])
+    factory = _FakePiFactory(agent)
+    worker = PiWorker(
+        model=config.ModelConfig(base_url="https://model.example/v1"),
+        tools=("read",),
+        agent_factory=factory,
+        runtime_checker=lambda: None,
+    )
+
+    await worker.run("Reason", PromptTemplate(name="reason", text="SYSTEM"), await _board(tmp_path))
+
+    assert "-e" not in factory.configs[0].extra_args
+
+
+def _fake_pi_install(root: Path, package: dict[str, object]) -> Path:
+    """Write a fake ``pi`` install and return its binary path."""
+    binary = root / "pi-coding-agent" / "dist" / "bundle" / "cli.js"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("// cli", encoding="utf-8")
+    (binary.parents[2] / "package.json").write_text(json.dumps(package), encoding="utf-8")
+    return binary
+
+
+@pytest.mark.parametrize(
+    ("package", "expected"),
+    [
+        ({"piConfig": {"name": "ekreke", "configDir": ".pi"}}, "EKREKE_CODING_AGENT_DIR"),
+        ({"n": {"name": "tau", "configDir": ".pi"}}, "TAU_CODING_AGENT_DIR"),
+        ({"piConfig": {"configDir": ".pi"}}, "PI_CODING_AGENT_DIR"),
+        ({}, "PI_CODING_AGENT_DIR"),
+    ],
+)
+def test_resolve_agent_dir_env_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, package: dict[str, object], expected: str
+) -> None:
+    binary = _fake_pi_install(tmp_path, package)
+    monkeypatch.setattr("shutil.which", lambda name: str(binary))
+    assert resolve_agent_dir_env_name() == expected
+
+
+def test_resolve_agent_dir_env_name_without_pi(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    assert resolve_agent_dir_env_name() == "PI_CODING_AGENT_DIR"
+
+
+def test_resolve_agent_dir_env_name_ignores_unrelated_ancestor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A package.json higher up the tree (not the Pi package) must not hijack the name.
+    binary = tmp_path / "shim" / "pi"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    (tmp_path / "package.json").write_text(
+        json.dumps({"name": "someone-else", "piConfig": {"name": "hijack"}}), encoding="utf-8"
+    )
+    monkeypatch.setattr("shutil.which", lambda name: str(binary))
+    assert resolve_agent_dir_env_name() == "PI_CODING_AGENT_DIR"
+
+
+async def test_pi_worker_uses_the_derived_agent_dir_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    binary = _fake_pi_install(
+        tmp_path / "install", {"piConfig": {"name": "ekreke", "configDir": ".pi"}}
+    )
+    monkeypatch.setattr("shutil.which", lambda name: str(binary))
+    factory = _FakePiFactory(_FakePiAgent([]))
+    worker = PiWorker(
+        model=config.ModelConfig(base_url="https://model.example/v1"),
+        tools=(),
+        agent_factory=factory,
+        runtime_checker=lambda: None,
+    )
+
+    await worker.run("Reason", PromptTemplate(name="reason", text="SYSTEM"), await _board(tmp_path))
+
+    env = factory.configs[0].env
+    assert "EKREKE_CODING_AGENT_DIR" in env
+    assert env["EKREKE_CODING_AGENT_DIR"] == env["PI_CODING_AGENT_DIR"]
+
+
+def test_packaged_search_extension_exists() -> None:
+    from originweave.capabilities.pi import _extension_path
+
+    assert _extension_path().is_file()
 
 
 async def test_pi_worker_requires_runtime_and_credentials(

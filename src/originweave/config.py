@@ -10,6 +10,8 @@ defaults defined here. Credentials are never stored in config (env only).
 
 from __future__ import annotations
 
+import math
+import os
 import re
 import tomllib
 from collections.abc import Mapping
@@ -211,6 +213,8 @@ class Config:
                 f"unknown model provider {model!r}; "
                 f"expected one of {sorted(ALLOWED_MODEL_PROVIDERS)}"
             )
+        if not self.capability.model.model:
+            raise ConfigError("capability.model.model must be a non-empty string")
         worker = self.worker.provider
         if worker not in ALLOWED_WORKER_PROVIDERS:
             raise ConfigError(
@@ -248,8 +252,10 @@ class Config:
         budget = self.worker.budget
         if budget.max_steps <= 0:
             raise ConfigError(f"worker.budget.max_steps must be > 0, got {budget.max_steps}")
-        if budget.max_cost < 0:
-            raise ConfigError(f"worker.budget.max_cost must be >= 0, got {budget.max_cost}")
+        if not math.isfinite(budget.max_cost) or budget.max_cost < 0:
+            raise ConfigError(
+                f"worker.budget.max_cost must be finite and >= 0, got {budget.max_cost}"
+            )
         parse_duration(budget.max_wall, "worker.budget.max_wall")
         if not self.run.dir:
             raise ConfigError("run.dir must be a non-empty string")
@@ -428,6 +434,25 @@ def from_dict(data: Mapping[str, Any]) -> Config:
         run=RunConfig(dir=_as_str(run.get("dir"), "run.dir", defaults.run.dir)),
         project=ProjectConfig(dir=_as_str(project.get("dir"), "project.dir", defaults.project.dir)),
     )
+
+
+def save(config: Config, path: Path | None = None) -> Path:
+    """Write ``config`` to ``originweave.toml``, overwriting any existing file.
+
+    Validates first so a bad ``UpdateSettings`` can never persist an invalid file. The
+    file is regenerated from :meth:`Config.to_dict`, so any comments or unrelated
+    formatting in a hand-edited file are not preserved (semantics are the contract).
+    """
+    config.validate()
+    config_path = Path(CONFIG_FILENAME) if path is None else path
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    # Write to a sibling temp file then replace, so a crash mid-write cannot corrupt
+    # the live config.
+    tmp_path = config_path.with_name(f".{config_path.name}.tmp")
+    with tmp_path.open("wb") as handle:
+        tomli_w.dump(config.to_dict(), handle)
+    os.replace(tmp_path, config_path)
+    return config_path
 
 
 def load(path: Path | None = None) -> Config:

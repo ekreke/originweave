@@ -13,12 +13,42 @@ A run directory looks like::
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
 from .blackboard import BlackboardError
 from .events import DEFAULT_TONE, Event, format_event_id, now_iso
+
+_SESSION_SUFFIX_RE = re.compile(r"(\d+)$")
+
+
+def _session_sort_key(path: Path) -> tuple[int, str]:
+    """Sort ``sess_NNN`` snapshots numerically (so ``sess_1000`` follows ``sess_999``)."""
+    match = _SESSION_SUFFIX_RE.search(path.stem)
+    return (int(match.group(1)) if match else 0, path.stem)
+
+
+def _validate_session(path: Path, data: Mapping[str, Any]) -> None:
+    """Reject a structurally malformed session snapshot as a :class:`BlackboardError`.
+
+    Guards the type assumptions the proto mapper makes (``input`` an object, ``steps``
+    a list of objects with an integer ``seq``) so bad data becomes a clean INTERNAL
+    rather than a leaked ``ParseError``/``AttributeError``/``ValueError``.
+    """
+    source = data.get("input")
+    if source is not None and not isinstance(source, dict):
+        raise BlackboardError(f"{path}: session.input must be an object")
+    steps = data.get("steps", [])
+    if not isinstance(steps, list):
+        raise BlackboardError(f"{path}: session.steps must be a list")
+    for step in steps:
+        if not isinstance(step, dict):
+            raise BlackboardError(f"{path}: session step must be an object")
+        seq = step.get("seq")
+        if seq is not None and (isinstance(seq, bool) or not isinstance(seq, int)):
+            raise BlackboardError(f"{path}: session step seq must be an integer")
 
 
 class RunStore:
@@ -92,6 +122,28 @@ class RunStore:
 
     def read_events(self) -> list[Event]:
         return list(self.iter_events())
+
+    def read_sessions(self) -> list[dict[str, Any]]:
+        """Read the worker session snapshots under ``sessions/`` (M6 P3c).
+
+        Returns every ``sessions/*.json`` in filename order (``sess_NNN`` sorts
+        chronologically); an absent directory yields ``[]`` (e.g. the committed
+        sample). Raises :class:`BlackboardError` on malformed content, mirroring
+        :meth:`read_events`.
+        """
+        if not self.sessions_dir.is_dir():
+            return []
+        sessions: list[dict[str, Any]] = []
+        for path in sorted(self.sessions_dir.glob("*.json"), key=_session_sort_key):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise BlackboardError(f"{path}: invalid JSON: {exc}") from exc
+            if not isinstance(data, dict):
+                raise BlackboardError(f"{path}: session must be a JSON object")
+            _validate_session(path, data)
+            sessions.append(data)
+        return sessions
 
     def append_event(
         self,

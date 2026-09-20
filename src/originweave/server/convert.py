@@ -7,7 +7,7 @@ placed into a ``google.protobuf.Struct`` via :func:`json_format.ParseDict`.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from google.protobuf import json_format, struct_pb2
@@ -15,6 +15,7 @@ from google.protobuf import json_format, struct_pb2
 from originweave.v1 import originweave_pb2 as pb
 
 from ..blackboard import Board, Edge, Evidence, Fact, Hint, HumanDecision, Intent, WaitingFor
+from ..config import Config, ModelConfig, WorkerConfig
 from ..events import Event
 from ..persistence import Project, Run
 from ..report import Deviation, Report, derive_report
@@ -121,6 +122,69 @@ def report_pb(report: Report) -> Any:
     )
 
 
+def session_step_pb(step: Mapping[str, Any]) -> Any:
+    """Map one ``sessions/*.json`` step to a ``SessionStep``.
+
+    ``text`` is the untruncated snapshot value (the ``WORKER_STEP`` event is the
+    truncated index; the session file is the source of truth).
+    """
+    message = pb.SessionStep(
+        seq=int(step.get("seq", 0)),
+        kind=str(step.get("kind", "")),
+        name=str(step.get("name", "")),
+        text=str(step.get("text", "")),
+    )
+    ok = step.get("ok")
+    if ok is not None:
+        message.ok = bool(ok)
+    return message
+
+
+def session_pb(session: Mapping[str, Any]) -> Any:
+    """Map one ``sessions/*.json`` snapshot to a ``Session`` (raw input/output)."""
+    payload = struct_pb2.Struct()
+    json_format.ParseDict(session.get("input") or {}, payload)
+    message = pb.Session(
+        id=str(session.get("id", "")),
+        run_id=str(session.get("runId", "")),
+        worker=str(session.get("worker", "")),
+        task=str(session.get("task", "")),
+        model=str(session.get("model", "")),
+        input=payload,
+        output=str(session.get("output", "")),
+        steps=[session_step_pb(step) for step in session.get("steps") or []],
+        started_at=str(session.get("startedAt", "")),
+        ended_at=str(session.get("endedAt", "")),
+    )
+    intent_id = session.get("intentId")
+    if intent_id is not None:
+        message.intent_id = str(intent_id)
+    return message
+
+
+def worker_settings_pb(worker: WorkerConfig, model: ModelConfig) -> Any:
+    """Map the ``[worker]`` + ``[capability.model]`` config onto ``WorkerSettings``."""
+    return pb.WorkerSettings(
+        llm=pb.LlmSettings(provider=model.provider, model=model.model, base_url=model.base_url),
+        provider=worker.provider,
+        max_concurrency=worker.max_concurrency,
+        tools=list(worker.tools),
+        heartbeat_interval=worker.heartbeat_interval,
+        heartbeat_timeout=worker.heartbeat_timeout,
+        heartbeat_on_timeout=worker.heartbeat_on_timeout,
+        budget=pb.WorkerBudget(
+            max_steps=worker.budget.max_steps,
+            max_wall=worker.budget.max_wall,
+            max_cost=worker.budget.max_cost,
+        ),
+    )
+
+
+def settings_pb(config: Config) -> Any:
+    """Map a :class:`Config` onto the ``Settings`` message."""
+    return pb.Settings(worker=worker_settings_pb(config.worker, config.capability.model))
+
+
 def event_pb(event: Event) -> Any:
     payload = struct_pb2.Struct()
     json_format.ParseDict(event.payload, payload)
@@ -171,7 +235,13 @@ def run_pb(run: Run) -> Any:
     )
 
 
-def run_detail_pb(run: Run, board: Board, events: Sequence[Event]) -> Any:
+def run_detail_pb(
+    run: Run,
+    board: Board,
+    events: Sequence[Event],
+    *,
+    sessions: Sequence[Mapping[str, Any]] = (),
+) -> Any:
     waiting = waiting_for_pb(board.waitingFor) if board.waitingFor is not None else None
     report = derive_report(board, run_id=run.id)
     detail = pb.RunDetail(
@@ -185,6 +255,7 @@ def run_detail_pb(run: Run, board: Board, events: Sequence[Event]) -> Any:
         deviations=[deviation_pb(finding) for finding in report.findings],
         events=[event_pb(event) for event in events],
         decisions=[decision_pb(decision) for decision in board.decisions],
+        sessions=[session_pb(session) for session in sessions],
         # proto3 optional *message* fields reject direct assignment; constructor kwargs
         # work (and CopyFrom below). Same applies to entity_graph when M5 lands.
         waiting_for=waiting,

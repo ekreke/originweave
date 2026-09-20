@@ -80,7 +80,17 @@
   仅 CI 之外；**live 有配置目录环境变量名 bug，见「约定与坑」**）。
   每次 Worker 调用 = 一个**隔离会话**，原始输入/输出 + 步骤链落 run dir `sessions/<id>.json`，
   并由 `SESSION`/`WORKER_STEP` 事件索引（reducer 忽略，Board 不变）。检索类工具由 **TS 扩展回调
-  server `Search` RPC**（provider 选择留 Python）；**P4 的 TS 扩展加载机制已 spike 验证**（见 TODO）。
+  server `Search` RPC**（provider 选择留 Python，红线 5）——**P4 已落地**：
+  `src/originweave/pi_extensions/search.ts`（包内资源，`ORIGINWEAVE_SERVER_URL` 默认
+  `http://127.0.0.1:8765`）；`PiWorker` 注入 `-e <ext>` + `--tools search` + server URL、暴露 `tools`；
+  worker 拥有 `search` 工具时 `explore` 由 agent 自主检索（引擎不预取）。**P2 的 agent-dir 环境变量名
+  bug 已修**（`resolve_agent_dir_env_name` 按二进制 `package.json` 推导）。
+  **P3 已拆为 P3a/P3b/P3c（全部落地）**：**P3a** proto 增 `Session`/`SessionStep`/`Settings`/
+  `WorkerSettings`/`WorkerBudget`/`LlmSettings`、`RunDetail.sessions` 与 `GetSettings`/`UpdateSettings` RPC，
+  `config.save`（校验后原子写 toml）+ `ServerContext.apply_settings`（重建 provider，后续 run 生效），
+  `update_settings` 的 `worker` 块为权威值（含 `[capability.model]`），非法 → `INVALID_ARGUMENT`，pinned 拒绝；
+  **P3b** `Search` RPC（只读，空 query/非法 `num_results` → `INVALID_ARGUMENT`，provider 失败 → `UNAVAILABLE`）；
+  **P3c** `RunDetail.sessions`（读 `sessions/*.json`，原始输入/输出 + 步骤链）。
   P1/P2 不依赖 server；P3–P5 依赖 M1c-1；P6 并入 M3。
 
 ## 常用命令
@@ -137,12 +147,13 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
 - **能力为真实调用**（Phase R 已移除 `[live]`/cache/录制回放）：测试注入 fake provider，不打真网。
 - **Pi 运行时（M6）**：`pi` 的 agent 配置目录环境变量名由该构建的 `piConfig.name` 决定
-  （`<NAME>_CODING_AGENT_DIR`）。本机安装 `piConfig.name="ekreke"`，读的是
-  `EKREKE_CODING_AGENT_DIR`；`capabilities/pi.py` 目前硬编码 `PI_CODING_AGENT_DIR`，会导致
-  provider 配置不加载（`Unknown provider "originweave-openai"`）——**P2 遗留，P4 前须修**（按二进制推导
-  或同时设置候选键）。扩展加载：`pi --no-extensions -e <ext.ts>` 仍需显式 `-e`（`--no-extensions`
-  只关自动发现）；`--tools <name>` 按精确名同时约束内建与扩展工具；`typebox`/pi 类型在仓库外路径可
-  直接 import，无需 shim。
+  （`<NAME>_CODING_AGENT_DIR`）：上游 `pi`（如 homebrew 0.85.1，`piConfig` 无 `name`）读
+  `PI_CODING_AGENT_DIR`，改名构建（`piConfig.name="ekreke"`）读 `EKREKE_CODING_AGENT_DIR`。
+  `capabilities/pi.py` 的 `resolve_agent_dir_env_name()` 现**按二进制 `package.json` 推导**并同时设
+  `PI_CODING_AGENT_DIR`（P2 bug 已修，P4）。扩展加载：`pi --no-extensions -e <ext.ts>` 仍需显式 `-e`
+  （`--no-extensions` 只关自动发现）；`--tools <name>` 按精确名同时约束内建与扩展工具；
+  `typebox`/pi 类型在仓库外路径可直接 import，无需 shim。`search` 工具由包内
+  `src/originweave/pi_extensions/search.ts` 提供，回调 server `Search`（`ORIGINWEAVE_SERVER_URL`）。
 - **测试与工具链**：pytest `asyncio_mode = "auto"`（`pyproject.toml`），async 测试**不加**
   `@pytest.mark.asyncio`；ruff `line-length = 100`（非默认 88），mypy strict **只查 `src`**。
 - **事件字段名是契约**：`Event{id,at,type,message,tone,payload}`；reducer 只消费 `type`+`payload`，

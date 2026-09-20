@@ -43,7 +43,9 @@ dev = [
 [tool.hatch.build]
 # The generated proto/Connect tree is gitignored, so hatchling would exclude it from
 # the wheel/sdist; force-include it (it must be generated with `make proto` first).
-artifacts = ["src/originweave/v1/*.py"]
+# The Pi TS search extension is package data loaded by path at runtime (M6 P4); list
+# it explicitly so packaging never drops it.
+artifacts = ["src/originweave/v1/*.py", "src/originweave/pi_extensions/*.ts"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/originweave"]

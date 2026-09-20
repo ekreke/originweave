@@ -78,6 +78,9 @@ class WorkerReply:
 @runtime_checkable
 class Worker(Protocol):
     name: str
+    # Implementations may expose ``tools: frozenset[str]``; the engine reads it
+    # (via getattr) to decide whether the worker searches itself via the ``search``
+    # tool or the engine prefetches results into ``extra``.
 
     async def run(
         self,
@@ -135,6 +138,8 @@ class LocalWorker:
     """Single-turn worker: one ``model`` completion, no tools (M1 behavior)."""
 
     name = "local"
+    # No tools: the engine does retrieval and injects it (see Engine._worker_self_search).
+    tools: frozenset[str] = frozenset()
 
     def __init__(self, *, model: ModelProvider) -> None:
         self._model = model

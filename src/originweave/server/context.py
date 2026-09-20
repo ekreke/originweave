@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -118,8 +118,24 @@ class ServerContext:
     runs_dir: Path
     projects_dir: Path
     scheduler: RunScheduler
+    # The ``originweave.toml`` UpdateSettings writes back to; derived from ``root``.
+    config_path: Path = Path(config_module.CONFIG_FILENAME)
+    # Rebuilds providers after UpdateSettings; tests inject a fake factory.
+    providers_factory: Callable[[Config], Providers] = build_providers
     # ``originweave ui --run <dir>``: serve only this one run, read-only (C4).
     pinned_run: Path | None = None
+
+    def apply_settings(self, config: Config) -> None:
+        """Replace the live config and rebuild providers for subsequent runs.
+
+        Providers are rebuilt *before* the swap so a factory failure leaves the
+        context untouched. Running engines keep the providers they were built with;
+        only new runs (and new ``CreateRun`` / ``SubmitHumanInput`` resumes) observe
+        the change.
+        """
+        providers = self.providers_factory(config)
+        self.config = config
+        self.providers = providers
 
     @classmethod
     def build(
@@ -129,12 +145,16 @@ class ServerContext:
         providers: Providers | None = None,
         root: Path | None = None,
         run_dir: Path | None = None,
+        config_path: Path | None = None,
+        providers_factory: Callable[[Config], Providers] | None = None,
     ) -> ServerContext:
         """Resolve config/providers and the run + project directories.
 
         ``root`` is the base for the relative ``[run].dir`` / ``[project].dir``
         paths (defaults to the current working directory). ``run_dir`` pins the
         server to a single run directory (relative paths resolve against ``root``).
+        ``config_path`` overrides where ``UpdateSettings`` writes (defaults to
+        ``<root>/originweave.toml``).
         """
         cfg = config if config is not None else config_module.load()
         base = Path.cwd() if root is None else Path(root)
@@ -143,12 +163,29 @@ class ServerContext:
         if run_dir is not None:
             candidate = Path(run_dir)
             pinned = (candidate if candidate.is_absolute() else base / candidate).resolve()
+        resolved_config_path = (
+            config_path if config_path is not None else base / config_module.CONFIG_FILENAME
+        )
+        if providers_factory is not None:
+            resolved_factory = providers_factory
+        elif providers is not None:
+            # Keep injected (test) providers across UpdateSettings instead of swapping
+            # them for the production build, which would silently drop the fakes.
+            injected = providers
+
+            def resolved_factory(_config: Config) -> Providers:
+                return injected
+
+        else:
+            resolved_factory = build_providers
         return cls(
             config=cfg,
-            providers=providers if providers is not None else build_providers(cfg),
+            providers=providers if providers is not None else resolved_factory(cfg),
             runs_dir=runs_dir,
             projects_dir=base / cfg.project.dir,
             scheduler=RunScheduler(runs_dir=runs_dir),
+            config_path=resolved_config_path,
+            providers_factory=resolved_factory,
             pinned_run=pinned,
         )
 

@@ -365,7 +365,7 @@ TS agent 运行时）作为 Worker 实现，并**以 `pi` 为项目级默认**�
 Worker 调用 = 一个**隔离会话**，历史以会话为单位保留**原始输入/输出**与步骤链；worker 为
 **项目级配置**（`[worker]`：provider / max_concurrency / tools / budget），其 **LLM 复用
 `[capability.model]`**（openai 兼容：model + base_url，密钥 `OPENAI_API_KEY` 仅 env）；工具可配置；
-检索由 Pi 侧 TS 扩展执行但**回调 server `Search` RPC**（provider 选择留在 Python，保红线 4）。
+检索由 Pi 侧 TS 扩展执行但**回调 server `Search` RPC**（provider 选择留在 Python，保红线 5）。
 **Engine 始终是编排者与黑板唯一写入者**，事件溯源契约不变。
 
 > 依赖：P1/P2 不依赖 server；P3–P5 依赖 **M1c-1**（server 骨架）先落地；容器化并入 M3。
@@ -386,11 +386,24 @@ Worker 调用 = 一个**隔离会话**，历史以会话为单位保留**原始�
       工具白名单 + `cwd` 沙箱、`[capability.model]` → Pi model/auth 映射；**运行时（Node + `pi` 二进制）
       缺失时明确报错并给安装指引（不静默降级）**；**Pi 会话 turns 计入 `max_steps`，单会话受
       `[worker].budget` 约束**（注入 fake 测试，不打真网）
-- [ ] P3 proto + server：`Session`/`SessionStep`、`Settings`/`WorkerSettings`
-      （`provider`、`tools` 扁平 `string[]`、`budget{maxSteps,maxWall,maxCost}`，LLM 字段来自
-      `[capability.model]`）、`GetSettings`/`UpdateSettings`、`Search` RPC；`RunDetail.sessions[]`；
-      `max_concurrency` 调度限流
-- [ ] P4 TS 搜索扩展：注册 `search` 工具，仅回调 server `Search` RPC
+- [x] P3a proto + `GetSettings`/`UpdateSettings`：`Session`/`SessionStep`、`Settings`/`WorkerSettings`
+      （`LlmSettings{provider,model,baseUrl}`（来自 `[capability.model]`）、`provider`、`tools` 扁平
+      `string[]`、`WorkerBudget{maxSteps,maxWall,maxCost}`）+ `GetSettings`/`UpdateSettings` RPC；
+      `config.save`（校验后落 toml）+ `ServerContext.apply_settings`（重建 worker/search/prompt，
+      **后续 run 生效**，含 `max_concurrency` = engine 信号量、仅按 run）—
+      `proto/originweave/v1/originweave.proto`、`server/{service,convert,context}.py`、`config.py`
+- [x] P3b `Search` RPC：经 `[capability.search]` 执行检索（只读、provider 选择留 Python），
+      供 Pi TS 扩展回调（P4 消费、P6 容器内）— `server/service.py`（`search`；空 query/非法
+      `num_results` → `INVALID_ARGUMENT`，provider 失败 → `UNAVAILABLE`）
+- [x] P3c `RunDetail.sessions[]`：读 run dir `sessions/*.json`（原始输入/输出 + 完整步骤链；
+      样例目录无 `sessions/` 则为空）— `store.read_sessions`、`convert.session_pb`/`session_step_pb`、
+      `service._run_detail`（`RunStore` → `sessions`）
+- [x] P4 TS 搜索扩展：注册 `search` 工具，仅回调 server `Search` RPC —
+      `src/originweave/pi_extensions/search.ts`（包内资源；`ORIGINWEAVE_SERVER_URL`，默认
+      `http://127.0.0.1:8765`）；`PiWorker` 注入 `-e <ext>` + `--tools search` 与 server URL、
+      暴露 `tools`；`explore` 检索归属：**worker 拥有 `search` 工具时由 agent 自主检索、引擎不预取**
+      （否则维持引擎预取）；顺带修 P2 live bug（`resolve_agent_dir_env_name` 按二进制推导 agent-dir
+      环境变量名）
 - [ ] P5 前端：Settings 页（worker provider（默认 pi）/ LLM（model、base_url；密钥仅占位提示）/
       budget（max_steps、max_wall、max_cost）/ 工具开关）+ INSPECTOR 会话视图（原始输入 + 原始输出 +
       步骤链）+ EVENTS 按 worker 过滤
