@@ -238,10 +238,12 @@ originweave mcp [--run <dir>]
 - `analysis`（`provenance|relation|both`）、预算（`max_steps`/`max_wall`/`max_cost`）与
   `auto`（跳过 HITL Gate）是 `CreateRunRequest` 的字段（或配置 `[hitl].auto`），不是 CLI flag。
   资料 A 正文经 `CreateRunRequest.source_text` 传入（`source_type="text"`；`url` 暂不支持）。
+- `ui` 起读服务：Connect API 与构建产物 `frontend/dist`（存在时）统一在 `--port`（默认
+  `8765`）；带 `--run <dir>` 时进**单 run 只读模式**（只服务该 run，写 RPC 被拒绝）。
 
 实现状态：`init`（生成 `originweave.toml`，已存在需 `--force`）、`capabilities list`
-（M0b）与 `replay`（M0c，只读重放）已实现；`ui` / `mcp` / `capabilities install-obscura`
-仍为占位，逐个 milestone 落地（`src/originweave/cli.py`）。
+（M0b）、`replay`（M0c，只读重放）与 `ui`（M1c-1 C4，只读 API + 静态托管）已实现；`mcp` /
+`capabilities install-obscura` 仍为占位，逐个 milestone 落地（`src/originweave/cli.py`）。
 
 ## 6. 非目标（Non-goals）
 

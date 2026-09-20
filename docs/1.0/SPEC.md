@@ -195,8 +195,11 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 
 ### C4 · `originweave ui` + 静态 + 端到端
 
-- [ ] `ui`（替换 stub）：uvicorn 起 app、托管 `frontend/dist`（存在时）；`--run <dir>` 单 run 只读；端口统一 `8765`
-- [ ] `Makefile` / `README` / CI 同步；`ui` 冒烟测试；前端 `transport` 默认端口改指 `8765`（前端代码，随 M1c-2）
+- [x] `ui`（替换 stub）：uvicorn 起 app（`cli._cmd_ui`）、托管 `frontend/dist`（存在时，SPA
+      `index.html` 回退；`server/app.py` `SPAStaticFiles`）；`--run <dir>` 单 run 只读
+      （`ServerContext.pinned_run` + `service.py` 写 RPC 拒绝）；端口统一 `8765`
+- [x] `Makefile` / `README` / CI 同步；`ui` 冒烟测试（`tests/test_server.py`：静态/SPA、pinned、
+      lifespan 收尾、CLI）；前端 `transport` 默认端口改指 `8765`（`frontend/src/api/transport.ts`）
 
 验收：注入 fake provider 起 server → `CreateRun{source_text}` 产出 run → `GetRun` 返回 `RunDetail`
 （含 events/facts/intents）→ `AddHint`/`SubmitHumanInput` 落为事件。
@@ -238,7 +241,7 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 - [ ] INSPECTOR 接线：Hints 输入（`AddHint`）+ 选中状态与图联动
 - [ ] HITL UI：`awaiting_human` → Gate A/B/C 面板（approve/edit/reject）→ `submitHumanInput`；Replay 步进（前端按 `events[]`）
 - [ ] 新建核验表单（`CreateRun`：`source_text`/`goal`/`auto` 等）+ 顶栏操作与预算徽标
-- [ ] `transport` 默认端口改指 `8765`（随 C4）
+- [x] `transport` 默认端口改指 `8765`（随 C4 完成 — `frontend/src/api/transport.ts`）
 - [ ] 端到端：起 server → 建 run → 前端看到 DAG → Gate 处人工介入（测试以 fake provider 驱动）+ 冒烟
 
 验收：从前端发起一次核验（样例），看到由抽象论点拆解出的 DAG，可在 Gate 处人工介入；

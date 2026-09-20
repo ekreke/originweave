@@ -1,8 +1,8 @@
 import { createConnectTransport } from '@connectrpc/connect-web'
 
-// Base URL of the originweave server (Connect). Provisional: the server port is
-// finalised in M1c (8765 is the CLI `ui` read-only view port, not the API).
+// Base URL of the originweave server (Connect). `originweave ui` serves the API and
+// the built frontend on the same port (8765); override with VITE_API_BASE.
 // The frontend ships without mock data, so nothing calls this yet.
-const baseUrl = import.meta.env.VITE_API_BASE ?? 'http://localhost:8787'
+const baseUrl = import.meta.env.VITE_API_BASE ?? 'http://localhost:8765'
 
 export const transport = createConnectTransport({ baseUrl })

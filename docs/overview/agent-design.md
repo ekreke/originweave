@@ -229,6 +229,11 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 - 容器镜像与 server 镜像分离：server 常驻，runtime 短命。
 - 安全边界：容器内可触网执行检索；server 仅负责编排与持久化。
 
+`originweave ui`（M1c-1 C4）把 **Connect API 与构建产物 `frontend/dist`**（存在时，含 SPA
+`index.html` 回退）统一托管在同一端口（默认 **8765**）；带 `--run <dir>` 时进**单 run 只读模式**：
+只服务该 run，写 RPC（`CreateRun`/`AddHint`/`SubmitHumanInput`）被拒绝。前端只读视图，不拥有编排
+（红线 1）。
+
 > **M1/M1c-1 的临时态**：容器化在 M3 落地。在此之前，引擎以**库层 + 进程内 Dispatcher**
 > 运行（M1 单测驱动；M1c-1 由 server 进程内调用以打通 proto/前端）。这是**显式、临时**的
 > 例外，红线 3 的正式满足在 M3；Dispatcher 接口必须与 M3 的容器 Dispatcher 一致，
