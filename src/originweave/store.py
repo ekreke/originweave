@@ -120,6 +120,19 @@ class RunStore:
         self._count = sequence
         return event
 
+    def write_input(self, name: str, content: str) -> Path:
+        """Write one input file (e.g. document A) under ``input/``.
+
+        Not an event: the input snapshot is launch material, not board state. ``name``
+        must be a bare filename so a caller cannot escape the run directory.
+        """
+        if not name or "/" in name or "\\" in name or name in {".", ".."}:
+            raise BlackboardError(f"input name must be a bare filename, got {name!r}")
+        self.input_dir.mkdir(parents=True, exist_ok=True)
+        path = self.input_dir / name
+        path.write_text(content, encoding="utf-8")
+        return path
+
     def write_session(self, session_id: str, session: Mapping[str, Any]) -> Path:
         """Write the raw session snapshot for one worker call (M6).
 

@@ -114,10 +114,14 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 project_id, title?, source_type(url|text), analysis?(provenance|relation|both),
 goal, max_steps?, max_wall?, max_cost?, auto?, source_text?
 ```
-预算三项为**覆盖**，未给出时回落 `[worker].budget` 配置；`auto=true` 跳过 HITL Gate（默认 false）。
+预算三项为**覆盖**，未给出时回落 `[worker].budget` 配置；`auto=true` 跳过 HITL Gate（默认
+未给定时回落 `[hitl].auto`）。
 `source_text` 提供资料 A 正文，用于 `source_type="text"`（**目前仅支持 text；url 暂不支持**）。
 `analysis` 目前仅 `provenance`（`relation`/`both` 归 M5）。
-新建 run 初始化为 `status: "queued"`、计数为 0、`budget` 归零。
+`CreateRun` 把资料 A 落盘为 `input/document.md`（+ `input/source.json`），并起一个后台 asyncio
+任务跑 `Engine.run`；返回前**等到 `PROJECT` 事件落盘**，故返回的 `Run` 由事件派生、状态为
+`running`（计数由此后的 `GetRun` 反映），任何紧随其后的 `GetRun` 都能立即读到该 run。
+`project_id` 必须已存在（缺失 → `NOT_FOUND`）。
 
 ### 4.4 HITL 方法
 

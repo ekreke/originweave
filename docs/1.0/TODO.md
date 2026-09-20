@@ -38,9 +38,13 @@
     `run.json` 只存**静态元数据**（结果一律由 `events.jsonl` 派生）；目录式 `projects/<id>/project.json`。
   - **C3a 只读接线（已完成）**：`server/context.py`（`ServerContext`/`Providers`，`create_app(config/providers/root)`）、
     `server/convert.py`（领域/事件 → proto）、`service.py` 实现 5 个只读 RPC（`NOT_FOUND`）。
-  - **下一步 C3b**：`CreateRun{source_text}`（分配 id、写 `input/`+`run.json`、后台 asyncio 跑 `Engine.run`、
-    返回 `Run`）、`AddHint`→`HINT`、`SubmitHumanInput`→`resume`。
-  - **C4** `originweave ui`（uvicorn + `frontend/dist` + `--run` 只读；端口 8765）+ Makefile/CI/README。
+  - **C3b 写 RPC（已完成）**：`CreateRun{source_text}`（校验 project 存在 / `source_type=text` /
+    非空 `source_text` / `goal`；`input/document.md` + `input/source.json` + `run.json`；后台
+    asyncio 任务跑 `Engine.run`，返回前等 `PROJECT` 落盘 → 返回事件派生的 `running` `Run`）、
+    `AddHint`→`HINT`、`SubmitHumanInput`→新建 `Engine` 调 `resume`。`server/context.py` 增
+    `RunScheduler`（每 run 单例 `RunStore` + 后台任务持有/`wait`/`drain`）。
+  - **下一步 C4**：`originweave ui`（uvicorn + `frontend/dist` + `--run` 只读；端口 8765）+
+    Makefile/CI/README。
   - 已定：proto 加 `source_text`（`url` 暂不支持）；目录式 projects；`CreateRun` 后台调度；统一端口 `8765`。
 - 随后：M1c-2（前端接线与 UI）。
 
@@ -123,6 +127,14 @@
 
 ## 已知风险 / 缺口
 
+- **M1c-1 C3b**：`SubmitHumanInput` 目前**同步 await** 整个续跑周期（Reason→dispatch 可能数秒~数十秒），
+  与 SPEC 字面一致但会阻塞该 RPC；若需非阻塞可后续改为后台任务 + 前端轮询。同因，客户端取消该请求会让
+  `CancelledError` 穿透 `_continue`，可能停在「Intent 已 `claimed` 无终态」的中间态（完整恢复归 M3）。
+  后台引擎若在写 `FAILED` 前抛异常（设计上不应发生），run 会停在 `running`（`RunScheduler` 仅记 warning）。
+  **单进程/单事件循环前提**：`allocate_run_id` 与 `RunStore` 的内存 `_count` 只在单 loop 下保证 id 唯一；
+  `RunScheduler` 持有一个进程内 `RunStore` 表（`Agent` 与 `AddHint` 共用同一实例），C4 起 uvicorn **不得用
+  多 worker**，否则重复 id 会破坏「黑板=唯一事实来源」（M3 容器化后再解除）。
+
 - **I6 收敛只按「新 Fact」触发重跑**：被 `RELEASE` 退回 `open` 的 Intent 不会单独重派（无新 Fact 时
   循环即停）；完整的 Intent 重试/调度归 M3。进度判据目前只看 `facts`，M5 引入 `entities`/`relations`
   后需一并纳入。
@@ -168,6 +180,19 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M1c-1 C3b · CreateRun + 后台调度 + AddHint/SubmitHumanInput**：`server/service.py` 实现
+  `create_run`（project 必须已存在；`source_type=text` + 非空 `source_text` + `goal`，否则
+  `INVALID_ARGUMENT`；`analysis` 仅 `provenance`；资料 A 正文写 `input/document.md`（+ `source.json`）、
+  静态元数据写 `run.json`（含 budget 覆盖与 `auto`）；构造 `origin`（正文入 `note`）/`goal` Fact，
+  起后台任务跑 `Engine.run`，有界等到 `PROJECT` 落盘后返回事件派生的 `running` `Run`）、
+  `add_hint`（`HINT`，`h{N}` 按现有 HINT 计数）、`submit_human_input`（非 `awaiting_human` →
+  `FAILED_PRECONDITION`；gate 不符/未知 decision → `INVALID_ARGUMENT`；新建 `Engine` 调 `resume`）。
+  `server/context.py` 增 `RunScheduler`（每 run 单例 `RunStore`——避免多实例 `append_event` 的 event id
+  冲突；后台任务持有 + `wait`/`drain`）与 `ServerContext.scheduler`；`store.py` 增 `write_input()`。
+  顺带修正 `_lookup_project` 中 `BlackboardError`（`ValueError` 子类）不可达的 except 顺序。
+  契约同步 `dashboard.md §4.3`。测试 `tests/test_server.py` 增 C3b 用例（注入 fake provider）。
+  `make lint` + `make test`（266 passed, 1 skipped）+ `make replay` 全绿。
 
 - **M1c-1 C3a · DI + 只读 RPC + proto 映射**：新增 `server/context.py`（`Providers` 与 `ServerContext`，
   从 config 构建 `build_worker/search/prompt`；`create_app(config/providers/root/service)` 注入）、

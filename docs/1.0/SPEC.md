@@ -183,11 +183,15 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 
 #### C3b · CreateRun + 后台调度 + AddHint/SubmitHumanInput
 
-- [ ] `CreateRun{source_text}`：分配 id、写资料 A 到 `input/`、落 `run.json`（**静态元数据**；
-      返回的 `Run` 由事件派生、初始 `queued`）、后台 asyncio 任务跑 `Engine.run`、返回 `Run`
-- [ ] `AddHint` → `HINT` 事件；`SubmitHumanInput` → 重建 `Engine` 调 `resume`（I5 已支持 fresh-engine 续号）
-- [ ] 测试：ASGI 客户端注入 fake provider，`CreateRun → GetRun`（events/facts/intents）、
-      `AddHint`/`SubmitHumanInput` 落事件
+- [x] `CreateRun{source_text}`：校验 project 存在（缺失 → `NOT_FOUND`）与输入（仅 `text`、非空
+      `source_text`/`goal`、`analysis=provenance`），分配 id、写资料 A 到 `input/`（`document.md`）+
+      落 `run.json`（**静态元数据**）、后台 asyncio 任务跑 `Engine.run`；返回前等 `PROJECT` 落盘，
+      返回的 `Run` 由事件派生、状态 `running`（`server/service.py`；每 run 单例 `RunStore` 由
+      `server/context.py` 的 `RunScheduler` 持有）
+- [x] `AddHint` → `HINT` 事件；`SubmitHumanInput` → 重建 `Engine` 调 `resume`（I5 已支持 fresh-engine 续号；
+      非 `awaiting_human` → `FAILED_PRECONDITION`，gate 不符/未知 decision → `INVALID_ARGUMENT`）
+- [x] 测试：ASGI 客户端注入 fake provider，`CreateRun → GetRun`（events/facts/intents）、
+      `AddHint`/`SubmitHumanInput` 落事件（含并发 id 唯一性、非阻塞后台化、错误码负例）
 
 ### C4 · `originweave ui` + 静态 + 端到端
 

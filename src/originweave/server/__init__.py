@@ -9,6 +9,6 @@ drives the library-layer :class:`~originweave.engine.Engine` and exposes the fro
 from __future__ import annotations
 
 from .app import create_app
-from .context import Providers, ServerContext, build_providers
+from .context import Providers, RunScheduler, ServerContext, build_providers
 
-__all__ = ["Providers", "ServerContext", "build_providers", "create_app"]
+__all__ = ["Providers", "RunScheduler", "ServerContext", "build_providers", "create_app"]
