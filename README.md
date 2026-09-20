@@ -3,13 +3,16 @@
 给定资料 A，定位其核心说法的真实源头，判定 A 相对源头的偏差，输出**可审计的溯源 DAG + 偏差记分卡**（每项结论带来源 URL + 逐字引用，可回链、可重放）。
 
 > 当前 **M1 主体（I1–I6，库层）已完成** —— Bootstrap/Reason/Validate/Explore pass + Stigmergy 收敛、
-> 并发 Worker/心跳、HITL Gate A；**M6（可插拔 Worker）** 的 `PiWorker`（P2）已落地（M1 残留：
-> Dispatcher 接口对齐 M3、`verify` 型调度随 M2、样例输入的确定性单测）。
+> 并发 Worker/心跳、HITL Gate A；**M2 偏差记分卡已完成**（verify 型经 `compare` pass 派发、
+> deviation 记分、严格 `COMPLETE`、run dir `report.md`、Gate B）。
+> **M6（可插拔 Worker）** 的 `PiWorker`（P2）已落地（M1 残留：Dispatcher 接口对齐 M3、样例输入的
+> 确定性单测）。
 > **M1c-1（Connect server）**：**C1–C4 已落地**——proto codegen + Connect app、持久化、只读 + 写
 > RPC（`CreateRun`/`AddHint`/`SubmitHumanInput`）、`originweave ui`（只读 API + 静态托管，端口 8765）。
 > 起 run 走 server / proto API（`CreateRun`，经 `source_text` 收资料 A），故 **CLI 无 `trace`**；
-> `mcp` 仍为占位。`frontend/` 已完成 **2b-1 只读接线**（React Query 读真实数据；HITL/新建表单归
-> 2b-2–2b-5）。版本与里程碑见 `milestones.md`。
+> `mcp` 仍为占位。`frontend/` 已完成 **2b-1/2b-2/2b-3**（React Query 读真实数据、Inspector 选中 +
+> Hints、HITL Gate A/B + Replay 步进；新建表单 + 顶栏归 2b-4、端到端归 2b-5）。版本与里程碑见
+> `milestones.md`。
 
 ## 快速开始
 
@@ -62,7 +65,7 @@ tests/             # 单测
 scripts/           # 辅助脚本
 examples/          # 端到端样例（fixtures）
 proto/             # Connect/buf proto 契约
-frontend/          # React + Vite + TS 界面（M1b 脚手架、M1c-2 接线）
+frontend/          # React + Vite + TS 界面（M1b 脚手架、M1c-2b 接线）
 .github/workflows/ # CI
 ```
 

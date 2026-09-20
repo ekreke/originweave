@@ -12,10 +12,9 @@
 - **M6 · Pi Worker、可配置工具与会话**（用户新增；进度真相见 `SPEC.md` M6）。计划 P0–P6：
   - **P0 契约/文档（已完成）**、**P1 Worker 抽象 + 会话 + 事件（已完成）**：`capabilities/worker.py`、
     `Engine(worker=...)`、`[worker]` 配置、`SESSION`/`WORKER_STEP` 事件、run dir `sessions/`。
-  - **本轮（仅 docs）**：把「项目级完整化」写入 `SPEC.md` M6 + 本文件（见下）。
-  - **下一步 P1b 配置迁移**：退役顶层 `[budget]` → `[worker].budget`；`[worker].provider` 默认 `pi`；
+  - **P1b 配置迁移（已完成）**：退役顶层 `[budget]` → `[worker].budget`；`[worker].provider` 默认 `pi`；
     worker LLM 复用 `[capability.model]`（仅 openai 兼容）。
-  - **P2 `PiWorker`**（`capabilities/pi.py`，`pi-py-sdk`，每会话隔离，运行时缺失明确报错，
+  - **P2 `PiWorker`（已完成）**（`capabilities/pi.py`，`pi-py-sdk`，每会话隔离，运行时缺失明确报错，
     Pi turns 计入 `max_steps`，注入 fake 测试）。
   - P3 proto/server（Settings/Search/Session）；**P4 TS 搜索扩展回调 server `Search`**——加载机制
     已 spike 验证（见「已完成（近期）」）；P5 前端 Settings + 会话视图；P6 容器化（并入 M3）。
@@ -24,12 +23,12 @@
 - **M1 迭代切片**（引擎为库层、进程内 Dispatcher；`model`/`search` provider 已就绪）：
   已落地：**I1** Bootstrap、**I2a** `FAILED`/`STOPPED`、**I2** Reason、**I2b** Validate 去重、
   **I3** Explore + search（来源回链 `citation`/`source` + `Evidence`；`decompose`/`explore`
-  派发分支，`verify` 后随 M2 落地；`engine.py`、`prompts/explore.txt`）、
+  派发分支，`verify` 已随 M2 经 `compare` 派发；`engine.py`、`prompts/explore.txt`）、
   **I4** 并发派发 + 心跳/超时（`engine.py` `_dispatch`/`_run_explore`/`_heartbeat`；
   `[worker].heartbeat_{interval,timeout,on_timeout}`、`max_concurrency<=16`）、
   **I5** HITL Gate A（`engine.py` `run`/`resume`；`REQUEST_HUMAN`/`HUMAN_INPUT`，`auto` 跳过）、
   **I6** Stigmergy 多轮收敛（`engine.py` `_continue`；`triggerFacts`=新增 facts；`max_rounds` 安全阀）。
-  M1 残留（非本轮）：**verify 型调度**随 M2 `compare`（`SPEC:107`）；**进程内 Dispatcher 接口对齐 M3**
+  M1 残留（非本轮）：**进程内 Dispatcher 接口对齐 M3**
   （`SPEC:114`）；**对样例输入的 fake-provider 确定性 Board 单测**（`SPEC:118`，已有 fake-provider
   确定性测试，尚缺「样例输入」覆盖）。
 - **M1c-1 · server 骨架（进度真相见 `SPEC.md` M1c-1）**：
@@ -59,7 +58,6 @@
     **2b-3**（已完成）HITL UI（Gate A/B → `submitHumanInput`）+ Replay 步进；**2b-4** 新建核验表单 + 顶栏；
     **2b-5** 端到端 + 冒烟 + CI/文档。**M6 P3**（Settings/Search/Session proto + RPC）亦依赖 M1c-1，可并行规划。
   - 已定：proto 加 `source_text`（`url` 暂不支持）；目录式 projects；`CreateRun` 后台调度；统一端口 `8765`。
-- 随后：M1c-2（前端接线与 UI）。
 
 ## 待确认决策
 
@@ -157,8 +155,9 @@
 - 免费搜索走第三方公开 MCP 端点（`mcp.exa.ai` / `search.parallel.ai`），可能限流或变更；
   已兼容普通 JSON 与 SSE 两种响应。
 - 旧 `originweave.toml`（含 `[live]`）会因未知键报错（仓库无提交的 toml，影响小）。
-- 前端 `frontend/` 已入库（M1b 脚手架），但**尚无真实数据**（不接 mock）：DAG/Gate UI 与
-  server 接线归 M1c-2；在此之前 UI 只是可维护的界面壳。
+- 前端 `frontend/` 已入库（M1b 脚手架），并已完成 **M1c-2b 的 2b-1/2b-2/2b-3**
+  （React Query 读真实数据、Inspector 选中 + Hints、HITL Gate A/B + Replay 步进）；**新建核验表单 + 顶栏
+  归 2b-4、端到端与冒烟归 2b-5**；仍**不接 mock**（fixture 仅测试用）。
 - `Makefile` 的 `demo` target 依赖 M4 的 server + 前端，现阶段只打印提示（不执行）。
 - **契约重排**把 server API 与前端从 M4 提前到 **M1b/M1c-1/M1c-2**，M4 收缩为端到端 / Deployment / 文档回归；
   期间 `dashboard.md §4` 已由 REST 改为 proto，`product-overview.md §5` 已移除 `trace`。
@@ -378,7 +377,8 @@
   `AGENTS.md` / `README.md`；样例 README。（代码清理见上条「Phase R · 代码部分」。）
 
 - **M1c 拆分**：原 M1c（server + 前后端接线）拆为 **M1c-1（server 骨架，依赖 M1）** 与
-  **M1c-2（前端接线与 UI，依赖 M1c-1）**；M2 依赖改 M1c-2。决策：server 栈
+  **M1c-2（前端接线与 UI，依赖 M1c-1；后进一步拆为 M1c-2a/2b）**；M2 依赖记为 **M1c-1**（前端接线
+  不影响库层记分卡）。决策：server 栈
   Starlette + uvicorn + `connect-python`、持久化 `run.json` + 目录式 `projects`、
   前端 React Query、布局用 proto `Fact.position` + 前端按 `events[]` 步进。
 

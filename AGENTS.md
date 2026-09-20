@@ -24,11 +24,12 @@
 - 已实现：`originweave init`（写 `originweave.toml`，已存在需 `--force`）、
   `originweave capabilities list`、配置加载/校验、capability 注册表，
   事件日志 → 黑板 reducer → `originweave replay <run-dir>`（只读、不触网），
-  以及 **M1 库层 OODA 引擎的 Bootstrap / Reason / Validate / Explore pass + Stigmergy 收敛**（I1–I6：
-  `src/originweave/engine.py`、`prompts/{bootstrap,reason,validate,explore}.txt`）。
+  以及 **M1 库层 OODA 引擎的 Bootstrap / Reason / Validate / Explore pass + Stigmergy 收敛**（I1–I6）
+  与 **M2 的 verify 型 `compare` pass / 偏差记分卡 / Gate B**（`src/originweave/engine.py`、
+  `src/originweave/report.py`、`prompts/{bootstrap,reason,validate,explore,compare}.txt`）。
 - **引擎是库层**：`Engine` 是黑板的**唯一写入者**（事件经 `RunStore.append_event`），
-  进程内 Dispatcher 是 M3 容器化前的临时态。**不经 CLI / server 暴露**（server 归 M1c-1）；
-  `verify` 型 Intent 留待 M2 `compare`，派发时保持 `open`。**I4 并发已落地**：一轮内先按
+  进程内 Dispatcher 是 M3 容器化前的临时态。**不经 CLI 暴露**，由 M1c-1 的 server 进程内调用
+  （容器化归 M3）；`verify` 型 Intent 自 M2 起经 `compare` pass 派发。**I4 并发已落地**：一轮内先按
   id 序 `EXECUTE` 认领，再受 `[worker].max_concurrency`（<=16）并发执行、**按 id 序提交**（Board
   确定）；执行期引擎代发 `HEARTBEAT`，超过 `[worker].heartbeat_timeout` 按
   `heartbeat_on_timeout=release|fail` 写 `RELEASE`/`FAILED`。**I5 HITL 已落地**：`Engine(auto=...)`
@@ -36,7 +37,7 @@
   `Engine.resume(decision, text?, targets?)` 写 `HUMAN_INPUT` 继续（`reject`→`STOPPED`）或
    `run(auto=True)` 跳过。**I6 收敛已落地**：`_continue` 多轮 Reason→dispatch，仅在产生新 Fact 时再
   Reason，至 `COMPLETE`／死胡同（保持 `running`）；`Engine(max_rounds=10)` 为安全阀。
-  **server（M1c-1）部分落地**：**C1** codegen + Connect app 骨架已落地——`make proto`
+  **server（M1c-1）C1–C4 已落地**：**C1** codegen + Connect app 骨架——`make proto`
   （需 buf + `protoc-gen-connect-python`）生成 `src/originweave/v1`（`originweave.v1.*`，不入库，
   ruff/mypy exclude）；`server/app.py` 的 `create_app` 挂载 Connect ASGI app，`ListProjects` 空表、
   其余 `UNIMPLEMENTED`。**C2** 持久化已落地——`persistence.py`（`Run`/`Project`/`summarize_run`/
@@ -51,6 +52,12 @@
   `scheduler.drain()`；`--run <dir>` 单 run 只读（写 RPC 拒）。起 run 仍走 server/proto
   （`CreateRun` 经 `source_text` 收资料 A）。**`make proto` 是 `make lint`/`test` 的前置**
   （无 gen 时 server 测试 `importorskip` 跳过）。
+- **M2 偏差记分卡已落地**：verify 型 Intent 经 `compare` pass 派发（`prompts/compare.txt`、不检索），
+  产出 `compare` + `deviation` Fact（带 `severity`/`confidence`）；`COMPLETE` 走严格判据（论点全部
+  拆解、子断言回链或 `open`、已有 compare）；`report.py`（`derive_report`/`render_report`）经
+  `store.write_report` 落 run dir `report.md`（派生物，`replay` 不重写）；**Gate B（`arbitrate`）**
+  由 reply `gate` 触发，server `SubmitHumanInput` 放行 `arbitrate`；server `RunDetail.report`/
+  `deviations` 暴露记分卡（`server/convert.py`）。
 - **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
   `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
 - **stub（打印 “not implemented yet”、返回 0）**：`mcp` / `capabilities install-obscura`。
@@ -72,10 +79,11 @@
   `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，落到 `frontend/src/gen/`），
   server Python 由 `make proto`（根 `buf.gen.yaml`，落到 `src/originweave/v1` → `originweave.v1.*`）。
 - **前端（`frontend/`，M1b 脚手架 + M1c-2b 接线）**：React + Vite + TS + React Flow + Connect；
-  **2b-1 只读接线 + 2b-2 INSPECTOR 交互已落地**（`@tanstack/react-query`；`api/{queryClient,hooks}.ts`；
-  `Overview`/`Project`/`AppShell`/`Console` 读真实数据；图/表格选中 → Inspector；Hints 输入 `AddHint`；
-  `transport` 默认同源）；**不接 mock**（fixture 仅测试用）。
-  HITL Gate UI / 新建核验表单 / 端到端归 **2b-3–2b-5**。
+  **2b-1 只读接线、2b-2 INSPECTOR 交互、2b-3 HITL Gate UI + Replay 步进已落地**
+  （`@tanstack/react-query`；`api/{queryClient,hooks}.ts`；`Overview`/`Project`/`AppShell`/`Console`
+  读真实数据；图/表格选中 → Inspector；Hints `AddHint`；Gate A/B → `SubmitHumanInput`；
+  `graph/replay.ts` 按 `events[]` 步进；`transport` 默认同源）；**不接 mock**（fixture 仅测试用）。
+  新建核验表单 + 顶栏归 **2b-4**、端到端与冒烟归 **2b-5**。
 - **M6（进行中，见 `SPEC.md` M6）**：把执行体抽为可插拔 **`Worker`**（`[worker].provider = local | pi`）；
   **P2 `PiWorker` 已落地**，经固定 `pi-py-sdk` 驱动官方 TS agent 运行时（运行时需 **Node + `pi` 二进制**，
   仅 CI 之外；**live 有配置目录环境变量名 bug，见「约定与坑」**）。
@@ -147,9 +155,9 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
 - **测试与工具链**：pytest `asyncio_mode = "auto"`（`pyproject.toml`），async 测试**不加**
   `@pytest.mark.asyncio`；ruff `line-length = 100`（非默认 88），mypy strict **只查 `src`**。
 - **事件字段名是契约**：`Event{id,at,type,message,tone,payload}`；reducer 只消费 `type`+`payload`，
-  `message`/`tone` 仅展示。已实现 16 种类型（M1 增 `FAILED`/`STOPPED` → `status=failed|stopped`；
-  M6 增 `SESSION`/`WORKER_STEP`，reducer 忽略、Board 不变）；`ENTITY`/`RELATION` 属 M5。见
-  `docs/overview/blackboard-protocol.md` §5。
+  `message`/`tone` 仅展示。已实现 16 种类型（M1 增 `FAILED`/`STOPPED` → `status=failed|stopped`
+  与 `VALIDATE`（Validate pass）；M6 增 `SESSION`/`WORKER_STEP`，reducer 忽略、Board 不变）；
+  `ENTITY`/`RELATION` 属 M5。见 `docs/overview/blackboard-protocol.md` §5。
 - `events.jsonl` 的唯一写入口是 `RunStore.append_event()`（id 单调递增、append-only）；reducer
   是纯 fold（`reduce(events) -> Board`，`src/originweave/reduce.py`），同事件必得同 `Board`。
   语义边（`main-chain`/`dependency`/`goal-derived`）必须显式写进事件 payload，结构边由 reducer 派生。
@@ -158,7 +166,7 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
 - `runs/` 与 `*.jsonl` 不入库（`.gitignore` 已就绪；`examples/**/*.jsonl` 例外放行，样例事件入库）；
   运行产物不要提交。
 - 布局：src layout，包在 `src/originweave/`；测试 `tests/`；样例 `examples/`；proto 契约
-  `proto/`（M1b）；前端 `frontend/`（M1b 脚手架、M1c-2 接线）；CI 在 `.github/workflows/ci.yml`
+  `proto/`（M1b）；前端 `frontend/`（M1b 脚手架、M1c-2b 接线）；CI 在 `.github/workflows/ci.yml`
   （3 个 job：`python` ruff → mypy → pytest；`proto` `buf lint`；`frontend` gen → typecheck →
   lint → format:check → test → build）。前端 `format:check` 无 `make` target，用
   `pnpm --dir frontend format`。
