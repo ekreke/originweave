@@ -95,3 +95,24 @@ jobs:
 
       - name: Build
         run: pnpm --dir frontend build
+
+      # Browser e2e: Playwright drives the built SPA served by a fake-provider
+      # uvicorn (scripts/e2e_server.py), so it needs Python/uv + generated proto.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python deps and generate Connect code
+        run: |
+          uv sync --frozen || uv sync
+          make proto
+
+      - name: Install Playwright browser
+        run: pnpm --dir frontend exec playwright install --with-deps chromium
+
+      - name: End-to-end (browser)
+        run: pnpm --dir frontend e2e

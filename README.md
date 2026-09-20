@@ -41,6 +41,7 @@ make frontend-install    # pnpm --dir frontend install
 make frontend-gen        # buf generate -> frontend/src/gen（需 buf；产物不入库）
 make frontend-dev        # Vite dev server
 make frontend-build      # tsc -b && vite build
+make frontend-e2e        # Playwright 浏览器 e2e（构建真实 dist + fake-provider server；需 chromium）
 ```
 
 ## Makefile
@@ -53,6 +54,7 @@ make frontend-build      # tsc -b && vite build
 | `fixtures` | 重新生成样例的 `events.jsonl`（确定性、产物入库）。 |
 | `proto` | 由 `proto/` 生成 server Python 代码（需 `buf` + `protoc-gen-connect-python`；M1c-1）。 |
 | `frontend-install` / `frontend-gen` / `frontend-dev` / `frontend-build` / `frontend-lint` / `frontend-typecheck` / `frontend-test` | 前端（`frontend/`，M1b）：安装 / proto 生成 / dev / 构建 / lint / tsc / vitest。 |
+| `frontend-e2e` | 浏览器端到端（`@playwright/test`）：构建真实 `frontend/dist` + 启动 fake-provider server（`scripts/e2e_server.py`），跑 `frontend/e2e/`。 |
 | `test` | `pytest`。 |
 | `smoke` | 端到端冒烟：进程内起 server（fake worker），`CreateRun` → Gate A → 记分卡；退出码非零即失败。 |
 | `image` | 构建 runtime 容器镜像 `originweave-runtime:latest`（M3a；需 Docker）。`[worker].execution=container` 时每次 Worker 调用用它起一个容器。 |

@@ -262,6 +262,15 @@
   `scripts/smoke.py` + `make smoke`（进程内 `create_app` + fake worker，`CreateRun→Gate→GetRun`，退出码）；
   CI `python` job 加 `make smoke`；前端 `routes.test.tsx` 加 NewRun→DAG→Gate 串联；README/Makefile 同步。
   `make lint`/`test`(367)/`smoke` + 前端 `typecheck`/`lint`/`format`/`test`(61)/`build` 全绿。
+- **M1c-2b 2b-5 · 浏览器端到端（Playwright）**：`@playwright/test` + `frontend/playwright.config.ts`
+  （`webServer` 起 `scripts/run_e2e_server.sh`）、`frontend/e2e/flow.spec.ts`（新建表单 → DAG → Gate A
+  `approve` → Replay 步进）；`scripts/e2e_server.py` 复用 `scripts/smoke.py` 的脚本化 worker，托管
+  **真实 `frontend/dist`** + fake provider（临时 run root、预建 `e2e` 项目）。CI `frontend` job 增
+  Python/uv/`make proto` + `playwright install --with-deps chromium` + `pnpm e2e`；`Makefile`
+  `frontend-e2e`（=`frontend-build` + `proto` + install chromium + e2e）；`vite.config.ts` 的 Vitest
+  `include` 收窄到 `src/**`（避免误收 `e2e/`）。顺带把 `api/hooks.ts` 的轮询从「仅 `awaiting_human`」
+  改为**活动态**（`queued`/`running`/`awaiting_human`，终态停），否则新建 run 不会自动出 Gate
+  （`activePollInterval`；`hooks.test.ts` 同步）。`pnpm e2e`（chromium）通过；README/AGENTS/SPEC 同步。
 
 - **M1c-2b 2b-4 · 新建核验表单 + 运行徽标**：`api/hooks.ts` 增 `useCreateRun`（`sourceType='text'`/
   `analysis='provenance'`，可选预算，invalidate 列表）；`NewRun` 重写（`title`/`source_text`/`goal`/`auto`
@@ -333,7 +342,8 @@
 
 - **M1c-2b 2b-1 · 数据层 + 只读接线**：前端加 `@tanstack/react-query`（`api/queryClient.ts` +
   `main.tsx` 的 `QueryClientProvider`），`api/hooks.ts` 提供 `useProjects`/`useProjectRuns`/`useRun`
-  （`awaiting_human` 轮询，判据抽为纯函数 `awaitingPollInterval`）；`Overview`（项目列表）、
+  （活动态轮询，判据抽为纯函数 `activePollInterval`（原 `awaitingPollInterval`，2b-5 改为
+  `queued`/`running`/`awaiting_human`））；`Overview`（项目列表）、
   `Project`（run 列表）、`AppShell`（项目导航 + LIVE/OFFLINE）、`Console`（`RunList` + 四页签 +
   `Inspector` 计数）接真实数据，保留 loading/error/`NOT_FOUND`/空态（`Console` 区分 `Code.NotFound`
   与连接错误；`RunList` 增 `loading`/`error` 三态）。`transport` 默认改**同源**

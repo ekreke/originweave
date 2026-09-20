@@ -242,8 +242,8 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 ### 2b-1 · 数据层 + 只读接线
 
 - [x] 依赖 `@tanstack/react-query`；`QueryClientProvider`（`main.tsx`）；hooks
-      `useProjects`/`useProjectRuns`/`useRun`；`awaiting_human` 轮询刷新 — `frontend/src/api/`
-      （`hooks.ts`/`queryClient.ts`；`awaitingPollInterval` 纯函数可测）
+      `useProjects`/`useProjectRuns`/`useRun`；**活动态轮询**（`queued`/`running`/`awaiting_human`，
+      终态停轮询）— `frontend/src/api/`（`hooks.ts`/`queryClient.ts`；`activePollInterval` 纯函数可测）
 - [x] 真实数据接入只读视图：`Overview`（项目列表）、`Project`（run 列表）、`AppShell`
       （项目导航 + 连接指示）、`Console`（`RunList` + 页签 GRAPH/FACTS/INTENTS/EVENTS + `Inspector` 计数）；
       loading/error/`NOT_FOUND` 与空态保留 — `frontend/src/{routes,layout,tabs}/`
@@ -287,6 +287,10 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
       `scripts/smoke.py`（`make smoke`，进程内 fake worker）、`frontend/src/routes/routes.test.tsx`（NewRun→DAG→Gate 串联）
 - [x] CI / 文档同步（`Makefile` / `README.md`）— `.github/workflows/ci.yml`（`python` job 加 `make smoke`）、
       `Makefile`（`smoke` target）、`README.md`
+- [x] 浏览器端到端（`@playwright/test`）：驱动**真实 `frontend/dist`** + fake-provider server
+      （`scripts/e2e_server.py` / `run_e2e_server.sh`，复用 `scripts/smoke.py` 的脚本化 worker）——
+      新建表单 → DAG → Gate A `approve` → Replay 步进 — `frontend/playwright.config.ts`、
+      `frontend/e2e/flow.spec.ts`；CI `frontend` job 增 Python/uv/`make proto`/Playwright + `pnpm e2e`
 
 约束：前端只调 RPC、不编排；RELATIONS/ENTITIES 页签归 M5；不改 `proto/`；fixture 只进测试文件。
 验收：从前端发起一次核验（样例），看到由抽象论点拆解出的 DAG，可在 Gate 处人工介入；

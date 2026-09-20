@@ -79,10 +79,12 @@
   `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，落到 `frontend/src/gen/`），
   server Python 由 `make proto`（根 `buf.gen.yaml`，落到 `src/originweave/v1` → `originweave.v1.*`）。
 - **前端（`frontend/`，M1b 脚手架 + M1c-2b 接线 + M6 P5）**：React + Vite + TS + React Flow + Connect；
-  **M1c-2b 2b-1–2b-5 全部落地**（`@tanstack/react-query`；`api/{queryClient,hooks}.ts`；
+  **M1c-2b 2b-1–2b-5 全部落地**（`@tanstack/react-query`；`api/{queryClient,hooks}.ts`，活动态轮询；
   `Overview`/`Project`/`AppShell`/`Console` 读真实数据；图/表格选中 → Inspector；Hints `AddHint`；
-  Gate A/B → `SubmitHumanInput`；**Replay 走服务端折算** `GetRun(at_event=k)`（复用 `reduce(events[:k])`，
+  Gate A/B → `SubmitHumanInput`；**Replay 走服务端折算** `GetRun(at_event=k)`（复用 `reduce(events[:k])`,
   前端只步进/高亮）；新建核验表单 + 顶栏；`transport` 默认同源；`make smoke` 端到端冒烟）。
+  **浏览器 e2e**：`@playwright/test`（`frontend/e2e/`，`make frontend-e2e`）驱动真实 `frontend/dist` +
+  fake-provider server（`scripts/e2e_server.py`）。
   **M6 P5 已落地**：Settings 页（`routes/Settings.tsx` + `settingsModel.ts`；`useSettings`/`useUpdateSettings`
   回传**全量 `[worker]` 块**）、INSPECTOR 会话视图（`SessionView`；原始输入/输出 + 步骤链）、EVENTS 按 worker
   过滤（`tabs/events.ts`）。**不接 mock**（fixture 仅测试用）。
@@ -134,6 +136,7 @@ make frontend-typecheck    # tsc -b --noEmit
 make frontend-lint         # ESLint
 make frontend-test         # Vitest（jsdom）
 make frontend-build        # tsc -b && vite build
+make frontend-e2e          # Playwright 浏览器 e2e（真实 dist + fake-provider server）
 make frontend-dev          # Vite dev server
 ```
 
@@ -189,7 +192,8 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   运行产物不要提交。
 - 布局：src layout，包在 `src/originweave/`；测试 `tests/`；样例 `examples/`；proto 契约
   `proto/`（M1b）；前端 `frontend/`（M1b 脚手架、M1c-2b 接线）；CI 在 `.github/workflows/ci.yml`
-  （3 个 job：`python` ruff → mypy → pytest；`proto` `buf lint`；`frontend` gen → typecheck →
-  lint → format:check → test → build）。前端 `format:check` 无 `make` target，用
+  （3 个 job：`python` ruff → mypy → pytest + `make smoke`；`proto` `buf lint`；`frontend` gen →
+  typecheck → lint → format:check → test → build → **Playwright e2e**（增 Python/uv/`make proto`））。
+  前端 `format:check` 无 `make` target，用
   `pnpm --dir frontend format`。
 - 当前 git 分支为 `develop`（`main` 为发布分支）；仓库无 CONTRIBUTING/PR 模板，未约定合并流程。

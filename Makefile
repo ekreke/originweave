@@ -11,7 +11,7 @@ PORT ?= 8765
 .DEFAULT_GOAL := help
 .PHONY: help install run demo smoke image fixtures proto test lint fmt ui replay cloc clean \
 	frontend-install frontend-gen frontend-dev frontend-build frontend-lint \
-	frontend-typecheck frontend-test
+	frontend-typecheck frontend-test frontend-e2e
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -59,6 +59,10 @@ frontend-typecheck: ## tsc -b --noEmit for the frontend
 
 frontend-test: ## Vitest for the frontend
 	pnpm --dir frontend test
+
+frontend-e2e: frontend-build proto ## Playwright e2e (built SPA + fake-provider server)
+	pnpm --dir frontend exec playwright install chromium
+	pnpm --dir frontend e2e
 
 test: install ## Run the test suite
 	$(UV) run pytest

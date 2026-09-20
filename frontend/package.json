@@ -16,6 +16,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "e2e": "playwright test",
     "test": "vitest run"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@bufbuild/protoc-gen-es": "^2.15.0",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^24.13.3",

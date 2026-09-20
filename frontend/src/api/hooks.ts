@@ -22,17 +22,22 @@ export function useProjectRuns(projectId: string | undefined) {
   })
 }
 
-// A run awaiting a human decision keeps polling so the Gate/Continue state appears
-// without a manual refresh; every other status polls nothing.
-export const AWAITING_POLL_MS = 2_000
+// A run that is still active (queued/running/awaiting a human) keeps polling so the
+// board advances on its own -- a fresh run shows the Gate card when it pauses, a
+// paused run shows the result once the human resolves it. Terminal runs poll nothing.
+export const ACTIVE_POLL_MS = 2_000
 
-export function awaitingPollInterval(status: string | undefined): number | false {
-  return status === 'awaiting_human' ? AWAITING_POLL_MS : false
+// `paused` is a declared status but the reducer never emits it yet (M3 controllability);
+// include it here if that changes.
+const ACTIVE_STATUSES = new Set(['queued', 'running', 'awaiting_human'])
+
+export function activePollInterval(status: string | undefined): number | false {
+  return status !== undefined && ACTIVE_STATUSES.has(status) ? ACTIVE_POLL_MS : false
 }
 
 // Live run detail. `atEvent` (Replay) asks the server to fold only the first
 // `atEvent` events so the board reflects that step; the timeline stays full. Only
-// the live view polls, and only while a gate is awaiting a human.
+// the live view polls.
 export function useRun(runId: string | undefined, atEvent?: number | null) {
   const replaying = atEvent != null
   return useQuery({
@@ -47,7 +52,7 @@ export function useRun(runId: string | undefined, atEvent?: number | null) {
       (await client.getRun({ runId: runId ?? '', ...(atEvent != null ? { atEvent } : {}) }))
         .runDetail,
     refetchInterval: (query) =>
-      replaying ? false : awaitingPollInterval(query.state.data?.run?.status),
+      replaying ? false : activePollInterval(query.state.data?.run?.status),
   })
 }
 

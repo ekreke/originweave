@@ -4,8 +4,8 @@ import { createElement, type ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  AWAITING_POLL_MS,
-  awaitingPollInterval,
+  ACTIVE_POLL_MS,
+  activePollInterval,
   useAddHint,
   useCreateRun,
   useRun,
@@ -35,11 +35,14 @@ function wrapper({ children }: { children: ReactNode }) {
   return createElement(QueryClientProvider, { client: queryClient }, children)
 }
 
-describe('awaitingPollInterval', () => {
-  it('polls only while a run awaits human input', () => {
-    expect(awaitingPollInterval('awaiting_human')).toBe(AWAITING_POLL_MS)
-    expect(awaitingPollInterval('running')).toBe(false)
-    expect(awaitingPollInterval(undefined)).toBe(false)
+describe('activePollInterval', () => {
+  it('polls while the run is still active and stops on a terminal state', () => {
+    expect(activePollInterval('queued')).toBe(ACTIVE_POLL_MS)
+    expect(activePollInterval('running')).toBe(ACTIVE_POLL_MS)
+    expect(activePollInterval('awaiting_human')).toBe(ACTIVE_POLL_MS)
+    expect(activePollInterval('completed')).toBe(false)
+    expect(activePollInterval('failed')).toBe(false)
+    expect(activePollInterval(undefined)).toBe(false)
   })
 })
 
