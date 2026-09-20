@@ -225,6 +225,26 @@
 
 ## 已完成（近期）
 
+- **前端图渲染修复 · live 布局 + 节点标签预览**：新增 `frontend/src/graph/layout.ts`
+  （`layoutRunDetail`：无 `Fact.position` 时按溯源深度分层兜底，origin 顶 / goal 其上 / facts 成行，
+  确定性、不重叠；`hasPosition`）；`graph/mapping.ts` 逐节点**混合**取坐标（有坐标用原值）+
+  `shortLabel`（折叠空白、80 字符截断）写入节点 `preview`；`graph/nodes.tsx` 用 `preview` 渲染、
+  `title` 保留全文；`presentation.css` `.node-label` 3 行封顶 + `FactDetail` 长文改 `.detail-scroll`
+  可滚动（完整 `goal` 只在 INSPECTOR 全量展示）。测试：`graph/layout.test.ts`、
+  `graph/mapping.test.ts`（兜底/混合/`shortLabel`）、`graph/GraphCanvas.test.tsx`（预览截断 + title）、
+  `routes.test.tsx`（点击 goal → INSPECTOR 全文）。`dashboard.md §2` 同步。前端 `typecheck`/`lint`/
+  `format:check`/`test`(100)/`build` 全绿。无 Python/proto 改动。
+
+- **M4a · `CreateProject` + 可写服务入口**：proto 增 `CreateProject`；`server/service.py` `create_project`
+  （id 校验/空 name → `INVALID_ARGUMENT`、重复 → `ALREADY_EXISTS`、pinned 拒绝）；前端新增
+  `routes/NewProject.tsx`（`/projects/new`）+ `useCreateProject` + Overview 入口；`Makefile` 增 `dev`
+  （可写，`ui`/`run` 仍只读样例）；`dashboard.md §3/§4.1`。测试：`tests/test_server.py`
+  （建/列/往返、重复→409、非法/空/保留 id→400、pinned→400、`CreateProject→CreateRun` 串联）、
+  前端 `hooks.test.ts`/`routes.test.tsx`（含空态 CTA、保留 id 禁用）。review 加固：拒绝保留 id `new`
+  （避免与 `/projects/new` 路由冲突）、`registry.get` 错误经 `_lookup_project` 归一、`ProjectRegistry.write`
+  改**原子写**（temp+`os.replace`）。`make lint` + `make test`（396 passed, 1 skipped）+ 前端
+  `typecheck/lint/format:check/test`(89)/`build` 全绿。
+
 - **M5a · 实体关系图领域/事件/reducer**：`blackboard.py` 增 `Entity`/`Relation`/`EntityGraph`（字段对齐
   `product-overview §4`）、`EntityType`/`EntityStatus`/`RelationStatus`/`RelationType` + frozenset、
   `RELATION_TYPES`（11 型 + `other`）；`IntentType += extract/relate`；`Board.entities/relations`（含

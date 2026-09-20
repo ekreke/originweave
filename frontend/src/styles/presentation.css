@@ -697,3 +697,23 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Graph node labels are short previews; the full text lives in the Inspector (M5+). */
+.node-label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  max-width: 180px;
+  word-break: break-word;
+}
+
+/* Inspector: long claim/goal text scrolls instead of stretching the column. */
+.detail-scroll {
+  margin: 4px 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

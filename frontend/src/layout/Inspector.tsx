@@ -209,8 +209,8 @@ function FactDetail({ fact }: { fact: Fact }) {
         <dt>conf.</dt>
         <dd className="mono">{fact.confidence.toFixed(2)}</dd>
       </dl>
-      <p className="detail-note">{fact.label}</p>
-      {fact.note ? <p className="detail-note">{fact.note}</p> : null}
+      <div className="detail-scroll">{fact.label}</div>
+      {fact.note ? <div className="detail-scroll">{fact.note}</div> : null}
       {fact.evidence.length > 0 ? (
         <div className="evidence">
           <h4>证据</h4>

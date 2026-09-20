@@ -2,9 +2,29 @@ import { create } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
 
 import { RunDetailSchema } from '@/gen/originweave/v1/originweave_pb'
-import { edgeDash, factColor, factShape, intentVariant, runDetailToGraph } from '@/graph/mapping'
+import {
+  edgeDash,
+  factColor,
+  factShape,
+  intentVariant,
+  runDetailToGraph,
+  shortLabel,
+} from '@/graph/mapping'
 
-import { sampleRunDetail } from '@/test/fixtures'
+import { edge, fact, sampleRunDetail, vec2 } from '@/test/fixtures'
+
+describe('shortLabel', () => {
+  it('collapses whitespace and keeps short labels intact', () => {
+    expect(shortLabel('  hi  ')).toBe('hi')
+    expect(shortLabel('a\n\nb   c')).toBe('a b c')
+  })
+
+  it('truncates a long label with an ellipsis', () => {
+    const out = shortLabel('x'.repeat(200), 80)
+    expect(out.endsWith('…')).toBe(true)
+    expect(out.length).toBeLessThanOrEqual(81)
+  })
+})
 
 describe('visual encoding', () => {
   it('maps fact kinds to shapes and colour tokens', () => {
@@ -70,5 +90,44 @@ describe('runDetailToGraph', () => {
     const a = runDetailToGraph(sampleRunDetail())
     const b = runDetailToGraph(sampleRunDetail())
     expect(a).toEqual(b)
+  })
+
+  it('lays out a live run (no positions) without stacking nodes', () => {
+    const detail = create(RunDetailSchema, {
+      origin: fact({ id: 'origin', kind: 'origin' }),
+      goal: fact({ id: 'goal', kind: 'goal' }),
+      facts: [fact({ id: 'f1', role: 'main-claim' }), fact({ id: 'c1', kind: 'citation' })],
+      edges: [
+        edge({ id: 'e1', source: 'origin', target: 'f1', relation: 'main-chain' }),
+        edge({ id: 'e2', source: 'f1', target: 'c1', relation: 'dependency' }),
+      ],
+    })
+    const positions = runDetailToGraph(detail).nodes.map((n) => `${n.position.x},${n.position.y}`)
+    expect(new Set(positions).size).toBe(positions.length)
+  })
+
+  it('keeps an explicit position and falls back per missing node (mixed)', () => {
+    const detail = create(RunDetailSchema, {
+      origin: fact({ id: 'origin', kind: 'origin', position: vec2(30, 30) }),
+      goal: fact({ id: 'goal', kind: 'goal' }),
+      facts: [fact({ id: 'f1', position: vec2(400, 40) })],
+    })
+    const graph = runDetailToGraph(detail)
+    // Explicit (non-zero) coordinates are kept verbatim...
+    expect(graph.nodes.find((n) => n.id === 'origin')?.position).toEqual({ x: 30, y: 30 })
+    expect(graph.nodes.find((n) => n.id === 'f1')?.position).toEqual({ x: 400, y: 40 })
+    // ...while a node with no position gets its fallback (not the default 0,0).
+    expect(graph.nodes.find((n) => n.id === 'goal')?.position).toEqual({ x: 0, y: -160 })
+  })
+
+  it('sets a short preview on each fact node', () => {
+    const detail = create(RunDetailSchema, {
+      origin: fact({ id: 'origin', kind: 'origin' }),
+      goal: fact({ id: 'goal', kind: 'goal', label: 'x'.repeat(200) }),
+    })
+    const node = runDetailToGraph(detail).nodes.find((n) => n.id === 'goal')
+    const data = node?.data as { preview: string; fact: { label: string } }
+    expect(data.preview.endsWith('…')).toBe(true)
+    expect(data.fact.label).toHaveLength(200)
   })
 })

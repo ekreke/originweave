@@ -1,6 +1,7 @@
 import { MarkerType, type Edge, type Node } from '@xyflow/react'
 
 import type { Fact, RunDetail } from '@/gen/originweave/v1/originweave_pb'
+import { hasPosition, layoutRunDetail } from '@/graph/layout'
 
 // Pure mapping from the proto RunDetail contract to React Flow nodes/edges.
 // Following dashboard.md §2, Facts are double-encoded by kind (shape + colour)
@@ -16,6 +17,8 @@ export interface FactNodeData extends Record<string, unknown> {
   shape: FactShape
   /** CSS custom-property name holding the kind colour, e.g. `--c-k-fact`. */
   color: string
+  /** Short, single-line preview for the node label (the full text is in the Inspector). */
+  preview: string
 }
 
 export interface IntentNodeData extends Record<string, unknown> {
@@ -97,19 +100,42 @@ function byId(a: { id: string }, b: { id: string }): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
 }
 
+// Node labels are previews: a long claim/goal must not blow up the canvas. Newlines and
+// runs of whitespace collapse to one line; the node carries the full text in its title
+// and the Inspector shows it verbatim. Sliced by code point (not UTF-16 unit) so a
+// surrogate pair at the cut survives intact.
+export const PREVIEW_MAX = 80
+
+export function shortLabel(text: string, max = PREVIEW_MAX): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  const chars = Array.from(flat)
+  if (chars.length <= max) return flat
+  return `${chars.slice(0, max).join('').trimEnd()}…`
+}
+
 export function runDetailToGraph(detail: RunDetail): GraphModel {
   const nodes: GraphNode[] = []
   const anchors = new Map<string, { x: number; y: number }>()
+  // Positions are server-provided; when a live run carries none, fill the gaps with a
+  // deterministic layering so nodes do not all stack at (0,0).
+  const fallback = layoutRunDetail(detail)
 
   const pushFact = (f: Fact | undefined) => {
     if (!f) return
-    const position = { x: f.position?.x ?? 0, y: f.position?.y ?? 0 }
+    const position = hasPosition(f.position)
+      ? { x: f.position!.x, y: f.position!.y }
+      : (fallback.get(f.id) ?? { x: 0, y: 0 })
     anchors.set(f.id, position)
     nodes.push({
       id: f.id,
       type: 'fact',
       position,
-      data: { fact: f, shape: factShape(f.kind), color: factColor(f.kind) },
+      data: {
+        fact: f,
+        shape: factShape(f.kind),
+        color: factColor(f.kind),
+        preview: shortLabel(f.label),
+      },
     })
   }
 

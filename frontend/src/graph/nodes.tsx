@@ -15,7 +15,7 @@ export function FactNode({ data, selected }: NodeProps<FactNodeType>) {
       data-testid={`fact-node-${data.fact.id}`}
       title={data.fact.label}
     >
-      <span className="node-label">{data.fact.label}</span>
+      <span className="node-label">{data.preview}</span>
       <Handle type="target" position={Position.Top} />
       <Handle type="source" position={Position.Bottom} />
     </div>
