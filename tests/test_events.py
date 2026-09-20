@@ -58,9 +58,7 @@ def test_validate_event_is_known() -> None:
 def test_terminal_events_are_known() -> None:
     assert DEFAULT_TONE["FAILED"] == "danger"
     assert DEFAULT_TONE["STOPPED"] == "warning"
-    failed = Event.from_dict(
-        {"id": "e1", "at": "t", "type": "FAILED", "payload": {"reason": "x"}}
-    )
+    failed = Event.from_dict({"id": "e1", "at": "t", "type": "FAILED", "payload": {"reason": "x"}})
     stopped = Event.from_dict(
         {"id": "e2", "at": "t", "type": "STOPPED", "payload": {"reason": "x"}}
     )
@@ -71,6 +69,21 @@ def test_terminal_events_are_known() -> None:
 def test_format_event_id_is_zero_padded() -> None:
     assert format_event_id(1) == "e0001"
     assert format_event_id(42) == "e0042"
+
+
+def test_entity_and_relation_events_are_known() -> None:
+    assert "ENTITY" in EVENT_TYPES
+    assert "RELATION" in EVENT_TYPES
+    assert DEFAULT_TONE["ENTITY"] == "info"
+    assert DEFAULT_TONE["RELATION"] == "info"
+    entity = Event.from_dict(
+        {"id": "e1", "at": "t", "type": "ENTITY", "payload": {"entity": {"id": "n1"}}}
+    )
+    relation = Event.from_dict(
+        {"id": "e2", "at": "t", "type": "RELATION", "payload": {"relation": {"id": "r1"}}}
+    )
+    assert entity.tone == "info"
+    assert relation.type == "RELATION"
 
 
 def test_now_iso_is_parseable() -> None:

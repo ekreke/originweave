@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from originweave.blackboard import BlackboardError, EntityGraph
 from originweave.events import Event
 from originweave.reduce import ReduceError, reduce, render_canonical
 
@@ -229,3 +230,121 @@ def test_canonical_is_deterministic() -> None:
         ev(3, "HINT", {"hint": {"id": "h1", "text": "x"}}),
     ]
     assert render_canonical(reduce(events)) == render_canonical(reduce(events))
+
+
+ENTITY = {
+    "id": "n1",
+    "name": "GitHub",
+    "type": "organization",
+    "status": "verified",
+    "confidence": 0.9,
+}
+RELATION = {
+    "id": "r1",
+    "source": "n1",
+    "target": "n2",
+    "type": "subsidiary-of",
+    "status": "verified",
+    "inferred": False,
+    "confidence": 0.8,
+}
+
+
+def test_entity_event_folds() -> None:
+    board = reduce([project(), ev(2, "ENTITY", {"entity": ENTITY})])
+    assert [e.id for e in board.entities] == ["n1"]
+    assert board.entities[0].name == "GitHub"
+    assert board.entities[0].type == "organization"
+    assert board.relations == []
+
+
+def test_entity_event_upserts_by_id_and_accumulates_aliases() -> None:
+    board = reduce(
+        [
+            project(),
+            ev(2, "ENTITY", {"entity": ENTITY}),
+            ev(3, "ENTITY", {"entity": {**ENTITY, "id": "n2", "name": "Microsoft"}}),
+            ev(
+                4,
+                "ENTITY",
+                {
+                    "entity": {
+                        **ENTITY,
+                        "name": "GitHub, Inc.",
+                        "aliases": ["GitHub", "GH"],
+                    }
+                },
+            ),
+        ]
+    )
+    # The same id is replaced in place, so first-seen order is preserved (n1 before n2).
+    assert [e.id for e in board.entities] == ["n1", "n2"]
+    assert board.entities[0].name == "GitHub, Inc."
+    assert board.entities[0].aliases == ["GitHub", "GH"]
+
+
+def test_relation_event_appends() -> None:
+    board = reduce(
+        [
+            project(),
+            ev(2, "ENTITY", {"entity": ENTITY}),
+            ev(3, "ENTITY", {"entity": {**ENTITY, "id": "n2", "name": "Microsoft"}}),
+            ev(4, "RELATION", {"relation": RELATION}),
+        ]
+    )
+    assert [r.id for r in board.relations] == ["r1"]
+    assert board.relations[0].source == "n1"
+    assert board.relations[0].type == "subsidiary-of"
+    assert board.relations[0].inferred is False
+
+
+def test_entity_graph_canonical_is_deterministic() -> None:
+    events = [
+        project(),
+        ev(2, "ENTITY", {"entity": ENTITY}),
+        ev(3, "ENTITY", {"entity": {**ENTITY, "id": "n2", "name": "Microsoft"}}),
+        ev(4, "RELATION", {"relation": RELATION}),
+    ]
+    assert render_canonical(reduce(events)) == render_canonical(reduce(events))
+    board = reduce(events)
+    assert board.entity("n1") is not None
+    assert board.entity("missing") is None
+
+
+def test_entity_rejects_unknown_type() -> None:
+    with pytest.raises(BlackboardError):
+        reduce([project(), ev(2, "ENTITY", {"entity": {**ENTITY, "type": "alien"}})])
+
+
+def test_entity_rejects_unknown_status_and_missing_fields() -> None:
+    with pytest.raises(BlackboardError):
+        reduce([project(), ev(2, "ENTITY", {"entity": {**ENTITY, "status": "gone"}})])
+    with pytest.raises(BlackboardError):
+        reduce([project(), ev(2, "ENTITY", {"entity": {"id": "n1"}})])  # no name
+    with pytest.raises(BlackboardError):
+        reduce([project(), ev(2, "ENTITY", {"entity": {"name": "X"}})])  # no id
+
+
+def test_relation_rejects_unknown_type() -> None:
+    with pytest.raises(BlackboardError):
+        reduce([project(), ev(2, "RELATION", {"relation": {**RELATION, "type": "befriends"}})])
+
+
+def test_relation_rejects_non_boolean_inferred() -> None:
+    with pytest.raises(BlackboardError):
+        reduce([project(), ev(2, "RELATION", {"relation": {**RELATION, "inferred": "yes"}})])
+    with pytest.raises(BlackboardError):
+        reduce([project(), ev(2, "RELATION", {"relation": {**RELATION, "inferred": 1}})])
+
+
+def test_relation_requires_endpoints() -> None:
+    with pytest.raises(BlackboardError):
+        reduce([project(), ev(2, "RELATION", {"relation": {"id": "r1", "target": "n2"}})])
+
+
+def test_entity_graph_roundtrips() -> None:
+    graph = EntityGraph.from_dict({"entities": [ENTITY], "relations": [RELATION]})
+    assert [e.id for e in graph.entities] == ["n1"]
+    assert [r.id for r in graph.relations] == ["r1"]
+    assert EntityGraph.from_dict(graph.to_dict()).to_dict() == graph.to_dict()
+    assert EntityGraph.from_dict({}).to_dict() == {"entities": [], "relations": []}

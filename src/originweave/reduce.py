@@ -12,7 +12,17 @@ import json
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .blackboard import Board, Edge, Fact, Hint, HumanDecision, Intent, WaitingFor
+from .blackboard import (
+    Board,
+    Edge,
+    Entity,
+    Fact,
+    Hint,
+    HumanDecision,
+    Intent,
+    Relation,
+    WaitingFor,
+)
 from .events import Event
 
 STRUCTURAL_RELATIONS = ("spawns", "resolves", "decomposes")
@@ -20,6 +30,19 @@ STRUCTURAL_RELATIONS = ("spawns", "resolves", "decomposes")
 
 class ReduceError(ValueError):
     """Raised when an event log cannot be reduced into a well-formed board."""
+
+
+def _upsert_entity(entities: list[Entity], entity: Entity) -> None:
+    """Insert an entity, or replace the same-id one in place (M5 merge/alias upsert).
+
+    The engine re-emits an existing entity with accumulated ``aliases``; replacing in
+    place keeps first-seen order, so replay stays deterministic.
+    """
+    for index, existing in enumerate(entities):
+        if existing.id == entity.id:
+            entities[index] = entity
+            return
+    entities.append(entity)
 
 
 def _object(payload: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -69,6 +92,8 @@ def reduce(events: Iterable[Event]) -> Board:
     intents: list[Intent] = []
     hints: list[Hint] = []
     edges: list[Edge] = []
+    entities: list[Entity] = []
+    relations: list[Relation] = []
     decisions: list[HumanDecision] = []
     waiting: WaitingFor | None = None
     verdict: str | None = None
@@ -138,6 +163,12 @@ def reduce(events: Iterable[Event]) -> Board:
             edges.extend(_edges(payload))
         elif event.type == "HINT":
             hints.append(Hint.from_dict(_object(payload, "hint")))
+        elif event.type == "ENTITY":
+            _upsert_entity(entities, Entity.from_dict(_object(payload, "entity")))
+        elif event.type == "RELATION":
+            # Write-once: the engine assigns a fresh id per judged relation, so a plain
+            # append is deterministic (unlike ENTITY, which is re-emitted to add aliases).
+            relations.append(Relation.from_dict(_object(payload, "relation")))
         elif event.type == "REQUEST_HUMAN":
             status = "awaiting_human"
             waiting = WaitingFor(
@@ -184,6 +215,8 @@ def reduce(events: Iterable[Event]) -> Board:
         intents=intents,
         hints=hints,
         edges=edges,
+        entities=entities,
+        relations=relations,
         decisions=decisions,
         waitingFor=waiting,
         verdict=verdict,

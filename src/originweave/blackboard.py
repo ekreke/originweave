@@ -23,8 +23,9 @@ FactKind = Literal[
 FactRole = Literal["main-claim", "sub-claim", "none"]
 # Verification state of a fact.
 FactStatus = Literal["verified", "open", "flagged", "review"]
-# What an Intent asks a worker to do (the three OODA task directives).
-IntentType = Literal["decompose", "explore", "verify"]
+# What an Intent asks a worker to do. decompose/explore/verify drive the provenance
+# DAG; extract/relate drive the entity-relation graph (M5, analysis includes relation).
+IntentType = Literal["decompose", "explore", "verify", "extract", "relate"]
 # Intent lifecycle; claimed/awaiting_human are transient coordination states.
 IntentStatus = Literal["open", "claimed", "done", "dropped", "awaiting_human"]
 # DAG edge semantics. Structural edges (decomposes/spawns/resolves) are derived by the
@@ -39,6 +40,25 @@ RunStatus = Literal[
 # Author of a Hint or a human decision.
 Author = Literal["human", "agent"]
 
+# Entity-relation graph (M5). Nodes are entities, edges are relations from a frozen
+# ontology; reverse labels are derived by the renderer (only forward types are stored).
+EntityType = Literal["person", "organization", "product", "location", "event", "other"]
+EntityStatus = Literal["verified", "open", "flagged"]
+RelationStatus = Literal["verified", "inferred", "open", "flagged"]
+RelationType = Literal[
+    "subsidiary-of",
+    "invests-in",
+    "acquires",
+    "partners-with",
+    "competes-with",
+    "supplies",
+    "employs",
+    "founded",
+    "owns",
+    "located-in",
+    "other",
+]
+
 # Runtime validation sets: from_dict() checks values against these via _choice().
 # They are the enforced counterpart of the Literal aliases above; keep members in sync.
 FACT_KINDS: frozenset[str] = frozenset(  # FactKind
@@ -46,7 +66,9 @@ FACT_KINDS: frozenset[str] = frozenset(  # FactKind
 )
 FACT_ROLES: frozenset[str] = frozenset({"main-claim", "sub-claim", "none"})  # FactRole
 FACT_STATUSES: frozenset[str] = frozenset({"verified", "open", "flagged", "review"})  # FactStatus
-INTENT_TYPES: frozenset[str] = frozenset({"decompose", "explore", "verify"})  # IntentType
+INTENT_TYPES: frozenset[str] = frozenset(  # IntentType
+    {"decompose", "explore", "verify", "extract", "relate"}
+)
 INTENT_STATUSES: frozenset[str] = frozenset(  # IntentStatus
     {"open", "claimed", "done", "dropped", "awaiting_human"}
 )
@@ -57,6 +79,28 @@ RUN_STATUSES: frozenset[str] = frozenset(  # RunStatus
     {"queued", "running", "awaiting_human", "paused", "stopped", "completed", "failed"}
 )
 AUTHORS: frozenset[str] = frozenset({"human", "agent"})  # Author
+ENTITY_TYPES: frozenset[str] = frozenset(  # EntityType
+    {"person", "organization", "product", "location", "event", "other"}
+)
+ENTITY_STATUSES: frozenset[str] = frozenset({"verified", "open", "flagged"})  # EntityStatus
+RELATION_STATUSES: frozenset[str] = frozenset(  # RelationStatus
+    {"verified", "inferred", "open", "flagged"}
+)
+RELATION_TYPES: frozenset[str] = frozenset(  # RelationType
+    {
+        "subsidiary-of",
+        "invests-in",
+        "acquires",
+        "partners-with",
+        "competes-with",
+        "supplies",
+        "employs",
+        "founded",
+        "owns",
+        "located-in",
+        "other",
+    }
+)
 
 
 class BlackboardError(ValueError):
@@ -91,6 +135,22 @@ def _float(data: Mapping[str, Any], key: str, default: float = 0.0) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise BlackboardError(f"{key} must be a number")
     return float(value)
+
+
+def _bool(data: Mapping[str, Any], key: str, default: bool = False) -> bool:
+    value = data.get(key, default)
+    if not isinstance(value, bool):
+        raise BlackboardError(f"{key} must be a boolean")
+    return value
+
+
+def _position(data: Mapping[str, Any]) -> dict[str, float]:
+    raw = _dict(data, "position")
+    return {
+        str(k): float(v)
+        for k, v in raw.items()
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+    }
 
 
 def _list(data: Mapping[str, Any], key: str) -> list[Any]:
@@ -170,12 +230,6 @@ class Fact:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Fact:
-        position_raw = _dict(data, "position")
-        position = {
-            str(k): float(v)
-            for k, v in position_raw.items()
-            if isinstance(v, (int, float)) and not isinstance(v, bool)
-        }
         evidence = [Evidence.from_dict(e) for e in _list(data, "evidence") if isinstance(e, dict)]
         return cls(
             id=_require_str(data, "id", "fact"),
@@ -186,7 +240,7 @@ class Fact:
             status=_choice(_str(data, "status", "open"), FACT_STATUSES, "fact.status"),
             confidence=_float(data, "confidence"),
             note=_str(data, "note"),
-            position=position,
+            position=_position(data),
             evidence=evidence,
         )
 
@@ -289,6 +343,117 @@ class Edge:
 
 
 @dataclass
+class Entity:
+    id: str
+    name: str
+    type: str = "other"
+    aliases: list[str] = field(default_factory=list)
+    status: str = "open"
+    confidence: float = 0.0
+    note: str = ""
+    position: dict[str, float] = field(default_factory=dict)
+    evidence: list[Evidence] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "type": self.type,
+            "aliases": list(self.aliases),
+            "status": self.status,
+            "confidence": self.confidence,
+            "note": self.note,
+            "position": dict(self.position),
+            "evidence": [e.to_dict() for e in self.evidence],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Entity:
+        name = _str(data, "name")
+        if not name:
+            # M5b merges by normalized name, so a nameless entity is meaningless.
+            raise BlackboardError("entity.name must be a non-empty string")
+        aliases = [a for a in _list(data, "aliases") if isinstance(a, str)]
+        evidence = [Evidence.from_dict(e) for e in _list(data, "evidence") if isinstance(e, dict)]
+        return cls(
+            id=_require_str(data, "id", "entity"),
+            name=name,
+            type=_choice(_str(data, "type", "other"), ENTITY_TYPES, "entity.type"),
+            aliases=aliases,
+            status=_choice(_str(data, "status", "open"), ENTITY_STATUSES, "entity.status"),
+            confidence=_float(data, "confidence"),
+            note=_str(data, "note"),
+            position=_position(data),
+            evidence=evidence,
+        )
+
+
+@dataclass
+class Relation:
+    id: str
+    source: str
+    target: str
+    type: str = "other"
+    label: str = ""
+    status: str = "open"
+    confidence: float = 0.0
+    inferred: bool = False
+    note: str = ""
+    evidence: list[Evidence] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "source": self.source,
+            "target": self.target,
+            "type": self.type,
+            "label": self.label,
+            "status": self.status,
+            "confidence": self.confidence,
+            "inferred": self.inferred,
+            "note": self.note,
+            "evidence": [e.to_dict() for e in self.evidence],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Relation:
+        evidence = [Evidence.from_dict(e) for e in _list(data, "evidence") if isinstance(e, dict)]
+        return cls(
+            id=_require_str(data, "id", "relation"),
+            source=_require_str(data, "source", "relation"),
+            target=_require_str(data, "target", "relation"),
+            type=_choice(_str(data, "type", "other"), RELATION_TYPES, "relation.type"),
+            label=_str(data, "label"),
+            status=_choice(_str(data, "status", "open"), RELATION_STATUSES, "relation.status"),
+            confidence=_float(data, "confidence"),
+            inferred=_bool(data, "inferred"),
+            note=_str(data, "note"),
+            evidence=evidence,
+        )
+
+
+@dataclass
+class EntityGraph:
+    entities: list[Entity] = field(default_factory=list)
+    relations: list[Relation] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "entities": [e.to_dict() for e in self.entities],
+            "relations": [r.to_dict() for r in self.relations],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> EntityGraph:
+        return cls(
+            entities=[Entity.from_dict(e) for e in _list(data, "entities") if isinstance(e, dict)],
+            relations=[
+                Relation.from_dict(r) for r in _list(data, "relations") if isinstance(r, dict)
+            ],
+        )
+
+
+@dataclass
 class HumanDecision:
     gate: str
     decision: str
@@ -345,6 +510,8 @@ class Board:
     intents: list[Intent] = field(default_factory=list)
     hints: list[Hint] = field(default_factory=list)
     edges: list[Edge] = field(default_factory=list)
+    entities: list[Entity] = field(default_factory=list)
+    relations: list[Relation] = field(default_factory=list)
     decisions: list[HumanDecision] = field(default_factory=list)
     waitingFor: WaitingFor | None = None
     verdict: str | None = None
@@ -361,6 +528,12 @@ class Board:
                 return item
         return None
 
+    def entity(self, entity_id: str) -> Entity | None:
+        for item in self.entities:
+            if item.id == entity_id:
+                return item
+        return None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
@@ -370,6 +543,8 @@ class Board:
             "intents": [i.to_dict() for i in self.intents],
             "hints": [h.to_dict() for h in self.hints],
             "edges": [e.to_dict() for e in self.edges],
+            "entities": [e.to_dict() for e in self.entities],
+            "relations": [r.to_dict() for r in self.relations],
             "decisions": [d.to_dict() for d in self.decisions],
             "waitingFor": None if self.waitingFor is None else self.waitingFor.to_dict(),
             "verdict": self.verdict,
@@ -387,6 +562,10 @@ class Board:
             intents=[Intent.from_dict(i) for i in _list(data, "intents") if isinstance(i, dict)],
             hints=[Hint.from_dict(h) for h in _list(data, "hints") if isinstance(h, dict)],
             edges=[Edge.from_dict(e) for e in _list(data, "edges") if isinstance(e, dict)],
+            entities=[Entity.from_dict(e) for e in _list(data, "entities") if isinstance(e, dict)],
+            relations=[
+                Relation.from_dict(r) for r in _list(data, "relations") if isinstance(r, dict)
+            ],
             decisions=[
                 HumanDecision.from_dict(d) for d in _list(data, "decisions") if isinstance(d, dict)
             ],
@@ -398,16 +577,24 @@ class Board:
 __all__ = [
     "AUTHORS",
     "EDGE_RELATIONS",
+    "ENTITY_STATUSES",
+    "ENTITY_TYPES",
     "FACT_KINDS",
     "FACT_ROLES",
     "FACT_STATUSES",
     "INTENT_STATUSES",
     "INTENT_TYPES",
+    "RELATION_STATUSES",
+    "RELATION_TYPES",
     "RUN_STATUSES",
     "Author",
     "Board",
     "Edge",
     "EdgeRelation",
+    "Entity",
+    "EntityGraph",
+    "EntityStatus",
+    "EntityType",
     "Evidence",
     "Fact",
     "FactKind",
@@ -419,6 +606,9 @@ __all__ = [
     "IntentStatus",
     "IntentType",
     "BlackboardError",
+    "Relation",
+    "RelationStatus",
+    "RelationType",
     "RunStatus",
     "WaitingFor",
 ]

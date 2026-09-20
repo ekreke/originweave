@@ -9,6 +9,13 @@
   verify 派发 + compare pass + deviation 记分 + 严格 `COMPLETE` + `report.md` + Gate B。
   **下一步**：**M3** 进行中（**M3a 容器化 runtime 已完成**；待做 **M3b** 预算执行 + 可控性 →
   **M3c** 异步 Hint + Gate C → **M3d** langfuse + capabilities + mcp → **M3e** 集成测试）；其后 **M5**。
+- **M5 · 实体/组织关系图（进行中）**（进度真相见 `SPEC.md` M5）。已拆为 **M5a–M5e**：
+  **M5a（已完成）** 领域/事件/reducer；**下一步 M5b** 引擎 `extract`/`relate`（`Engine(analysis)`、
+  `prompts/{reason,extract,relate}.txt`、reply `entities`/`relations`、规范化归并 upsert、进度/COMPLETE
+  判据、`entity-graph.json` 增量落盘）；**M5c** server（`analysis` 放行、`RunDetail.entity_graph`）；
+  **M5d** 前端 RELATIONS/ENTITIES 页签；**M5e** 关系样例 + 文档。决策：`relation`/`both` 保留
+  Bootstrap+Gate A；实体 id `n*`/关系 `r*`；归并键 `NFKC+casefold+折叠空白`；「已 relate」= 对实体
+  派发过 `relate` Intent；`both` = 溯源判据 且 relation 判据 且 Reason 判定。
 - **M6 · Pi Worker、可配置工具与会话**（用户新增；进度真相见 `SPEC.md` M6）。计划 P0–P6：
   - **P0 契约/文档（已完成）**、**P1 Worker 抽象 + 会话 + 事件（已完成）**：`capabilities/worker.py`、
     `Engine(worker=...)`、`[worker]` 配置、`SESSION`/`WORKER_STEP` 事件、run dir `sessions/`。
@@ -180,9 +187,10 @@
 - `Makefile` 的 `demo` target 依赖 M4 的 server + 前端，现阶段只打印提示（不执行）。
 - **契约重排**把 server API 与前端从 M4 提前到 **M1b/M1c-1/M1c-2**，M4 收缩为端到端 / Deployment / 文档回归；
   期间 `dashboard.md §4` 已由 REST 改为 proto，`product-overview.md §5` 已移除 `trace`。
-- **契约-代码漂移（M5 范围，未实现）**：`Entity`/`Relation`/`EntityGraph`、`ENTITY`/`RELATION`
-  事件、`Intent.extract`/`relate`、`CreateRun.analysis` 已在 `overview/` + `proto/` 冻结契约中，
-  但 `blackboard.py` / `events.py` / `reduce.py` / server 尚未实现（归 M5）。
+- **契约-代码漂移（M5 进行中）**：`Entity`/`Relation`/`EntityGraph`、`ENTITY`/`RELATION` 事件已实现
+  （**M5a**：`blackboard.py`/`events.py`/`reduce.py`）；`Intent.extract`/`relate` 类型已入 `blackboard.py`，
+  但引擎 pass、server `CreateRun.analysis`、`RunDetail.entity_graph`、前端 RELATIONS/ENTITIES 页签仍待做
+  （M5b–M5d）。
 - **枚举定义双份**（`blackboard.py`）：`Literal` 别名（`FactKind` 等）与 `frozenset` 校验集
   （`FACT_KINDS` 等）各写一遍、靠人工同步；且 dataclass 字段仍是 `str`、未用 `Literal` 标注，
   mypy 静态检查未生效。可选收口：字段改用别名标注，或从 `Literal` 派生集合（`typing.get_args`）。
@@ -216,6 +224,14 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M5a · 实体关系图领域/事件/reducer**：`blackboard.py` 增 `Entity`/`Relation`/`EntityGraph`（字段对齐
+  `product-overview §4`）、`EntityType`/`EntityStatus`/`RelationStatus`/`RelationType` + frozenset、
+  `RELATION_TYPES`（11 型 + `other`）；`IntentType += extract/relate`；`Board.entities/relations`（含
+  `to_dict/from_dict` 与 `entity()`）；`events.py` 增 `ENTITY`/`RELATION`；`reduce.py` 增 `ENTITY`
+  （按 id upsert、保序）与 `RELATION`（追加、write-once）分支；`Entity.name` 非空校验。测试：
+  `tests/test_reduce.py`（fold/upsert+aliases 保序/关系追加/确定性/非法枚举/缺字段/非布尔 inferred/
+  `EntityGraph` 往返）、`tests/test_events.py`。`make lint` + `make test`（393 passed, 1 skipped）全绿。
 
 - **M3a · container-per-worker runtime**：新增 `src/originweave/runtime/`（`ContainerWorker` 每次
   `Worker.run()` 起/销毁一个容器、`ContainerManager` 走 `docker` CLI、容器内 `runner.py` 暴露

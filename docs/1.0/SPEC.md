@@ -360,9 +360,9 @@ Hint 注入、Gate C 行为均可观测。
 **实体-关系图**（与溯源 DAG 并列、共享同一 run 与事件溯源）；关系用「预定义本体 +
 `other`」，允许无来源推断但必须显式标注。
 
-- [ ] 领域模型：`Entity` / `Relation` / `EntityGraph`（`src/originweave/blackboard.py`），字段与 `product-overview.md` 第 4 节一致
-- [ ] 关系本体：预定义正向类型 + `other`（反向标签由渲染层派生，不建反向型）
-- [ ] 事件 `ENTITY` / `RELATION` writer + reducer 分支（纯 fold，追加式）
+- [x] 领域模型：`Entity` / `Relation` / `EntityGraph`（`src/originweave/blackboard.py`），字段与 `product-overview.md` 第 4 节一致 — `blackboard.py`（`Entity`/`Relation`/`EntityGraph` + `Board.entities/relations`）
+- [x] 关系本体：预定义正向类型 + `other`（反向标签由渲染层派生，不建反向型）— `blackboard.py` `RELATION_TYPES`/`RelationType`（渲染端反向标签归 M5d）
+- [x] 事件 `ENTITY` / `RELATION` writer + reducer 分支（纯 fold，追加式）— `events.py`（`ENTITY`/`RELATION`）+ `reduce.py`（`ENTITY` 按 id upsert、`RELATION` 追加）
 - [ ] Intent 类型 `extract`（实体抽取）/ `relate`（关系判别），复用 OODA 与 Dispatcher
 - [ ] 实体消歧/合并：按规范化名称归并同名实体，`aliases` 累积（保证重放确定性）
 - [ ] server `CreateRun(analysis=relation|both)` 触发关系图抽取（测试注入 fake provider）
