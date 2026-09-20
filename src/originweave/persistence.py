@@ -17,13 +17,14 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .blackboard import BlackboardError
 from .config import BudgetConfig
+from .events import Event
 from .reduce import reduce
 from .store import RunStore
 
@@ -216,6 +217,7 @@ def summarize_run(
     *,
     meta: Mapping[str, Any] | None = None,
     budget: BudgetConfig | None = None,
+    events: Sequence[Event] | None = None,
 ) -> Run:
     """Build a :class:`Run` from a run directory: static fields from ``run.json``
     (when present), everything else from the event log.
@@ -226,9 +228,13 @@ def summarize_run(
     derived from the events; a ``status`` in ``run.json`` is ignored. ``confidence``,
     the real ``budget`` counters and ``entities``/``relations`` stay zero until the
     milestones that produce them (M2/M5/M6).
+
+    ``events`` overrides the log to fold (Replay's ``at_event`` passes a prefix); the
+    default reads the full log from ``store``. Passing ``events`` (even an empty
+    sequence) means "fold exactly this" and never falls back to the store.
     """
     meta = dict(meta) if meta is not None else {}
-    events = store.read_events()
+    events = list(events) if events is not None else store.read_events()
     board = reduce(events) if events else None
 
     intents = IntentCounts()

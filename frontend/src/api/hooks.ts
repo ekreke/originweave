@@ -28,12 +28,24 @@ export function awaitingPollInterval(status: string | undefined): number | false
   return status === 'awaiting_human' ? AWAITING_POLL_MS : false
 }
 
-export function useRun(runId: string | undefined) {
+// Live run detail. `atEvent` (Replay) asks the server to fold only the first
+// `atEvent` events so the board reflects that step; the timeline stays full. Only
+// the live view polls, and only while a gate is awaiting a human.
+export function useRun(runId: string | undefined, atEvent?: number | null) {
+  const replaying = atEvent != null
   return useQuery({
-    queryKey: ['run', runId],
+    queryKey: ['run', runId, atEvent ?? null],
     enabled: Boolean(runId),
-    queryFn: async () => (await client.getRun({ runId: runId ?? '' })).runDetail,
-    refetchInterval: (query) => awaitingPollInterval(query.state.data?.run?.status),
+    // Keep the previous board visible while stepping (no empty flash, and the
+    // timeline length stays stable for the stepper's bounds). Scoped to the same
+    // run: navigating to another run must not flash the previous run's board.
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === runId ? previousData : undefined,
+    queryFn: async () =>
+      (await client.getRun({ runId: runId ?? '', ...(atEvent != null ? { atEvent } : {}) }))
+        .runDetail,
+    refetchInterval: (query) =>
+      replaying ? false : awaitingPollInterval(query.state.data?.run?.status),
   })
 }
 

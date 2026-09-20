@@ -1,7 +1,9 @@
+import { create } from '@bufbuild/protobuf'
 import { Code, ConnectError } from '@connectrpc/connect'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { RunDetailSchema } from '@/gen/originweave/v1/originweave_pb'
 import { App } from '@/App'
 import { sampleProjects, sampleRunDetail, sampleRuns } from '@/test/fixtures'
 import { AppProviders } from '@/test/providers'
@@ -174,24 +176,51 @@ describe('replay stepper', () => {
 
     expect(label()).toBe('live')
     fireEvent.click(forward)
-    expect(label()).toBe('1/4')
+    // Stepping asks the server to fold the board to the first event.
+    await waitFor(() => expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_009', atEvent: 1 }))
+    await waitFor(() => expect(label()).toBe('1/4'))
     fireEvent.click(forward)
     fireEvent.click(forward)
     fireEvent.click(forward)
-    expect(label()).toBe('4/4')
+    await waitFor(() => expect(label()).toBe('4/4'))
     fireEvent.click(forward)
     expect(label()).toBe('live')
   })
 
-  it('filters the graph to the visible nodes while replaying', async () => {
+  it('renders the folded board returned by GetRun(at_event)', async () => {
+    const full = sampleRunDetail()
+    // Step 1 = only PROJECT: the anchors exist, the derived nodes do not.
+    const folded = create(RunDetailSchema, {
+      run: full.run,
+      origin: full.origin,
+      goal: full.goal,
+      facts: [],
+      intents: [],
+      edges: [],
+      events: full.events,
+    })
+    mocks.getRun.mockImplementation(async (request: { atEvent?: number }) =>
+      request.atEvent === 1 ? { runDetail: folded } : { runDetail: full },
+    )
+
     renderAt('/projects/copilot-productivity/runs/run_009')
     await screen.findByText('Copilot 提升 55% 生产率')
 
-    // Step 0 (PROJECT) only seeds the anchors: the derived fact nodes are hidden.
     fireEvent.click(screen.getByRole('button', { name: 'replay forward' }))
 
-    expect(screen.queryByTestId('fact-node-f1')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByTestId('fact-node-f1')).not.toBeInTheDocument())
     expect(screen.getByTestId('fact-node-origin')).toBeInTheDocument()
+  })
+
+  it('disables the gate and hint write while replaying', async () => {
+    const { container } = renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('确认核心论点？')
+    expect(screen.getByRole('button', { name: 'approve' })).toBeEnabled()
+
+    fireEvent.click(container.querySelector('button[aria-label="replay back"]')!)
+
+    expect(await screen.findByLabelText('hint input')).toBeDisabled()
+    expect(await screen.findByRole('button', { name: 'approve' })).toBeDisabled()
   })
 })
 

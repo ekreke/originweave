@@ -20,6 +20,7 @@ from originweave.capabilities import PromptTemplate  # noqa: E402
 from originweave.capabilities.worker import LocalWorker  # noqa: E402
 from originweave.config import Config  # noqa: E402
 from originweave.persistence import Project, ProjectRegistry  # noqa: E402
+from originweave.reduce import reduce  # noqa: E402
 from originweave.server import Providers, ServerContext, create_app  # noqa: E402
 from originweave.server.service import Service  # noqa: E402
 from originweave.store import RunStore  # noqa: E402
@@ -257,6 +258,91 @@ async def test_get_run_corrupt_log_reports_internal(tmp_path: Path) -> None:
 
     assert response.status_code == 500
     assert response.json()["code"] == "internal"
+
+
+async def test_get_run_at_event_folds_the_board(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+    events = RunStore(tmp_path / "runs" / "run_001").read_events()
+
+    async with _client(tmp_path) as client:
+        responses = [
+            await _post(client, "GetRun", {"runId": "run_001", "atEvent": k}) for k in range(1, 6)
+        ]
+
+    for k, response in enumerate(responses, start=1):
+        assert response.status_code == 200, response.text
+        detail = response.json()["runDetail"]
+        board = reduce(events[:k])
+        assert [fact["id"] for fact in detail.get("facts", [])] == [f.id for f in board.facts]
+        assert [intent["id"] for intent in detail.get("intents", [])] == [
+            i.id for i in board.intents
+        ]
+        assert [edge["id"] for edge in detail.get("edges", [])] == [e.id for e in board.edges]
+        assert detail["run"]["status"] == board.status
+        # The timeline always carries the full log so stepping keeps a stable length.
+        assert len(detail["events"]) == len(events)
+
+    # Concrete checkpoints: after PROJECT only, then after CONCLUDE, then COMPLETE.
+    assert responses[0].json()["runDetail"]["run"]["status"] == "running"
+    assert responses[0].json()["runDetail"].get("facts", []) == []
+    assert [f["id"] for f in responses[3].json()["runDetail"]["facts"]] == ["f1"]
+    assert responses[4].json()["runDetail"]["run"]["status"] == "completed"
+
+
+async def test_get_run_at_event_folds_hints_and_gates(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "run_001")
+    store.init_layout()
+    store.write_run_meta({"id": "run_001", "project_id": "p"})
+    at = "2026-01-01T00:00:0{}"
+    store.append_event("PROJECT", {"origin": _ORIGIN, "goal": _GOAL}, at=at.format(0))
+    store.append_event(
+        "HINT",
+        {"hint": {"id": "h1", "text": "t", "author": "human", "createdAt": ""}},
+        at=at.format(1),
+    )
+    store.append_event(
+        "REQUEST_HUMAN", {"gate": "confirm-claim", "question": "ok?"}, at=at.format(2)
+    )
+
+    async with _client(tmp_path) as client:
+        first = await _post(client, "GetRun", {"runId": "run_001", "atEvent": 1})
+        second = await _post(client, "GetRun", {"runId": "run_001", "atEvent": 2})
+        third = await _post(client, "GetRun", {"runId": "run_001", "atEvent": 3})
+
+    only_project = first.json()["runDetail"]
+    assert only_project.get("hints", []) == []
+    assert "waitingFor" not in only_project
+
+    with_hint = second.json()["runDetail"]
+    assert [hint["id"] for hint in with_hint["hints"]] == ["h1"]
+    assert "waitingFor" not in with_hint  # the gate is not requested yet
+
+    awaiting = third.json()["runDetail"]
+    assert awaiting["waitingFor"]["gate"] == "confirm-claim"
+    assert awaiting["run"]["status"] == "awaiting_human"
+
+
+async def test_get_run_rejects_out_of_range_at_event(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+
+    async with _client(tmp_path) as client:
+        too_small = await _post(client, "GetRun", {"runId": "run_001", "atEvent": 0})
+        too_big = await _post(client, "GetRun", {"runId": "run_001", "atEvent": 99})
+
+    for response in (too_small, too_big):
+        assert response.status_code == 400
+        assert response.json()["code"] == "invalid_argument"
+
+
+async def test_pinned_run_supports_at_event(tmp_path: Path) -> None:
+    run_dir = _write_ui_run(tmp_path, "demo")  # PROJECT + COMPLETE
+
+    async with _ui_client(tmp_path, static_dir=None, run_dir=run_dir) as client:
+        first = await _post(client, "GetRun", {"runId": "demo", "atEvent": 1})
+        full = await _post(client, "GetRun", {"runId": "demo", "atEvent": 2})
+
+    assert first.json()["runDetail"]["run"]["status"] == "running"
+    assert full.json()["runDetail"]["run"]["status"] == "completed"
 
 
 async def test_projects_list_and_get(tmp_path: Path) -> None:
@@ -531,9 +617,7 @@ def _write_run_with_deviation(runs_dir: Path, run_id: str) -> None:
         {"intent": {"id": "i1", "type": "decompose", "from": "f1", "question": "q"}},
         at=at.format(1),
     )
-    store.append_event(
-        "EXECUTE", {"intentId": "i1", "worker": "w", "model": "x"}, at=at.format(2)
-    )
+    store.append_event("EXECUTE", {"intentId": "i1", "worker": "w", "model": "x"}, at=at.format(2))
     deviation = {
         "id": "d1",
         "kind": "deviation",
@@ -732,9 +816,10 @@ async def test_lifespan_drains_background_runs(tmp_path: Path) -> None:
     ProjectRegistry(tmp_path / "projects", tmp_path / "runs").write(Project(id="p", name="P"))
     app = create_app(config=Config(), providers=providers, root=tmp_path)
 
-    async with app.router.lifespan_context(app), httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client,
+    ):
         await _create_run(client, auto=True)  # still running at exit
 
     # The lifespan shutdown awaited the background task to completion.

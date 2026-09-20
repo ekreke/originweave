@@ -8,6 +8,7 @@ import {
   awaitingPollInterval,
   useAddHint,
   useCreateRun,
+  useRun,
   useSubmitHumanInput,
 } from '@/api/hooks'
 
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   addHint: vi.fn(),
   submitHumanInput: vi.fn(),
   createRun: vi.fn(),
+  getRun: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({ client: mocks }))
@@ -33,6 +35,24 @@ describe('awaitingPollInterval', () => {
     expect(awaitingPollInterval('awaiting_human')).toBe(AWAITING_POLL_MS)
     expect(awaitingPollInterval('running')).toBe(false)
     expect(awaitingPollInterval(undefined)).toBe(false)
+  })
+})
+
+describe('useRun', () => {
+  beforeEach(() => {
+    mocks.getRun.mockReset().mockResolvedValue({ runDetail: {} })
+  })
+
+  it('forwards at_event when replaying', async () => {
+    const { result } = renderHook(() => useRun('run_001', 3), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_001', atEvent: 3 })
+  })
+
+  it('omits at_event for the live view', async () => {
+    const { result } = renderHook(() => useRun('run_001'), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_001' })
   })
 })
 

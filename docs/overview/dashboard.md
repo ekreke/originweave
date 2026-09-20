@@ -94,7 +94,7 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 | `GetProject` | `GetProjectRequest{project_id}` | `GetProjectResponse{project}` | 单个项目；不存在 → `NOT_FOUND` |
 | `ListProjectRuns` | `ListProjectRunsRequest{project_id}` | `ListProjectRunsResponse{runs}` | 某项目下 run 列表 |
 | `ListRuns` | `ListRunsRequest{project_id?}` | `ListRunsResponse{runs}` | 全部 run（可按项目过滤） |
-| `GetRun` | `GetRunRequest{run_id}` | `GetRunResponse{run_detail}` | run 详情；不存在 → `NOT_FOUND` |
+| `GetRun` | `GetRunRequest{run_id, at_event?}` | `GetRunResponse{run_detail}` | run 详情；不存在 → `NOT_FOUND` |
 | `CreateRun` | `CreateRunRequest` | `CreateRunResponse{run}` | 新建 run（**起一次核验的唯一入口**） |
 | `AddHint` | `AddHintRequest{run_id, text}` | `AddHintResponse{hint}` | 写一条 Hint（`author=human`，非阻塞） |
 | `SubmitHumanInput` | `SubmitHumanInputRequest` | `SubmitHumanInputResponse{run}` | 提交 Gate 决策，解除 `awaiting_human` |
@@ -112,6 +112,11 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 `waiting_for?`（仅 `status = awaiting_human`） · `report?`（未产出时为空） ·
 `decisions[]`（`HUMAN_INPUT` 裁决记录） · `sessions[]`（M6：一次 Worker 调用的会话，含原始
 输入/输出与步骤链；**P3，尚未入 `proto/`**）。
+
+**Replay（`at_event`）**：`GetRun` 带 `at_event=k`（1..N）时，服务端用 `reduce(events[:k])`
+折算 board —— `run`/`origin`/`goal`/`facts`/`intents`/`hints`/`edges`/`deviations`/`report`/
+`waiting_for`/`decisions` 均为**第 k 步当时态**；`events[]` 仍返回**全量**（时间轴长度稳定）。
+`k` 越界 → `INVALID_ARGUMENT`。不传 `at_event` 即全量 board。
 
 ### 4.3 CreateRunRequest
 

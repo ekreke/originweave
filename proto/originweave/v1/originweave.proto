@@ -268,6 +268,10 @@ message ListRunsResponse {
 
 message GetRunRequest {
   string run_id = 1;
+  // Replay: fold only the first `at_event` events (1..len) so the returned board
+  // reflects the run as of that step. Unset = the full board. `events[]` is always
+  // returned in full so the timeline length stays stable while stepping.
+  optional int32 at_event = 2;
 }
 
 message GetRunResponse {

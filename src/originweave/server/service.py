@@ -22,7 +22,7 @@ from originweave.v1.originweave_connect import OriginweaveService
 from ..blackboard import BlackboardError, Fact, Hint
 from ..config import parse_duration
 from ..engine import GATE_A, GATE_B, Engine, EngineError
-from ..events import now_iso
+from ..events import Event, now_iso
 from ..persistence import Project, Run, allocate_run_id, is_run_id, summarize_run
 from ..reduce import ReduceError, reduce
 from ..report import ReportError
@@ -114,8 +114,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         store = RunStore(self._ctx.runs_dir / run_id)
         if not store.events_path.is_file():
             raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
+        at_event = request.at_event if request.HasField("at_event") else None
         try:
-            return pb.GetRunResponse(run_detail=self._run_detail(store))
+            return pb.GetRunResponse(run_detail=self._run_detail(store, at_event=at_event))
         except (BlackboardError, ReduceError, ReportError) as exc:
             raise ConnectError(
                 Code.INTERNAL, f"run {run_id!r} has a malformed event log: {exc}"
@@ -356,9 +357,10 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         store = self._pinned_store()
         if request.run_id != self._run_id_of(store):
             raise ConnectError(Code.NOT_FOUND, f"run {request.run_id!r} not found")
+        at_event = request.at_event if request.HasField("at_event") else None
         try:
-            return pb.GetRunResponse(run_detail=self._run_detail(store))
-        except (BlackboardError, ReduceError) as exc:
+            return pb.GetRunResponse(run_detail=self._run_detail(store, at_event=at_event))
+        except (BlackboardError, ReduceError, ReportError) as exc:
             raise ConnectError(
                 Code.INTERNAL, f"run {request.run_id!r} has a malformed event log: {exc}"
             ) from exc
@@ -400,12 +402,28 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             runs.append(run)
         return runs
 
-    def _run_detail(self, store: RunStore) -> Any:
+    def _run_detail(self, store: RunStore, *, at_event: int | None = None) -> Any:
         events = store.read_events()
-        board = reduce(events)
+        folded = self._folded_events(events, at_event)
+        board = reduce(folded)
         run = summarize_run(
             store,
             meta=store.read_run_meta(),
             budget=self._ctx.config.worker.budget,
+            events=folded,
         )
+        # The board is folded to `at_event` (Replay), but the timeline keeps the full
+        # log so its length stays stable while stepping.
         return convert.run_detail_pb(run, board, events)
+
+    @staticmethod
+    def _folded_events(events: list[Event], at_event: int | None) -> list[Event]:
+        """The event prefix to fold for Replay; ``None`` folds the whole log."""
+        if at_event is None:
+            return events
+        if at_event < 1 or at_event > len(events):
+            raise ConnectError(
+                Code.INVALID_ARGUMENT,
+                f"at_event must be within 1..{len(events)}; got {at_event}",
+            )
+        return events[:at_event]

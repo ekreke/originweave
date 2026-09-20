@@ -97,11 +97,7 @@ function byId(a: { id: string }, b: { id: string }): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
 }
 
-// `visibleIds` (Replay stepper) hides nodes/edges that had not appeared yet at a
-// given event step; undefined keeps the live, fully-derived board. The origin/goal
-// anchors are always drawn (they exist from PROJECT, i.e. step 0).
-export function runDetailToGraph(detail: RunDetail, visibleIds?: Set<string>): GraphModel {
-  const keep = (id: string) => visibleIds === undefined || visibleIds.has(id)
+export function runDetailToGraph(detail: RunDetail): GraphModel {
   const nodes: GraphNode[] = []
   const anchors = new Map<string, { x: number; y: number }>()
 
@@ -119,11 +115,10 @@ export function runDetailToGraph(detail: RunDetail, visibleIds?: Set<string>): G
 
   pushFact(detail.origin)
   pushFact(detail.goal)
-  for (const f of detail.facts) if (keep(f.id)) pushFact(f)
+  for (const f of detail.facts) pushFact(f)
 
   const groups = new Map<string, RunDetail['intents']>()
   for (const it of [...detail.intents].sort(byId)) {
-    if (!keep(it.id)) continue
     const list = groups.get(it.from) ?? []
     list.push(it)
     groups.set(it.from, list)
@@ -145,20 +140,18 @@ export function runDetailToGraph(detail: RunDetail, visibleIds?: Set<string>): G
     })
   }
 
-  const edges: GraphEdge[] = detail.edges
-    .filter((e) => keep(e.source) && keep(e.target))
-    .map((e) => {
-      const dash = edgeDash(e.relation)
-      return {
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        type: 'smoothstep',
-        markerEnd: { type: MarkerType.ArrowClosed },
-        ...(dash ? { style: { strokeDasharray: dash } } : {}),
-        data: { relation: e.relation, note: e.note },
-      }
-    })
+  const edges: GraphEdge[] = detail.edges.map((e) => {
+    const dash = edgeDash(e.relation)
+    return {
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      type: 'smoothstep',
+      markerEnd: { type: MarkerType.ArrowClosed },
+      ...(dash ? { style: { strokeDasharray: dash } } : {}),
+      data: { relation: e.relation, note: e.note },
+    }
+  })
 
   return { nodes, edges }
 }

@@ -1,10 +1,9 @@
 import { Code, ConnectError } from '@connectrpc/connect'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import { useAddHint, useProjectRuns, useRun, useSubmitHumanInput } from '@/api/hooks'
 import type { Fact, Intent, RunDetail } from '@/gen/originweave/v1/originweave_pb'
-import { firstSeenAt, visibleIdsAt } from '@/graph/replay'
 import { Inspector, type InspectorSelection } from '@/layout/Inspector'
 import { RunList } from '@/layout/RunList'
 import { EventsTab } from '@/tabs/EventsTab'
@@ -51,19 +50,10 @@ export function Console() {
     run: runId,
     id: null,
   })
-  const run = useRun(runId)
-  const runs = useProjectRuns(projectId)
-  const addHint = useAddHint(runId)
-  const submitGate = useSubmitHumanInput(runId)
-  const detail = run.data
-  const selectionId = selected.run === runId ? selected.id : null
-  const selection = resolveSelection(detail, selectionId)
-  const select = (id: string | null) => setSelected({ run: runId, id })
-
-  // Replay stepper: null means the live board; a number hides nodes/edges that had
-  // not appeared yet at that event step (see graph/replay.ts). Like `selected`, the
-  // step is tagged with its run so switching runs resets it instead of leaking a
-  // step from a longer run onto a shorter one.
+  // Replay stepper: `step` is a 0-based event index (null = live). The server folds
+  // the board to `step + 1` events (see GetRunRequest.at_event); the timeline below
+  // stays the full log so its length is stable. Like `selected`, the step is tagged
+  // with its run so switching runs resets it.
   const [replay, setReplay] = useState<{ run: string | undefined; step: number | null }>({
     run: runId,
     step: null,
@@ -75,10 +65,18 @@ export function Console() {
       return { run: runId, step: typeof next === 'function' ? next(base) : next }
     })
   }
-  const events = useMemo(() => detail?.events ?? [], [detail])
+
+  const run = useRun(runId, replayStep === null ? null : replayStep + 1)
+  const runs = useProjectRuns(projectId)
+  const addHint = useAddHint(runId)
+  const submitGate = useSubmitHumanInput(runId)
+  const detail = run.data
+  const selectionId = selected.run === runId ? selected.id : null
+  const selection = resolveSelection(detail, selectionId)
+  const select = (id: string | null) => setSelected({ run: runId, id })
+
+  const events = detail?.events ?? []
   const maxStep = events.length - 1
-  const seen = useMemo(() => firstSeenAt(events), [events])
-  const visible = replayStep === null ? undefined : visibleIdsAt(seen, replayStep)
 
   const notFound = run.error instanceof ConnectError && run.error.code === Code.NotFound
 
@@ -107,13 +105,13 @@ export function Console() {
   function renderTab() {
     switch (tab) {
       case 'GRAPH':
-        return <GraphTab detail={detail} onSelect={select} visibleIds={visible} />
+        return <GraphTab detail={detail} onSelect={select} />
       case 'FACTS':
         return <FactsTab facts={detail?.facts} onSelect={select} selectedId={selectionId} />
       case 'INTENTS':
         return <IntentsTab intents={detail?.intents} onSelect={select} selectedId={selectionId} />
       case 'EVENTS':
-        return <EventsTab events={detail?.events} step={replayStep} />
+        return <EventsTab events={events} step={replayStep} />
     }
   }
 
@@ -125,6 +123,8 @@ export function Console() {
       ` · cost ${(detail.run.budget?.cost ?? 0).toFixed(2)}` +
       ` · intents ${detail.run.intents?.open ?? 0}/${detail.run.intents?.done ?? 0}`
     : ''
+  // The folded board is historical, so writing is disabled while replaying.
+  const live = replayStep === null
 
   return (
     <div className="console">
@@ -209,8 +209,11 @@ export function Console() {
         intents={detail?.intents}
         hints={detail?.hints}
         waitingFor={detail?.waitingFor}
-        onDecision={(decision, text) =>
-          submitGate.mutate({ gate: detail?.waitingFor?.gate ?? '', decision, text })
+        onDecision={
+          live
+            ? (decision, text) =>
+                submitGate.mutate({ gate: detail?.waitingFor?.gate ?? '', decision, text })
+            : undefined
         }
         decisionPending={submitGate.isPending}
         decisionError={
@@ -220,7 +223,7 @@ export function Console() {
               : String(submitGate.error)
             : undefined
         }
-        onAddHint={(text) => addHint.mutateAsync(text).then(() => undefined)}
+        onAddHint={live ? (text) => addHint.mutateAsync(text).then(() => undefined) : undefined}
       />
     </div>
   )

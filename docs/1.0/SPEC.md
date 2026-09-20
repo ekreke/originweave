@@ -266,9 +266,11 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
       `submitHumanInput`；含修正说明输入、pending 禁用、失败行内报错；Gate C（`review`）随 M3 —
       `frontend/src/layout/Inspector.tsx`（`GateCard`）、`frontend/src/api/hooks.ts`（`useSubmitHumanInput`）、
       `frontend/src/routes/Console.tsx`
-- [x] Replay 步进：前端按 `events[]` 逐步回放（`firstSeenAt` 派生节点首现序号，过滤图节点/边 +
-      截断/高亮 EVENTS；不复刻 reducer；步进随 run 隔离）— `frontend/src/graph/replay.ts`、
-      `frontend/src/routes/Console.tsx`、`frontend/src/graph/mapping.ts`、`frontend/src/tabs/EventsTab.tsx`
+- [x] Replay 步进：**服务端折算** `GetRun(at_event=k)`（`reduce(events[:k])`，复用唯一 reducer、
+      零漂移；`events[]` 仍全量），前端只做步进/高亮与折算 board 的展示（步进随 run 隔离；replay 期间
+      禁用写操作）— `proto/`（`GetRunRequest.at_event`）、`service.py`（`_run_detail`/`_folded_events`）、
+      `persistence.py`（`summarize_run(events=…)`）、`frontend/src/api/hooks.ts`（`useRun(runId, atEvent)`）、
+      `frontend/src/routes/Console.tsx`、`frontend/src/tabs/EventsTab.tsx`、`frontend/src/tabs/GraphTab.tsx`
 
 ### 2b-4 · 新建核验表单 + 顶栏
 
