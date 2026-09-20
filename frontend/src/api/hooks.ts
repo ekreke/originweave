@@ -22,6 +22,31 @@ export function useProjectRuns(projectId: string | undefined) {
   })
 }
 
+export interface CreateProjectInput {
+  id: string
+  name: string
+  description?: string
+  accent?: string
+}
+
+// Creating a project is the only way to start a run (CreateRun needs one to exist).
+// A duplicate id is rejected by the server (ALREADY_EXISTS), not silently reused.
+export function useCreateProject() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: CreateProjectInput) => {
+      const response = await client.createProject({
+        id: input.id,
+        name: input.name,
+        ...(input.description ? { description: input.description } : {}),
+        ...(input.accent ? { accent: input.accent } : {}),
+      })
+      return response.project
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  })
+}
+
 // A run that is still active (queued/running/awaiting a human) keeps polling so the
 // board advances on its own -- a fresh run shows the Gate card when it pauses, a
 // paused run shows the result once the human resolves it. Terminal runs poll nothing.

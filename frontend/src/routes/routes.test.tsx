@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { RunDetailSchema } from '@/gen/originweave/v1/originweave_pb'
 import { App } from '@/App'
-import { sampleProjects, sampleRunDetail, sampleRuns, settings } from '@/test/fixtures'
+import { sampleProjects, sampleRunDetail, sampleRuns, fact, settings } from '@/test/fixtures'
 import { AppProviders } from '@/test/providers'
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   addHint: vi.fn(),
   submitHumanInput: vi.fn(),
   createRun: vi.fn(),
+  createProject: vi.fn(),
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
 }))
@@ -36,6 +37,7 @@ beforeEach(() => {
   mocks.addHint.mockReset().mockResolvedValue({ hint: undefined })
   mocks.submitHumanInput.mockReset().mockResolvedValue({ run: { id: 'run_009' } })
   mocks.createRun.mockReset().mockResolvedValue({ run: { id: 'run_009' } })
+  mocks.createProject.mockReset().mockResolvedValue({ project: { id: 'newp', name: 'New' } })
   mocks.getSettings.mockReset().mockResolvedValue({ settings: settings() })
   mocks.updateSettings.mockReset().mockResolvedValue({ settings: settings() })
 })
@@ -138,6 +140,32 @@ describe('console', () => {
     const inspector = within(screen.getByLabelText('inspector'))
     expect(inspector.getByText('sess_003')).toBeInTheDocument()
     expect(inspector.getAllByText('原始输出').length).toBeGreaterThan(0)
+  })
+
+  it('shows the full goal text in the Inspector after clicking its node', async () => {
+    const base = sampleRunDetail()
+    const longGoal =
+      '判定「55% faster」是否忠实于一手研究：核对样本量、时间窗口、适用范围与统计口径，并说明是否外推到所有开发者。'
+    mocks.getRun.mockResolvedValue({
+      runDetail: create(RunDetailSchema, {
+        run: base.run,
+        origin: base.origin,
+        goal: fact({ id: 'goal', kind: 'goal', label: longGoal }),
+        facts: base.facts,
+        intents: base.intents,
+        edges: base.edges,
+        events: base.events,
+        waitingFor: base.waitingFor,
+        hints: base.hints,
+        sessions: base.sessions,
+      }),
+    })
+    renderAt('/projects/copilot-productivity/runs/run_009')
+
+    fireEvent.click(await screen.findByTestId('fact-node-goal'))
+
+    const inspector = within(screen.getByLabelText('inspector'))
+    expect(inspector.getByText(longGoal)).toBeInTheDocument()
   })
 
   it('submits a hint through AddHint', async () => {
@@ -342,6 +370,58 @@ describe('settings', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     expect(await screen.findByText(/read-only/)).toBeInTheDocument()
+  })
+})
+
+describe('new project', () => {
+  it('exposes the create-project entry from the overview', async () => {
+    renderAt('/')
+    expect(await screen.findByRole('link', { name: '新建项目' })).toBeInTheDocument()
+  })
+
+  it('creates a project and navigates to it', async () => {
+    renderAt('/projects/new')
+
+    fireEvent.change(screen.getByLabelText('project id'), { target: { value: 'newp' } })
+    fireEvent.change(screen.getByLabelText('project name'), { target: { value: 'New' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+
+    await waitFor(() =>
+      expect(mocks.createProject).toHaveBeenCalledWith({ id: 'newp', name: 'New' }),
+    )
+    // Navigation lands on the project page, which loads its (empty) run list.
+    await waitFor(() => expect(mocks.listProjectRuns).toHaveBeenCalledWith({ projectId: 'newp' }))
+  })
+
+  it('shows an inline error when the project already exists', async () => {
+    mocks.createProject.mockRejectedValue(
+      new ConnectError('project already exists', Code.AlreadyExists),
+    )
+    renderAt('/projects/new')
+
+    fireEvent.change(screen.getByLabelText('project id'), { target: { value: 'p' } })
+    fireEvent.change(screen.getByLabelText('project name'), { target: { value: 'P' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+
+    expect(await screen.findByText(/project already exists/)).toBeInTheDocument()
+  })
+
+  it('shows the empty-state call to action when there are no projects', async () => {
+    mocks.listProjects.mockResolvedValue({ projects: [] })
+    renderAt('/')
+
+    expect(await screen.findByText(/暂无项目/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '立即新建' })).toBeInTheDocument()
+  })
+
+  it('disables submit for the reserved id', () => {
+    renderAt('/projects/new')
+
+    fireEvent.change(screen.getByLabelText('project id'), { target: { value: 'new' } })
+    fireEvent.change(screen.getByLabelText('project name'), { target: { value: 'New' } })
+
+    expect(screen.getByRole('button', { name: '创建项目' })).toBeDisabled()
+    expect(mocks.createProject).not.toHaveBeenCalled()
   })
 })
 

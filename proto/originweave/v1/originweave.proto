@@ -283,6 +283,7 @@ message RunDetail {
 service OriginweaveService {
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
   rpc GetProject(GetProjectRequest) returns (GetProjectResponse);
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
   rpc ListProjectRuns(ListProjectRunsRequest) returns (ListProjectRunsResponse);
   rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
   rpc GetRun(GetRunRequest) returns (GetRunResponse);
@@ -305,6 +306,17 @@ message GetProjectRequest {
 }
 
 message GetProjectResponse {
+  Project project = 1;
+}
+
+message CreateProjectRequest {
+  string id = 1; // [A-Za-z0-9][A-Za-z0-9._-]*
+  string name = 2;
+  optional string description = 3;
+  optional string accent = 4; // display accent colour
+}
+
+message CreateProjectResponse {
   Project project = 1;
 }
 

@@ -348,6 +348,10 @@ Hint 注入、Gate C 行为均可观测。
 
 目标：端到端闭环、server 容器化部署，以及文档/契约一致性回归（server 与前端已在 M1c-1 / M1c-2a/2b 落地）。
 
+- [x] **前置：`CreateProject` + 可写服务入口**（demo 从零起步）— proto `CreateProject` RPC + 消息；
+  `server/service.py` `create_project`（id 校验 / 空 name → `INVALID_ARGUMENT`、重复 → `ALREADY_EXISTS`、
+  pinned 拒绝）；`dashboard.md §3/§4.1`；前端 `/projects/new`（`routes/NewProject.tsx` + `useCreateProject` +
+  Overview 入口）；`Makefile` `dev`（可写，`ui`/`run` 仍为只读样例）
 - [ ] 端到端 `make demo`：资料 A → 抽象论点 → DAG → 记分卡 → 前端可见 → `replay` 可复现
 - [ ] server 运行于 Docker（Deployment 层）
 - [ ] 文档一致性回归：`overview/`、`proto/` 与本文件术语/契约无漂移

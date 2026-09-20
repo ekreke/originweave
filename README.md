@@ -15,7 +15,8 @@
 > 修了 agent-dir 环境变量名 bug）。**M6 P5** 前端已落地——Settings 页（写回 `[worker]`）、INSPECTOR
 > 会话视图（原始输入/输出 + 步骤链）、EVENTS 按 worker 过滤。
 > 起 run 走 server / proto API（`CreateRun`，经 `source_text` 收资料 A），故 **CLI 无 `trace`**；
-> `mcp` 仍为占位。`frontend/` 已完成 **M1c-2b 2b-1–2b-5**（React Query 读真实数据、Inspector 选中 +
+> `mcp` 仍为占位。**起 run 前需先建项目**（`CreateProject` RPC + UI `/projects/new`；`make dev` 起可写
+> server）。`frontend/` 已完成 **M1c-2b 2b-1–2b-5**（React Query 读真实数据、Inspector 选中 +
 > Hints、HITL Gate A/B + Replay 步进、新建核验表单 + 运行徽标；端到端冒烟见 `make smoke`）。
 > 版本与里程碑见 `milestones.md`。
 
@@ -27,6 +28,7 @@ uv run originweave init  # 生成项目内 originweave.toml（已存在需 --for
 uv run originweave capabilities list   # 查看 provider 与凭据就绪情况
 uv run originweave replay examples/copilot_productivity   # 重放样例事件日志（不触网）
 make ui                  # 起只读 UI 服务（Connect API + frontend/dist，端口 8765）
+make dev                 # 起可写 server（cwd 下 runs/ + projects/；在 UI 里建项目/run）
 make lint                # ruff check + mypy
 make test                # pytest
 make smoke               # 端到端冒烟（进程内起 server + fake worker，建 run → Gate → 记分卡）
@@ -49,7 +51,8 @@ make frontend-e2e        # Playwright 浏览器 e2e（构建真实 dist + fake-p
 | target | 作用 |
 |---|---|
 | `install` | `uv sync`，安装运行依赖 + dev 依赖（ruff / mypy / pytest）。 |
-| `run` | 起本地只读视图（`originweave ui --run $(RUN_DIR) --port 8765`）。 |
+| `run` | 起本地只读视图（`originweave ui --run $(RUN_DIR) --port 8765`，只服务样例）。 |
+| `dev` | 起**可写** server（`originweave ui --port 8765`，服务 cwd 下 `runs/` + `projects/`）；先在 UI 建项目再建 run。 |
 | `demo` | 端到端跑样例（server + 前端）。**归 M4，尚未接线。** |
 | `fixtures` | 重新生成样例的 `events.jsonl`（确定性、产物入库）。 |
 | `proto` | 由 `proto/` 生成 server Python 代码（需 `buf` + `protoc-gen-connect-python`；M1c-1）。 |

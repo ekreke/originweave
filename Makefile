@@ -9,7 +9,7 @@ RUNS_DIR ?= runs
 PORT ?= 8765
 
 .DEFAULT_GOAL := help
-.PHONY: help install run demo smoke image fixtures proto test lint fmt ui replay cloc clean \
+.PHONY: help install run dev demo smoke image fixtures proto test lint fmt ui replay cloc clean \
 	frontend-install frontend-gen frontend-dev frontend-build frontend-lint \
 	frontend-typecheck frontend-test frontend-e2e
 
@@ -20,12 +20,16 @@ help: ## List available targets
 install: ## Sync runtime + dev dependencies into .venv
 	$(UV) sync
 
-run: install ## Start the local test env
+run: install ## Start the local read-only view of the sample run
 	$(UV) run originweave ui --run $(RUN_DIR) --port $(PORT)
+
+dev: install ## Start a writable local server (runs/ + projects/ under cwd; create projects/runs)
+	$(UV) run originweave ui --port $(PORT)
 
 demo: ## End-to-end sample (server + frontend; lands in M4, not wired yet)
 	@echo "make demo lands in M4 (server + frontend; see docs/1.0/SPEC.md)."
 	@echo "Use 'make replay' to replay the sample event log."
+	@echo "For a live run: 'make dev' (writable) then create a project + run in the UI."
 
 smoke: install ## Boot the server with a fake worker and drive a run end-to-end (in-process)
 	$(UV) run python scripts/smoke.py

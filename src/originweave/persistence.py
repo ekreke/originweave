@@ -16,6 +16,7 @@ run directories at read time.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -311,7 +312,11 @@ class ProjectRegistry:
         return projects
 
     def write(self, project: Project) -> Path:
-        """Persist the static project fields (counts are never written)."""
+        """Persist the static project fields (counts are never written).
+
+        Written to a sibling temp file and replaced, so a crash mid-write cannot leave a
+        corrupt ``project.json`` (a malformed file breaks ``list()``/the whole overview).
+        """
         path = self.path(project.id)
         path.parent.mkdir(parents=True, exist_ok=True)
         static = {
@@ -320,10 +325,12 @@ class ProjectRegistry:
             "description": project.description,
             "accent": project.accent,
         }
-        path.write_text(
+        tmp_path = path.with_name(f".{path.name}.tmp")
+        tmp_path.write_text(
             json.dumps(static, sort_keys=True, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+        os.replace(tmp_path, path)
         return path
 
     def ensure(self, project_id: str, *, name: str | None = None) -> Project:

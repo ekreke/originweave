@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom'
 
 import { AppShell } from '@/layout/AppShell'
 import { Console } from '@/routes/Console'
+import { NewProject } from '@/routes/NewProject'
 import { NewRun } from '@/routes/NewRun'
 import { NotFound } from '@/routes/NotFound'
 import { Overview } from '@/routes/Overview'
@@ -13,6 +14,7 @@ export function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<Overview />} />
+        <Route path="projects/new" element={<NewProject />} />
         <Route path="projects/:projectId" element={<Project />} />
         <Route path="projects/:projectId/runs/new" element={<NewRun />} />
         <Route path="projects/:projectId/runs/:runId" element={<Console />} />

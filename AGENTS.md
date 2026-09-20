@@ -50,7 +50,9 @@
   增 `RunScheduler`（每 run 单例 `RunStore` + 任务持有/`drain`）。**C4** `originweave ui` 已落地——
   `create_app(..., static_dir, run_dir)` 把 Connect 挂在 proto path、SPA 静态挂 `/`、lifespan 收尾
   `scheduler.drain()`；`--run <dir>` 单 run 只读（写 RPC 拒）。起 run 仍走 server/proto
-  （`CreateRun` 经 `source_text` 收资料 A）。**`make proto` 是 `make lint`/`test` 的前置**
+  （`CreateRun` 经 `source_text` 收资料 A）。**M4a**：`CreateProject`（proto + `server/service.py`；
+  重复 → `ALREADY_EXISTS`）+ 前端 `/projects/new`（`routes/NewProject.tsx`）+ `Makefile dev`（可写；
+  `ui`/`run` 仍只读样例）——**起 run 前必须先建项目**。**`make proto` 是 `make lint`/`test` 的前置**
   （无 gen 时 server 测试 `importorskip` 跳过）。
 - **M2 偏差记分卡已落地**：verify 型 Intent 经 `compare` pass 派发（`prompts/compare.txt`、不检索），
   产出 `compare` + `deviation` Fact（带 `severity`/`confidence`）；`COMPLETE` 走严格判据（论点全部
@@ -122,6 +124,7 @@ make fmt                    # ruff format src tests scripts
 make proto                  # buf generate proto -> src/originweave/v1（M1c-1；需 buf + protoc-gen-connect-python）
 make image                  # 烤 runtime 容器镜像（M3a；需 Docker）；[worker].execution=container 时每次调用起一个
 make smoke                  # 端到端冒烟（进程内 fake worker → CreateRun/Gate/记分卡）
+make dev                    # 起可写 server（cwd 下 runs/ + projects/；UI 里建项目/run）
 make fixtures               # 重生成样例事件 events.jsonl（scripts/build_sample_fixtures.py，另有 --check 校验）
 make cloc                   # 仅统计 src/originweave 逻辑行数
 uv run pytest tests/test_config.py::test_default_values   # 跑单个测试

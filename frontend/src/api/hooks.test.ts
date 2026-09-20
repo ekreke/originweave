@@ -7,6 +7,7 @@ import {
   ACTIVE_POLL_MS,
   activePollInterval,
   useAddHint,
+  useCreateProject,
   useCreateRun,
   useRun,
   useSettings,
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   addHint: vi.fn(),
   submitHumanInput: vi.fn(),
   createRun: vi.fn(),
+  createProject: vi.fn(),
   getRun: vi.fn(),
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
@@ -124,7 +126,6 @@ describe('useCreateRun', () => {
   beforeEach(() => {
     mocks.createRun.mockReset().mockResolvedValue({ run: { id: 'run_007' } })
   })
-
   it('maps the form input to a text/provenance CreateRunRequest', async () => {
     const { result } = renderHook(() => useCreateRun(), { wrapper })
 
@@ -204,5 +205,26 @@ describe('useUpdateSettings', () => {
     }
     expect(request.settings.worker?.provider).toBe('pi')
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['settings'] }))
+  })
+})
+
+describe('useCreateProject', () => {
+  beforeEach(() => {
+    mocks.createProject.mockReset().mockResolvedValue({ project: { id: 'newp', name: 'New' } })
+  })
+
+  it('sends the project identity and refreshes the project list', async () => {
+    const { result } = renderHook(() => useCreateProject(), { wrapper })
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+
+    result.current.mutate({ id: 'newp', name: 'New', description: 'd' })
+
+    await waitFor(() => expect(mocks.createProject).toHaveBeenCalledTimes(1))
+    expect(mocks.createProject).toHaveBeenCalledWith({
+      id: 'newp',
+      name: 'New',
+      description: 'd',
+    })
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['projects'] }))
   })
 })

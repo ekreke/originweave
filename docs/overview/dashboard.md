@@ -49,6 +49,10 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
     Intent 以问号徽标呈现，`open/claimed/dropped` 分别用灰/蓝/划除；
     边按 `relation` 区分（`main-chain` 实线、`dependency` 虚线、
     `decomposes` 点线、`spawns`/`resolves` —— 见 `blackboard-protocol.md`）。
+    **节点标签是短预览**（折叠空白、超长截断 + 省略号、CSS 3 行封顶），**完整文本在 INSPECTOR**
+    （点击节点后展示，长文可滚动）。坐标取 proto `Fact.position`；**live run 未写坐标时前端按溯源深度
+    分层兜底**（origin 顶 / goal 其上 / facts 按 BFS 深度成行；兜底布局内确定性、两两不重叠），也符合
+    "`position` 渲染侧可重算"的约定。
   - **FACTS** — 事实表：`ID | Kind | Statement | Conf. | Evidence`。
   - **INTENTS** — Intent 表：`ID | Type | Question | Status | From`，含 `dropped`（死胡同）。
   - **RELATIONS** — 实体-关系图（`analysis` 含 relation 时）。复用 PROVENANCE DAG 的图
@@ -69,6 +73,7 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 | 路由 | 视图 |
 |---|---|
 | `/` | 总览（项目与 run 汇总） |
+| `/projects/new` | 新建项目（提交后走 `CreateProject`） |
 | `/projects/:projectId` | 项目详情 + run 列表 |
 | `/projects/:projectId/runs/new` | 新建核验（提交后走 `CreateRun`） |
 | `/projects/:projectId/runs/:runId` | 审阅台（三栏：run 列表 / 图与页签 / INSPECTOR） |
@@ -92,6 +97,7 @@ source 菱形、boundary 虚线框、compare 六边、deviation 警示三角）�
 |---|---|---|---|
 | `ListProjects` | `ListProjectsRequest` | `ListProjectsResponse{projects}` | 列出全部项目 |
 | `GetProject` | `GetProjectRequest{project_id}` | `GetProjectResponse{project}` | 单个项目；不存在 → `NOT_FOUND` |
+| `CreateProject` | `CreateProjectRequest{id, name, description?, accent?}` | `CreateProjectResponse{project}` | 建目录式项目（`projects/<id>/project.json`）；id 已存在 → `ALREADY_EXISTS`，非法/保留 id（`new`）、空 name → `INVALID_ARGUMENT`，pinned 只读 → `FAILED_PRECONDITION` |
 | `ListProjectRuns` | `ListProjectRunsRequest{project_id}` | `ListProjectRunsResponse{runs}` | 某项目下 run 列表 |
 | `ListRuns` | `ListRunsRequest{project_id?}` | `ListRunsResponse{runs}` | 全部 run（可按项目过滤） |
 | `GetRun` | `GetRunRequest{run_id, at_event?}` | `GetRunResponse{run_detail}` | run 详情；不存在 → `NOT_FOUND` |

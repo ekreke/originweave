@@ -31,9 +31,14 @@ export function Overview() {
         <div className="panel-hd">
           <h2>总览 · 项目与 run 汇总</h2>
           <span className="cnt">只读视图 · 由事件派生</span>
+          <Link className="btn" to="/projects/new">
+            新建项目
+          </Link>
         </div>
         {!projects || projects.length === 0 ? (
-          <div className="empty">暂无项目。新建一次核验后出现。</div>
+          <div className="empty">
+            暂无项目。<Link to="/projects/new">立即新建</Link> 后即可发起核验。
+          </div>
         ) : (
           <ul className="list">
             {projects.map((project) => (

@@ -13,6 +13,7 @@ node_modules/
 .coverage
 htmlcov/
 runs/
+projects/
 *.jsonl
 !examples/**/*.jsonl
 # generated proto code (build artifact; run `buf generate proto`)

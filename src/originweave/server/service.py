@@ -42,6 +42,8 @@ from .context import ServerContext
 
 # Longest auto-derived title taken from document A's first non-empty line.
 _TITLE_LIMIT = 120
+# A project id that would collide with the frontend route ``/projects/new`` (M4a).
+_RESERVED_PROJECT_IDS: frozenset[str] = frozenset({"new"})
 # Upper bound on SearchRequest.num_results, so a client cannot ask a provider for an
 # unbounded fan-out.
 _MAX_SEARCH_RESULTS = 50
@@ -151,6 +153,34 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         if project is None:
             raise ConnectError(Code.NOT_FOUND, f"project {project_id!r} not found")
         return pb.GetProjectResponse(project=convert.project_pb(project))
+
+    async def create_project(self, request: Any, ctx: Any) -> Any:
+        """Create a project registry entry (M4a).
+
+        Projects are the only way to start a run (``CreateRun`` needs one to exist), so
+        this is the entry point that lets a fresh server be used at all. Idempotence is
+        rejected on purpose (``ALREADY_EXISTS``) rather than silently returning: a typo'd
+        id must not look like a success.
+        """
+        self._reject_if_pinned()
+        project_id = request.id.strip()
+        name = request.name.strip()
+        if not name:
+            raise ConnectError(Code.INVALID_ARGUMENT, "name is required")
+        if project_id in _RESERVED_PROJECT_IDS:
+            raise ConnectError(Code.INVALID_ARGUMENT, f"project id {project_id!r} is reserved")
+        # _lookup_project validates the id shape (INVALID_ARGUMENT) and maps a malformed
+        # registry file to INTERNAL; a hit means the id is taken.
+        if self._lookup_project(project_id) is not None:
+            raise ConnectError(Code.ALREADY_EXISTS, f"project {project_id!r} already exists")
+        project = Project(
+            id=project_id,
+            name=name,
+            description=request.description if request.HasField("description") else "",
+            accent=request.accent if request.HasField("accent") else "",
+        )
+        self._ctx.registry.write(project)
+        return pb.CreateProjectResponse(project=convert.project_pb(project))
 
     async def list_project_runs(self, request: Any, ctx: Any) -> Any:
         if self._ctx.pinned_run is not None:

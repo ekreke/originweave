@@ -361,6 +361,72 @@ async def test_projects_list_and_get(tmp_path: Path) -> None:
     assert missing.json()["code"] == "not_found"
 
 
+async def test_create_project_persists_and_lists(tmp_path: Path) -> None:
+    async with _client(tmp_path) as client:
+        created = await _post(
+            client,
+            "CreateProject",
+            {"id": "p", "name": "P", "description": "demo", "accent": "#abc"},
+        )
+        listed = await _post(client, "ListProjects", {})
+
+    assert created.status_code == 200, created.text
+    project = created.json()["project"]
+    # proto3 JSON omits default scalars, so runCount/updatedAt only appear once non-zero.
+    assert {k: project[k] for k in ("id", "name", "description", "accent")} == {
+        "id": "p",
+        "name": "P",
+        "description": "demo",
+        "accent": "#abc",
+    }
+    assert project.get("runCount", 0) == 0
+    assert [p["id"] for p in listed.json()["projects"]] == ["p"]
+    assert (tmp_path / "projects" / "p" / "project.json").is_file()
+
+
+async def test_create_project_rejects_duplicate_and_invalid(tmp_path: Path) -> None:
+    async with _client(tmp_path) as client:
+        first = await _post(client, "CreateProject", {"id": "p", "name": "P"})
+        duplicate = await _post(client, "CreateProject", {"id": "p", "name": "P2"})
+        bad_id = await _post(client, "CreateProject", {"id": "a/b", "name": "P"})
+        empty_id = await _post(client, "CreateProject", {"id": "", "name": "P"})
+        reserved = await _post(client, "CreateProject", {"id": "new", "name": "New"})
+        blank_name = await _post(client, "CreateProject", {"id": "q", "name": "   "})
+
+    assert first.status_code == 200
+    assert duplicate.status_code == 409
+    assert duplicate.json()["code"] == "already_exists"
+    for response in (bad_id, empty_id, reserved, blank_name):
+        assert response.status_code == 400
+        assert response.json()["code"] == "invalid_argument"
+    # A rejected id leaves no project directory behind.
+    assert not (tmp_path / "projects" / "a" / "b").exists()
+    assert not (tmp_path / "projects" / "new").exists()
+    assert not (tmp_path / "projects" / "q").exists()
+
+
+async def test_create_project_enables_create_run(tmp_path: Path) -> None:
+    ctx = _ctx_with(tmp_path, _providers(_bootstrap("A claim"), NO_REASON))
+    async with _client_for(ctx) as client:
+        created = await _post(client, "CreateProject", {"id": "fresh", "name": "Fresh"})
+        assert created.status_code == 200
+        response = await _post(
+            client,
+            "CreateRun",
+            {
+                "projectId": "fresh",
+                "sourceType": "text",
+                "sourceText": "doc A",
+                "goal": "g",
+                "auto": True,
+            },
+        )
+        await ctx.scheduler.drain()
+
+    assert response.status_code == 200, response.text
+    assert response.json()["run"]["projectId"] == "fresh"
+
+
 async def test_list_runs_filters_by_project(tmp_path: Path) -> None:
     _write_run(tmp_path / "runs", "run_001", project_id="p")
     _write_run(tmp_path / "runs", "run_002", project_id="q")
@@ -777,6 +843,7 @@ async def test_pinned_run_is_read_only(tmp_path: Path) -> None:
             "SubmitHumanInput",
             {"runId": "demo", "gate": "confirm-claim", "decision": "approve"},
         )
+        new_project = await _post(client, "CreateProject", {"id": "x", "name": "X"})
 
     assert [run["id"] for run in runs.json()["runs"]] == ["demo"]
     assert detail.status_code == 200
@@ -790,6 +857,8 @@ async def test_pinned_run_is_read_only(tmp_path: Path) -> None:
     assert create.json()["code"] == "failed_precondition"
     assert hint.status_code == 400
     assert human.status_code == 400
+    assert new_project.status_code == 400
+    assert new_project.json()["code"] == "failed_precondition"
 
 
 async def test_pinned_run_uses_run_json_id(tmp_path: Path) -> None:
