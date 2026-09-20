@@ -209,6 +209,7 @@ export function Console() {
         intents={detail?.intents}
         hints={detail?.hints}
         waitingFor={detail?.waitingFor}
+        sessions={detail?.sessions}
         onDecision={
           live
             ? (decision, text) =>

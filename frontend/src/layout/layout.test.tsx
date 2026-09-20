@@ -94,6 +94,33 @@ describe('Inspector', () => {
     expect(screen.getByText('优先核对原始 benchmark')).toBeInTheDocument()
     expect(screen.getByLabelText('hint input')).toBeDisabled()
   })
+
+  it('shows the session of the selected intent with raw input, output and steps', () => {
+    render(
+      <Inspector
+        selection={{ type: 'intent', intent: detail.intents[1]! }}
+        sessions={detail.sessions}
+      />,
+    )
+    expect(screen.getByRole('heading', { name: '会话' })).toBeInTheDocument()
+    expect(screen.getByText('sess_003')).toBeInTheDocument()
+    expect(screen.getAllByText('原始输出').length).toBeGreaterThan(0)
+    expect(screen.getByText('{"facts": []}')).toBeInTheDocument()
+    // The step chain renders with its tool name.
+    expect(screen.getByText('tool-call')).toBeInTheDocument()
+    expect(screen.getByText('search')).toBeInTheDocument()
+  })
+
+  it('lists the task sessions that have no intent', () => {
+    render(<Inspector sessions={detail.sessions} />)
+    expect(screen.getByRole('heading', { name: '任务会话' })).toBeInTheDocument()
+    expect(screen.getByText('sess_001')).toBeInTheDocument()
+  })
+
+  it('omits the session section without sessions', () => {
+    render(<Inspector selection={{ type: 'intent', intent: detail.intents[1]! }} />)
+    expect(screen.queryByRole('heading', { name: '会话' })).not.toBeInTheDocument()
+  })
 })
 
 describe('RunList', () => {

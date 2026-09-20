@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
+import type { Settings } from '@/gen/originweave/v1/originweave_pb'
+
 import { client } from './client'
 
 // Read hooks over the Connect API. The frontend only consumes data (red line 1);
@@ -59,6 +61,24 @@ export function useAddHint(runId: string | undefined) {
       return client.addHint({ runId, text })
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['run', runId] }),
+  })
+}
+
+// Project settings ([worker] + [capability.model]). UpdateSettings treats the whole
+// worker block as authoritative, so callers must round-trip the loaded Settings (a
+// partial patch with empty scalars would be rejected by the server).
+export function useSettings() {
+  return useQuery({
+    queryKey: ['settings'],
+    queryFn: async () => (await client.getSettings({})).settings,
+  })
+}
+
+export function useUpdateSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (settings: Settings) => (await client.updateSettings({ settings })).settings,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
   })
 }
 

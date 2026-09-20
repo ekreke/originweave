@@ -7,8 +7,7 @@
 
 - **M2 · 偏差记分卡（已完成）**（进度真相见 `SPEC.md` M2；详情见「已完成（近期）」）：
   verify 派发 + compare pass + deviation 记分 + 严格 `COMPLETE` + `report.md` + Gate B。
-  **下一步**：**M1c-2b 前端接线（`SPEC.md` 2b-1–2b-5 已全部完成）**；其后 **M3**（容器化 runtime）、
-  **M5**（实体关系图）；M6 P5（前端 Settings/会话视图）待做。
+  **下一步**：**M3**（容器化 runtime）或 **M5**（实体关系图）；M6 仅剩 **P6 容器化（并入 M3）**。
 - **M6 · Pi Worker、可配置工具与会话**（用户新增；进度真相见 `SPEC.md` M6）。计划 P0–P6：
   - **P0 契约/文档（已完成）**、**P1 Worker 抽象 + 会话 + 事件（已完成）**：`capabilities/worker.py`、
     `Engine(worker=...)`、`[worker]` 配置、`SESSION`/`WORKER_STEP` 事件、run dir `sessions/`。
@@ -25,8 +24,10 @@
     工具、回调 server `Search` RPC（`ORIGINWEAVE_SERVER_URL`，默认 `http://127.0.0.1:8765`）；
     `PiWorker` 注入 `-e <ext>` + `--tools search` + server URL、暴露 `tools`；`explore` 检索归属改为
     **worker 拥有 `search` 工具时 agent 自主检索、引擎不预取**；并修 P2 agent-dir 环境变量名 bug。
-    **下一步 P5 前端 Settings + 会话视图**（`GetSettings`/`UpdateSettings`/`RunDetail.sessions` 已就绪）；
-    P6 容器化（并入 M3）。
+  - **P5 前端（已完成）**：Settings 页（`routes/Settings.tsx` + `settingsModel.ts`；`useSettings`/
+    `useUpdateSettings` 回传**全量 `[worker]` 块**，含 provider / LLM / budget / tools / heartbeat）、
+    INSPECTOR 会话视图（`SessionView`：原始输入/输出 + 步骤链；任务会话另列）、EVENTS 按 worker 过滤
+    （`tabs/{EventsTab.tsx,events.ts}`）。**下一步 P6 容器化（并入 M3）**。
   - 依赖：P1/P2 不依赖 server；P3–P5 依赖 **M1c-1**。
 - **M1 迭代切片**（引擎为库层、进程内 Dispatcher；`model`/`search` provider 已就绪）：
   已落地：**I1** Bootstrap、**I2a** `FAILED`/`STOPPED`、**I2** Reason、**I2b** Validate 去重、
@@ -207,6 +208,20 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M6 P5 · 前端 Settings + 会话视图 + EVENTS 过滤**：`routes/Settings.tsx`（分组表单：worker provider/
+  max_concurrency、LLM model/base_url（provider 与密钥只读）、budget、tools 多选、heartbeat）+
+  `routes/settingsModel.ts`（`Draft`/`toDraft`/`draftToMessage`/`validateDraft`，避免 effect 同步 state）；
+  `api/hooks.ts` 增 `useSettings`/`useUpdateSettings`（**全量 `Settings`**，server 的 `worker` 块为权威值）；
+  `layout/Inspector.tsx` 增 `SessionView`（原始输入/输出 + 步骤链；按 `intentId` 关联选中 Intent，任务会话
+  另列），`routes/Console.tsx` 传 `sessions`；`tabs/events.ts`（纯函数 `eventWorker`/`eventWorkers`/
+  `filterByWorker`）+ `tabs/EventsTab.tsx` worker 下拉过滤（**按 id 定位 Replay 游标**、跨 run 自动回落
+  `all`）；`test/fixtures.ts` 增 settings/session fixture；`routes/settingsModel.test.ts` 单测
+  `toDraft`/`draftToMessage`/`validateDraft`。测试：`api/hooks.test.ts`、`routes/routes.test.tsx`
+  （Settings 加载/**全量 worker 块**保存/校验失败/server 错误；Intent 会话）、`layout/layout.test.tsx`、
+  `tabs/{tabs,events}.test.*`（含 replay+过滤游标、跨 run 回落）。review 加固：修 `durationSeconds`
+  捕获组 bug（`interval<timeout` 客户端校验此前静默失效）、EVENTS 游标按 id、过滤态跨 run 回落、
+  `patch` 清错。前端 `typecheck`/`lint`/`format:check`/`test`(83)/`build` 全绿。无后端/proto 改动。
 
 - **M1c-2b 2b-5 · 端到端与冒烟**：`tests/test_server.py` 增 `test_end_to_end_create_run_to_scorecard`
   （fake provider：`CreateRun(auto=false)` → Gate A → `SubmitHumanInput approve` → Reason/Explore/verify

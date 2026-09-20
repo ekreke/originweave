@@ -9,14 +9,19 @@ import {
   useAddHint,
   useCreateRun,
   useRun,
+  useSettings,
   useSubmitHumanInput,
+  useUpdateSettings,
 } from '@/api/hooks'
+import { settings } from '@/test/fixtures'
 
 const mocks = vi.hoisted(() => ({
   addHint: vi.fn(),
   submitHumanInput: vi.fn(),
   createRun: vi.fn(),
   getRun: vi.fn(),
+  getSettings: vi.fn(),
+  updateSettings: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({ client: mocks }))
@@ -163,5 +168,38 @@ describe('useCreateRun', () => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['runs'] })
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['projects'] })
     })
+  })
+})
+
+describe('useSettings', () => {
+  beforeEach(() => {
+    mocks.getSettings.mockReset().mockResolvedValue({ settings: settings() })
+  })
+
+  it('loads the project settings', async () => {
+    const { result } = renderHook(() => useSettings(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(mocks.getSettings).toHaveBeenCalledWith({})
+    expect(result.current.data?.worker?.provider).toBe('pi')
+  })
+})
+
+describe('useUpdateSettings', () => {
+  beforeEach(() => {
+    mocks.updateSettings.mockReset().mockResolvedValue({ settings: settings() })
+  })
+
+  it('sends the whole settings message and refreshes the cache', async () => {
+    const { result } = renderHook(() => useUpdateSettings(), { wrapper })
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+
+    result.current.mutate(settings())
+
+    await waitFor(() => expect(mocks.updateSettings).toHaveBeenCalledTimes(1))
+    const request = mocks.updateSettings.mock.calls[0]![0] as {
+      settings: { worker?: { provider: string } }
+    }
+    expect(request.settings.worker?.provider).toBe('pi')
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['settings'] }))
   })
 })

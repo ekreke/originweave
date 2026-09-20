@@ -419,9 +419,11 @@ Worker 调用 = 一个**隔离会话**，历史以会话为单位保留**原始�
       暴露 `tools`；`explore` 检索归属：**worker 拥有 `search` 工具时由 agent 自主检索、引擎不预取**
       （否则维持引擎预取）；顺带修 P2 live bug（`resolve_agent_dir_env_name` 按二进制推导 agent-dir
       环境变量名）
-- [ ] P5 前端：Settings 页（worker provider（默认 pi）/ LLM（model、base_url；密钥仅占位提示）/
+- [x] P5 前端：Settings 页（worker provider（默认 pi）/ LLM（model、base_url；密钥仅占位提示）/
       budget（max_steps、max_wall、max_cost）/ 工具开关）+ INSPECTOR 会话视图（原始输入 + 原始输出 +
-      步骤链）+ EVENTS 按 worker 过滤
+      步骤链）+ EVENTS 按 worker 过滤 — `frontend/src/routes/Settings.tsx`（+ `settingsModel.ts`）、
+      `api/hooks.ts`（`useSettings`/`useUpdateSettings`，全量 worker 块）、`layout/Inspector.tsx`
+      （`SessionView`；任务会话另列）、`tabs/{EventsTab.tsx,events.ts}`（worker 过滤）、`routes/Console.tsx`
 - [ ] P6 容器化（并入 M3）：runtime 镜像内置 Node + `pi` + TS 扩展；会话 `cwd` 沙箱
 
 验收：`[worker].provider="pi"`（默认）时，一次 run 的每个节点产生隔离会话（`sessions/*.json` 含原始

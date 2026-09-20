@@ -1,4 +1,4 @@
-import { create } from '@bufbuild/protobuf'
+import { create, type JsonObject } from '@bufbuild/protobuf'
 
 import {
   BudgetSchema,
@@ -9,11 +9,17 @@ import {
   HintSchema,
   IntentCountsSchema,
   IntentSchema,
+  LlmSettingsSchema,
   ProjectSchema,
   RunDetailSchema,
   RunSchema,
+  SessionSchema,
+  SessionStepSchema,
+  SettingsSchema,
   StepsSchema,
   Vec2Schema,
+  WorkerBudgetSchema,
+  WorkerSettingsSchema,
   type Edge,
   type Event,
   type Evidence,
@@ -23,6 +29,11 @@ import {
   type Project,
   type Run,
   type RunDetail,
+  type Session,
+  type SessionStep,
+  type Settings,
+  type WorkerBudget,
+  type WorkerSettings,
 } from '@/gen/originweave/v1/originweave_pb'
 
 // Deterministic proto fixtures for the presentation layer. They stand in for the
@@ -152,6 +163,55 @@ export function project(overrides: Partial<Project> = {}): Project {
   })
 }
 
+export function workerBudget(overrides: Partial<WorkerBudget> = {}): WorkerBudget {
+  return create(WorkerBudgetSchema, { maxSteps: 60, maxWall: '10m', maxCost: 2, ...overrides })
+}
+
+export function workerSettings(overrides: Partial<WorkerSettings> = {}): WorkerSettings {
+  return create(WorkerSettingsSchema, {
+    llm: create(LlmSettingsSchema, {
+      provider: 'openai',
+      model: 'deepseek-v4.1-flash',
+      baseUrl: '',
+    }),
+    provider: 'pi',
+    maxConcurrency: 1,
+    tools: [],
+    heartbeatInterval: '15s',
+    heartbeatTimeout: '5m',
+    heartbeatOnTimeout: 'release',
+    budget: workerBudget(),
+    ...overrides,
+  })
+}
+
+export function settings(overrides: Partial<Settings> = {}): Settings {
+  return create(SettingsSchema, { worker: workerSettings(), ...overrides })
+}
+
+export function sessionStep(overrides: Partial<SessionStep> = {}): SessionStep {
+  return create(SessionStepSchema, { seq: 1, kind: 'turn-start', name: '', text: '', ...overrides })
+}
+
+export function session(overrides: Partial<Session> = {}): Session {
+  return create(SessionSchema, {
+    id: 'sess_001',
+    runId: 'run_009',
+    worker: 'worker-1',
+    task: 'Explore',
+    model: 'test-model',
+    input: { task: 'Explore' } satisfies JsonObject,
+    output: '{"facts": []}',
+    steps: [
+      sessionStep({ seq: 1, kind: 'turn-start' }),
+      sessionStep({ seq: 2, kind: 'tool-call', name: 'search', text: 'q', ok: true }),
+    ],
+    startedAt: '2026-09-19T00:00:00Z',
+    endedAt: '2026-09-19T00:00:01Z',
+    ...overrides,
+  })
+}
+
 // A representative provenance DAG: origin/goal anchors, a main claim with
 // evidence, a citation and source, a deviation, plus intents covering all status
 // variants and edges covering every relation type.
@@ -270,6 +330,17 @@ export function sampleRunDetail(): RunDetail {
     ],
     waitingFor: { gate: 'confirm-claim', question: '确认核心论点？' },
     hints: [hint({ id: 'h1', text: '优先核对原始 benchmark' })],
+    sessions: [
+      session({ id: 'sess_003', intentId: 'i2', task: 'Explore', worker: 'worker-1' }),
+      session({
+        id: 'sess_001',
+        task: 'Bootstrap',
+        worker: 'worker-2',
+        input: { task: 'Bootstrap' },
+        output: 'boot ok',
+        steps: [sessionStep({ seq: 1, kind: 'turn-start' })],
+      }),
+    ],
   })
 }
 

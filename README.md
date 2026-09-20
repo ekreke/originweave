@@ -12,7 +12,8 @@
 > **M6 P3（Settings/Search/Session）已落地**——`GetSettings`/`UpdateSettings`（写回 `originweave.toml`）、
 > `Search`（供 Pi TS 扩展回调）、`RunDetail.sessions`（读 `sessions/*.json`）。
 > **M6 P4** 的 Pi TS 搜索扩展已落地（`src/originweave/pi_extensions/search.ts`，回调 server `Search`；
-> 修了 agent-dir 环境变量名 bug）。
+> 修了 agent-dir 环境变量名 bug）。**M6 P5** 前端已落地——Settings 页（写回 `[worker]`）、INSPECTOR
+> 会话视图（原始输入/输出 + 步骤链）、EVENTS 按 worker 过滤。
 > 起 run 走 server / proto API（`CreateRun`，经 `source_text` 收资料 A），故 **CLI 无 `trace`**；
 > `mcp` 仍为占位。`frontend/` 已完成 **M1c-2b 2b-1–2b-5**（React Query 读真实数据、Inspector 选中 +
 > Hints、HITL Gate A/B + Replay 步进、新建核验表单 + 运行徽标；端到端冒烟见 `make smoke`）。

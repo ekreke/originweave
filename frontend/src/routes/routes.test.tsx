@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { RunDetailSchema } from '@/gen/originweave/v1/originweave_pb'
 import { App } from '@/App'
-import { sampleProjects, sampleRunDetail, sampleRuns } from '@/test/fixtures'
+import { sampleProjects, sampleRunDetail, sampleRuns, settings } from '@/test/fixtures'
 import { AppProviders } from '@/test/providers'
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   addHint: vi.fn(),
   submitHumanInput: vi.fn(),
   createRun: vi.fn(),
+  getSettings: vi.fn(),
+  updateSettings: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({ client: mocks }))
@@ -34,6 +36,8 @@ beforeEach(() => {
   mocks.addHint.mockReset().mockResolvedValue({ hint: undefined })
   mocks.submitHumanInput.mockReset().mockResolvedValue({ run: { id: 'run_009' } })
   mocks.createRun.mockReset().mockResolvedValue({ run: { id: 'run_009' } })
+  mocks.getSettings.mockReset().mockResolvedValue({ settings: settings() })
+  mocks.updateSettings.mockReset().mockResolvedValue({ settings: settings() })
 })
 
 describe('overview', () => {
@@ -122,6 +126,18 @@ describe('console', () => {
     const inspector = within(screen.getByLabelText('inspector'))
     expect(inspector.getByText('claimed by')).toBeInTheDocument()
     expect(inspector.getByText('worker-1')).toBeInTheDocument()
+  })
+
+  it('shows the selected intent session in the Inspector', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('Copilot 提升 55% 生产率')
+
+    fireEvent.click(screen.getByRole('tab', { name: 'INTENTS' }))
+    fireEvent.click(screen.getByText('55% 来自哪里？'))
+
+    const inspector = within(screen.getByLabelText('inspector'))
+    expect(inspector.getByText('sess_003')).toBeInTheDocument()
+    expect(inspector.getAllByText('原始输出').length).toBeGreaterThan(0)
   })
 
   it('submits a hint through AddHint', async () => {
@@ -277,6 +293,55 @@ describe('new run', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建并进入审阅台' }))
 
     expect(await screen.findByText('project not found')).toBeInTheDocument()
+  })
+})
+
+describe('settings', () => {
+  it('loads the settings and saves the whole worker block', async () => {
+    renderAt('/settings')
+    const model = await screen.findByLabelText('llm model')
+    expect(model).toHaveValue('deepseek-v4.1-flash')
+
+    fireEvent.change(model, { target: { value: 'gpt-x' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(mocks.updateSettings).toHaveBeenCalledTimes(1))
+    const request = mocks.updateSettings.mock.calls[0]![0] as {
+      settings: { worker?: Record<string, unknown> }
+    }
+    // The whole authoritative worker block round-trips (the server rejects omissions).
+    expect(request.settings.worker).toMatchObject({
+      provider: 'pi',
+      maxConcurrency: 1,
+      heartbeatInterval: '15s',
+      heartbeatTimeout: '5m',
+      heartbeatOnTimeout: 'release',
+      tools: [],
+      llm: { model: 'gpt-x' },
+      budget: { maxSteps: 60, maxWall: '10m', maxCost: 2 },
+    })
+    expect(await screen.findByText(/已保存/)).toBeInTheDocument()
+  })
+
+  it('blocks an invalid draft without calling the server', async () => {
+    renderAt('/settings')
+    const model = await screen.findByLabelText('llm model')
+    fireEvent.change(model, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('model 不能为空')).toBeInTheDocument()
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('shows the server error when the update is rejected', async () => {
+    mocks.updateSettings.mockRejectedValue(
+      new ConnectError('the single-run view is read-only', Code.FailedPrecondition),
+    )
+    renderAt('/settings')
+    await screen.findByLabelText('llm model')
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText(/read-only/)).toBeInTheDocument()
   })
 })
 

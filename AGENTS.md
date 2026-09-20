@@ -78,12 +78,14 @@
 - `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出、**勿手改**）：前端 TS 由
   `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，落到 `frontend/src/gen/`），
   server Python 由 `make proto`（根 `buf.gen.yaml`，落到 `src/originweave/v1` → `originweave.v1.*`）。
-- **前端（`frontend/`，M1b 脚手架 + M1c-2b 接线）**：React + Vite + TS + React Flow + Connect；
-  **2b-1 只读接线、2b-2 INSPECTOR 交互、2b-3 HITL/Replay 已落地**（`@tanstack/react-query`；
-  `api/{queryClient,hooks}.ts`；`Overview`/`Project`/`AppShell`/`Console` 读真实数据；图/表格选中 →
-  Inspector；Hints `AddHint`；Gate A/B → `SubmitHumanInput`；**Replay 走服务端折算**
-  `GetRun(at_event=k)`（复用 `reduce(events[:k])`，前端只步进/高亮）；`transport` 默认同源）；
-  **不接 mock**（fixture 仅测试用）。新建核验表单 + 顶栏归 **2b-4**、端到端与冒烟归 **2b-5**。
+- **前端（`frontend/`，M1b 脚手架 + M1c-2b 接线 + M6 P5）**：React + Vite + TS + React Flow + Connect；
+  **M1c-2b 2b-1–2b-5 全部落地**（`@tanstack/react-query`；`api/{queryClient,hooks}.ts`；
+  `Overview`/`Project`/`AppShell`/`Console` 读真实数据；图/表格选中 → Inspector；Hints `AddHint`；
+  Gate A/B → `SubmitHumanInput`；**Replay 走服务端折算** `GetRun(at_event=k)`（复用 `reduce(events[:k])`，
+  前端只步进/高亮）；新建核验表单 + 顶栏；`transport` 默认同源；`make smoke` 端到端冒烟）。
+  **M6 P5 已落地**：Settings 页（`routes/Settings.tsx` + `settingsModel.ts`；`useSettings`/`useUpdateSettings`
+  回传**全量 `[worker]` 块**）、INSPECTOR 会话视图（`SessionView`；原始输入/输出 + 步骤链）、EVENTS 按 worker
+  过滤（`tabs/events.ts`）。**不接 mock**（fixture 仅测试用）。
 - **M6（进行中，见 `SPEC.md` M6）**：把执行体抽为可插拔 **`Worker`**（`[worker].provider = local | pi`）；
   **P2 `PiWorker` 已落地**，经固定 `pi-py-sdk` 驱动官方 TS agent 运行时（运行时需 **Node + `pi` 二进制**，
   仅 CI 之外；**live 有配置目录环境变量名 bug，见「约定与坑」**）。
@@ -100,7 +102,8 @@
   `update_settings` 的 `worker` 块为权威值（含 `[capability.model]`），非法 → `INVALID_ARGUMENT`，pinned 拒绝；
   **P3b** `Search` RPC（只读，空 query/非法 `num_results` → `INVALID_ARGUMENT`，provider 失败 → `UNAVAILABLE`）；
   **P3c** `RunDetail.sessions`（读 `sessions/*.json`，原始输入/输出 + 步骤链）。
-  P1/P2 不依赖 server；P3–P5 依赖 M1c-1；P6 并入 M3。
+  **P5 前端已落地**（Settings 页 / INSPECTOR 会话视图 / EVENTS 按 worker 过滤，见前端一节）；
+  余 **P6 容器化（并入 M3）**。P1/P2 不依赖 server；P3–P5 依赖 M1c-1。
 
 ## 常用命令
 

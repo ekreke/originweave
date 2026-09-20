@@ -1,10 +1,10 @@
 import { useState } from 'react'
 
-import type { Fact, Hint, Intent, WaitingFor } from '@/gen/originweave/v1/originweave_pb'
+import type { Fact, Hint, Intent, Session, WaitingFor } from '@/gen/originweave/v1/originweave_pb'
 
-// Presentation-only inspector: node detail, verbatim evidence, intent/hint counts and
-// the HITL gate card. Gate decisions are surfaced via `onDecision` and hints via
-// `onAddHint`; submitting them over RPC is the console's job.
+// Presentation-only inspector: node detail, verbatim evidence, intent/hint counts, the
+// HITL gate card and the worker session view. Gate decisions are surfaced via
+// `onDecision` and hints via `onAddHint`; submitting them over RPC is the console's job.
 
 export type InspectorSelection = { type: 'fact'; fact: Fact } | { type: 'intent'; intent: Intent }
 
@@ -15,10 +15,55 @@ export interface InspectorProps {
   intents?: Intent[]
   hints?: Hint[]
   waitingFor?: WaitingFor
+  sessions?: Session[]
   onDecision?: (decision: GateDecision, text: string) => void
   decisionPending?: boolean
   decisionError?: string
   onAddHint?: (text: string) => void | Promise<void>
+}
+
+// One Worker call's history: raw input/output plus the step chain (M6). Collapsed by
+// default so a run with many sessions stays readable.
+function SessionView({ session }: { session: Session }) {
+  return (
+    <details className="session">
+      <summary>
+        <span className="mono session-id">{session.id}</span>
+        <span className="status-badge status-claimed">{session.task}</span>
+        <span className="mono session-worker">{session.worker}</span>
+      </summary>
+      <dl className="detail-grid">
+        <dt>model</dt>
+        <dd className="mono">{session.model}</dd>
+        {session.intentId ? (
+          <>
+            <dt>intent</dt>
+            <dd className="mono">{session.intentId}</dd>
+          </>
+        ) : null}
+        <dt>started</dt>
+        <dd className="mono">{session.startedAt}</dd>
+        <dt>ended</dt>
+        <dd className="mono">{session.endedAt}</dd>
+      </dl>
+      <h4>原始输入</h4>
+      <pre className="session-io">{JSON.stringify(session.input ?? {}, null, 2)}</pre>
+      <h4>原始输出</h4>
+      <pre className="session-io">{session.output}</pre>
+      <h4>步骤链</h4>
+      <ol className="session-steps">
+        {session.steps.map((step) => (
+          <li key={step.seq} className="session-step">
+            <span className="mono session-step-seq">{step.seq}</span>
+            <span className="mono session-step-kind">{step.kind}</span>
+            {step.name ? <span className="mono session-step-name">{step.name}</span> : null}
+            {step.ok === false ? <span className="gate-error">error</span> : null}
+            {step.text ? <span className="session-step-text">{step.text}</span> : null}
+          </li>
+        ))}
+      </ol>
+    </details>
+  )
 }
 
 // A non-blocking Hint input: submit reports the text upward and clears it only after
@@ -228,13 +273,21 @@ export function Inspector({
   intents,
   hints,
   waitingFor,
+  sessions,
   onDecision,
   decisionPending,
   decisionError,
   onAddHint,
 }: InspectorProps) {
   const counts = intents && intents.length > 0 ? countByStatus(intents) : null
-  const isEmpty = !waitingFor && !selection && !counts
+  const intentSessions =
+    selection?.type === 'intent'
+      ? (sessions ?? []).filter((session) => session.intentId === selection.intent.id)
+      : []
+  // Bootstrap/Reason/Validate sessions have no Intent; surface them separately.
+  const taskSessions = (sessions ?? []).filter((session) => !session.intentId)
+  const hasSessions = intentSessions.length > 0 || taskSessions.length > 0
+  const isEmpty = !waitingFor && !selection && !counts && !hasSessions
 
   return (
     <div className="col inspector" aria-label="inspector">
@@ -251,6 +304,24 @@ export function Inspector({
 
       {selection?.type === 'fact' ? <FactDetail fact={selection.fact} /> : null}
       {selection?.type === 'intent' ? <IntentDetail intent={selection.intent} /> : null}
+
+      {intentSessions.length > 0 ? (
+        <div className="sessions">
+          <h4>会话</h4>
+          {intentSessions.map((session) => (
+            <SessionView key={session.id} session={session} />
+          ))}
+        </div>
+      ) : null}
+
+      {taskSessions.length > 0 ? (
+        <div className="sessions">
+          <h4>任务会话</h4>
+          {taskSessions.map((session) => (
+            <SessionView key={session.id} session={session} />
+          ))}
+        </div>
+      ) : null}
 
       {counts ? (
         <div className="intent-counts">

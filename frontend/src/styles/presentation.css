@@ -570,3 +570,130 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Settings page (M6 P5): grouped fieldsets over the shared panel chrome. */
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+.settings-form fieldset {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+  border: 1px solid rgb(var(--c-line));
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.settings-form legend {
+  padding: 0 6px;
+  font-size: 11px;
+  color: rgb(var(--c-muted));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: rgb(var(--c-muted));
+}
+
+.settings-form input,
+.settings-form select {
+  padding: 5px 8px;
+  border: 1px solid rgb(var(--c-line));
+  border-radius: 3px;
+  background: rgb(var(--c-bg));
+  color: rgb(var(--c-fg));
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.settings-form input[readonly] {
+  opacity: 0.6;
+}
+
+.settings-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.settings-tool {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+  font-size: 12px;
+  color: rgb(var(--c-fg));
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Worker session view (M6 P5). */
+.sessions {
+  margin-top: 12px;
+}
+
+.session {
+  margin: 6px 0;
+  border: 1px solid rgb(var(--c-line));
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.session summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 11.5px;
+}
+
+.session-io {
+  margin: 4px 0;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  background: rgb(var(--c-bg));
+  border: 1px solid rgb(var(--c-line));
+  border-radius: 3px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.session-steps {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.session-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.session-step-text {
+  color: rgb(var(--c-muted));
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
