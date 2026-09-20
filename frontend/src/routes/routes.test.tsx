@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   listProjectRuns: vi.fn(),
   getRun: vi.fn(),
   addHint: vi.fn(),
+  submitHumanInput: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({ client: mocks }))
@@ -28,6 +29,7 @@ beforeEach(() => {
   mocks.listProjectRuns.mockReset().mockResolvedValue({ runs: sampleRuns() })
   mocks.getRun.mockReset().mockResolvedValue({ runDetail: sampleRunDetail() })
   mocks.addHint.mockReset().mockResolvedValue({ hint: undefined })
+  mocks.submitHumanInput.mockReset().mockResolvedValue({ run: { id: 'run_009' } })
 })
 
 describe('overview', () => {
@@ -128,5 +130,65 @@ describe('console', () => {
     await waitFor(() =>
       expect(mocks.addHint).toHaveBeenCalledWith({ runId: 'run_009', text: 'check it' }),
     )
+  })
+})
+
+describe('hitl gate', () => {
+  it('submits a decision with the pending gate', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('确认核心论点？')
+
+    fireEvent.click(screen.getByRole('button', { name: 'approve' }))
+
+    await waitFor(() =>
+      expect(mocks.submitHumanInput).toHaveBeenCalledWith({
+        runId: 'run_009',
+        gate: 'confirm-claim',
+        decision: 'approve',
+        text: '',
+        targets: [],
+      }),
+    )
+  })
+
+  it('shows an inline error when the decision is rejected', async () => {
+    mocks.submitHumanInput.mockRejectedValue(new Error('gate not supported'))
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('确认核心论点？')
+
+    fireEvent.click(screen.getByRole('button', { name: 'reject' }))
+
+    expect(await screen.findByText('gate not supported')).toBeInTheDocument()
+  })
+})
+
+describe('replay stepper', () => {
+  it('walks from live to the last step and back to live', async () => {
+    const { container } = renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('Copilot 提升 55% 生产率')
+
+    const forward = screen.getByRole('button', { name: 'replay forward' })
+    const label = () => container.querySelector('.replay-step')?.textContent
+
+    expect(label()).toBe('live')
+    fireEvent.click(forward)
+    expect(label()).toBe('1/4')
+    fireEvent.click(forward)
+    fireEvent.click(forward)
+    fireEvent.click(forward)
+    expect(label()).toBe('4/4')
+    fireEvent.click(forward)
+    expect(label()).toBe('live')
+  })
+
+  it('filters the graph to the visible nodes while replaying', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('Copilot 提升 55% 生产率')
+
+    // Step 0 (PROJECT) only seeds the anchors: the derived fact nodes are hidden.
+    fireEvent.click(screen.getByRole('button', { name: 'replay forward' }))
+
+    expect(screen.queryByTestId('fact-node-f1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('fact-node-origin')).toBeInTheDocument()
   })
 })

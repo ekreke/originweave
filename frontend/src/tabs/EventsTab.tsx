@@ -1,8 +1,9 @@
 import type { Event } from '@/gen/originweave/v1/originweave_pb'
 
-// Presentation-only event timeline, coloured by tone; the caller supplies the
-// events from the server.
-export function EventsTab({ events }: { events?: Event[] }) {
+// Presentation-only event timeline, coloured by tone; the caller supplies the events.
+// With a `step` (Replay) only events[0..step] are shown and the current one is
+// highlighted; `step` null/undefined is the live, full timeline.
+export function EventsTab({ events, step }: { events?: Event[]; step?: number | null }) {
   if (!events || events.length === 0) {
     return (
       <div>
@@ -15,15 +16,24 @@ export function EventsTab({ events }: { events?: Event[] }) {
     )
   }
 
+  const shown = step != null ? events.slice(0, step + 1) : events
+
   return (
     <div>
       <div className="panel-hd">
         <h2>EVENTS</h2>
-        <span className="cnt">{events.length}</span>
+        <span className="cnt">
+          {step != null ? `${shown.length}/${events.length}` : events.length}
+        </span>
       </div>
       <ol className="event-list">
-        {events.map((e) => (
-          <li key={e.id} className={`event-row tone-${e.tone}`}>
+        {shown.map((e, index) => (
+          <li
+            key={e.id}
+            className={`event-row tone-${e.tone}${
+              step != null && index === shown.length - 1 ? ' event-current' : ''
+            }`}
+          >
             <span className="mono event-id">{e.id}</span>
             <span className="mono event-type">{e.type}</span>
             <span className="event-msg">{e.message}</span>

@@ -42,4 +42,13 @@ describe('presentation tabs', () => {
     expect(screen.getByText('REQUEST_HUMAN')).toBeInTheDocument()
     expect(container.querySelector('.tone-danger')).not.toBeNull()
   })
+
+  it('truncates and highlights the current event while replaying', () => {
+    const { container } = render(<EventsTab events={detail.events} step={1} />)
+
+    const rows = container.querySelectorAll('.event-row')
+    expect(rows).toHaveLength(2)
+    expect(rows[1]).toHaveClass('event-current')
+    expect(screen.getByText(`2/${detail.events.length}`)).toBeInTheDocument()
+  })
 })

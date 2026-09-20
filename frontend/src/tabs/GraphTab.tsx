@@ -5,10 +5,12 @@ import { runDetailToGraph } from '@/graph/mapping'
 export function GraphTab({
   detail,
   onSelect,
+  visibleIds,
 }: {
   detail?: RunDetail
   onSelect?: (id: string | null) => void
+  visibleIds?: Set<string>
 }) {
-  const graph = detail ? runDetailToGraph(detail) : undefined
+  const graph = detail ? runDetailToGraph(detail, visibleIds) : undefined
   return <GraphCanvas nodes={graph?.nodes} edges={graph?.edges} onSelect={onSelect} />
 }

@@ -262,9 +262,13 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 
 ### 2b-3 · HITL UI 与 Replay
 
-- [ ] `awaiting_human` → Gate A（`confirm-claim`）/ Gate B（`arbitrate`）面板（approve/edit/reject）→
-      `submitHumanInput`；Gate C（`review`）随 M3 — `frontend/src/layout/Inspector.tsx`
-- [ ] Replay 步进：前端按 `events[]` 逐步回放 — `frontend/src/routes/Console.tsx`
+- [x] `awaiting_human` → Gate A（`confirm-claim`）/ Gate B（`arbitrate`）面板（approve/edit/reject）→
+      `submitHumanInput`；含修正说明输入、pending 禁用、失败行内报错；Gate C（`review`）随 M3 —
+      `frontend/src/layout/Inspector.tsx`（`GateCard`）、`frontend/src/api/hooks.ts`（`useSubmitHumanInput`）、
+      `frontend/src/routes/Console.tsx`
+- [x] Replay 步进：前端按 `events[]` 逐步回放（`firstSeenAt` 派生节点首现序号，过滤图节点/边 +
+      截断/高亮 EVENTS；不复刻 reducer；步进随 run 隔离）— `frontend/src/graph/replay.ts`、
+      `frontend/src/routes/Console.tsx`、`frontend/src/graph/mapping.ts`、`frontend/src/tabs/EventsTab.tsx`
 
 ### 2b-4 · 新建核验表单 + 顶栏
 

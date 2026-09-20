@@ -37,7 +37,32 @@ describe('Inspector', () => {
 
     rerender(<Inspector waitingFor={detail.waitingFor} onDecision={onDecision} />)
     fireEvent.click(screen.getByRole('button', { name: 'reject' }))
-    expect(onDecision).toHaveBeenCalledWith('reject')
+    expect(onDecision).toHaveBeenCalledWith('reject', '')
+  })
+
+  it('passes the gate note with the decision', () => {
+    const onDecision = vi.fn()
+    render(<Inspector waitingFor={detail.waitingFor} onDecision={onDecision} />)
+
+    fireEvent.change(screen.getByLabelText('gate note'), {
+      target: { value: 'use the 2022 study' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'edit' }))
+
+    expect(onDecision).toHaveBeenCalledWith('edit', 'use the 2022 study')
+  })
+
+  it('disables the gate buttons while pending and shows the error', () => {
+    const onDecision = vi.fn()
+    const { rerender } = render(
+      <Inspector waitingFor={detail.waitingFor} onDecision={onDecision} decisionPending />,
+    )
+    expect(screen.getByRole('button', { name: 'approve' })).toBeDisabled()
+
+    rerender(
+      <Inspector waitingFor={detail.waitingFor} onDecision={onDecision} decisionError="boom" />,
+    )
+    expect(screen.getByText('boom')).toBeInTheDocument()
   })
 
   it('submits a hint through the Hints input and clears it', async () => {

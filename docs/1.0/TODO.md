@@ -7,8 +7,8 @@
 
 - **M2 · 偏差记分卡（已完成）**（进度真相见 `SPEC.md` M2；详情见「已完成（近期）」）：
   verify 派发 + compare pass + deviation 记分 + 严格 `COMPLETE` + `report.md` + Gate B。
-  **下一步**：**M1c-2b** 前端接线（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 / 2b-2 已完成**，
-  下一步 **2b-3** HITL Gate + Replay）。其后 M3（容器化 runtime）；M6 P3（Settings/Search/Session proto）可并行规划。
+  **下一步**：**M1c-2b** 前端接线（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 / 2b-2 / 2b-3 已完成**，
+  下一步 **2b-4** 新建核验表单 + 顶栏）。其后 M3（容器化 runtime）；M6 P3（Settings/Search/Session proto）可并行规划。
 - **M6 · Pi Worker、可配置工具与会话**（用户新增；进度真相见 `SPEC.md` M6）。计划 P0–P6：
   - **P0 契约/文档（已完成）**、**P1 Worker 抽象 + 会话 + 事件（已完成）**：`capabilities/worker.py`、
     `Engine(worker=...)`、`[worker]` 配置、`SESSION`/`WORKER_STEP` 事件、run dir `sessions/`。
@@ -51,12 +51,12 @@
     （`index.html` 回退），lifespan 收尾 `scheduler.drain()`；`cli._cmd_ui` 起 uvicorn（`frontend/dist`
     存在即托管），`--run <dir>` 单 run 只读（`ServerContext.pinned_run`）。前端 `transport` 默认
     端口改 8765。Makefile/README/docs 同步。
-  - **下一步 M1c-2b**（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 / 2b-2 已完成**，下一步 **2b-3**）：
+  - **下一步 M1c-2b**（已拆为 `SPEC.md` 的 **2b-1–2b-5**；**2b-1 / 2b-2 / 2b-3 已完成**，下一步 **2b-4**）：
     **2b-1**（已完成）数据层 + 只读接线（`@tanstack/react-query`、`QueryClientProvider`、`api/hooks.ts`
     的 `useProjects`/`useProjectRuns`/`useRun`、`Overview`/`Project`/`AppShell`/`Console` 接真实数据 +
     `awaiting_human` 轮询、`transport` 默认同源）；**2b-2**（已完成）INSPECTOR 选中联动 + Hints
     （`useAddHint`；`Console.resolveSelection` 含 `origin`/`goal`；FACTS/INTENTS 行选中）；
-    **2b-3** HITL UI（Gate A/B → `submitHumanInput`）+ Replay 步进；**2b-4** 新建核验表单 + 顶栏；
+    **2b-3**（已完成）HITL UI（Gate A/B → `submitHumanInput`）+ Replay 步进；**2b-4** 新建核验表单 + 顶栏；
     **2b-5** 端到端 + 冒烟 + CI/文档。**M6 P3**（Settings/Search/Session proto + RPC）亦依赖 M1c-1，可并行规划。
   - 已定：proto 加 `source_text`（`url` 暂不支持）；目录式 projects；`CreateRun` 后台调度；统一端口 `8765`。
 - 随后：M1c-2（前端接线与 UI）。
@@ -193,6 +193,17 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M1c-2b 2b-3 · HITL UI + Replay 步进**：INSPECTOR 抽出 `GateCard`（修正说明输入 + pending 禁用 +
+  失败行内报错），`Console` 经 `useSubmitHumanInput`（`SubmitHumanInput` + invalidate `['run',runId]`）
+  提交 `{gate, decision, text}`；Gate A/B 通用渲染，Gate C 随 M3。Replay：`graph/replay.ts` 的
+  `firstSeenAt` 从 `events[]` 派生节点首现序号（不改 server、不复刻 reducer）；
+  `mapping.runDetailToGraph(detail, visibleIds)` 过滤图（锚点恒显、悬空边剔除），`EventsTab` 按 `step`
+  截断/高亮；Console 中栏 ◀/▶/live 控件，步进按 run 隔离。测试 `graph/replay.test.ts`（首现/可见集）、
+  `mapping.test.ts`（过滤 + 悬空边）、`tabs.test.tsx`（截断高亮）、`routes.test.tsx`（Gate 提交/错误、
+  replay 走位/过滤）、`hooks.test.ts`（`useSubmitHumanInput`）。前端
+  `typecheck`/`lint`/`format:check`/`test`(56)/`build` 全绿；`originweave ui` 冒烟（只读模式写 RPC 正确 400）。
+  经 subagent review（无 blocker；已修跨 run replay 泄漏 + 补过滤路径测试）。
 
 - **M1c-2b 2b-2 · INSPECTOR 交互（选中联动 + Hints）**：`Console` 加 `resolveSelection`（`origin`/`goal`
   锚点优先、`intents` 兜底、未命中 `null`）+ **带 runId 标记的选中态**（跨 run 自动失效，避免同 id 碰撞）；

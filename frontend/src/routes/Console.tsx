@@ -1,9 +1,10 @@
 import { Code, ConnectError } from '@connectrpc/connect'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
-import { useAddHint, useProjectRuns, useRun } from '@/api/hooks'
+import { useAddHint, useProjectRuns, useRun, useSubmitHumanInput } from '@/api/hooks'
 import type { Fact, Intent, RunDetail } from '@/gen/originweave/v1/originweave_pb'
+import { firstSeenAt, visibleIdsAt } from '@/graph/replay'
 import { Inspector, type InspectorSelection } from '@/layout/Inspector'
 import { RunList } from '@/layout/RunList'
 import { EventsTab } from '@/tabs/EventsTab'
@@ -53,10 +54,31 @@ export function Console() {
   const run = useRun(runId)
   const runs = useProjectRuns(projectId)
   const addHint = useAddHint(runId)
+  const submitGate = useSubmitHumanInput(runId)
   const detail = run.data
   const selectionId = selected.run === runId ? selected.id : null
   const selection = resolveSelection(detail, selectionId)
   const select = (id: string | null) => setSelected({ run: runId, id })
+
+  // Replay stepper: null means the live board; a number hides nodes/edges that had
+  // not appeared yet at that event step (see graph/replay.ts). Like `selected`, the
+  // step is tagged with its run so switching runs resets it instead of leaking a
+  // step from a longer run onto a shorter one.
+  const [replay, setReplay] = useState<{ run: string | undefined; step: number | null }>({
+    run: runId,
+    step: null,
+  })
+  const replayStep = replay.run === runId ? replay.step : null
+  const stepReplay = (next: number | null | ((current: number | null) => number | null)) => {
+    setReplay((current) => {
+      const base = current.run === runId ? current.step : null
+      return { run: runId, step: typeof next === 'function' ? next(base) : next }
+    })
+  }
+  const events = useMemo(() => detail?.events ?? [], [detail])
+  const maxStep = events.length - 1
+  const seen = useMemo(() => firstSeenAt(events), [events])
+  const visible = replayStep === null ? undefined : visibleIdsAt(seen, replayStep)
 
   const notFound = run.error instanceof ConnectError && run.error.code === Code.NotFound
 
@@ -85,13 +107,13 @@ export function Console() {
   function renderTab() {
     switch (tab) {
       case 'GRAPH':
-        return <GraphTab detail={detail} onSelect={select} />
+        return <GraphTab detail={detail} onSelect={select} visibleIds={visible} />
       case 'FACTS':
         return <FactsTab facts={detail?.facts} onSelect={select} selectedId={selectionId} />
       case 'INTENTS':
         return <IntentsTab intents={detail?.intents} onSelect={select} selectedId={selectionId} />
       case 'EVENTS':
-        return <EventsTab events={detail?.events} />
+        return <EventsTab events={detail?.events} step={replayStep} />
     }
   }
 
@@ -116,8 +138,55 @@ export function Console() {
           ))}
         </div>
         <div className="center-body">
-          <div className="cnt mono" style={{ padding: '6px 12px' }}>
-            run: {runId ?? '—'} · {status}
+          <div className="run-head">
+            <div className="cnt mono" style={{ padding: '6px 12px' }}>
+              run: {runId ?? '—'} · {status}
+            </div>
+            <div className="replay" role="group" aria-label="replay">
+              <button
+                className="btn"
+                type="button"
+                aria-label="replay back"
+                disabled={events.length === 0}
+                onClick={() =>
+                  stepReplay((current) => {
+                    if (events.length === 0) return current
+                    if (current === null) return maxStep
+                    return Math.max(0, current - 1)
+                  })
+                }
+              >
+                ◀
+              </button>
+              <span className="mono replay-step">
+                {replayStep === null ? 'live' : `${replayStep + 1}/${events.length}`}
+              </span>
+              <button
+                className="btn"
+                type="button"
+                aria-label="replay forward"
+                disabled={events.length === 0}
+                onClick={() =>
+                  stepReplay((current) => {
+                    if (events.length === 0) return current
+                    if (current === null) return 0
+                    const next = current + 1
+                    return next > maxStep ? null : next
+                  })
+                }
+              >
+                ▶
+              </button>
+              <button
+                className="btn"
+                type="button"
+                aria-label="replay live"
+                disabled={replayStep === null}
+                onClick={() => stepReplay(null)}
+              >
+                live
+              </button>
+            </div>
           </div>
           {renderTab()}
         </div>
@@ -127,6 +196,17 @@ export function Console() {
         intents={detail?.intents}
         hints={detail?.hints}
         waitingFor={detail?.waitingFor}
+        onDecision={(decision, text) =>
+          submitGate.mutate({ gate: detail?.waitingFor?.gate ?? '', decision, text })
+        }
+        decisionPending={submitGate.isPending}
+        decisionError={
+          submitGate.error
+            ? submitGate.error instanceof Error
+              ? submitGate.error.message
+              : String(submitGate.error)
+            : undefined
+        }
         onAddHint={(text) => addHint.mutateAsync(text).then(() => undefined)}
       />
     </div>

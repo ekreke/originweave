@@ -469,3 +469,42 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* ------------------------------------------------------------- gate + replay */
+
+.gate-note {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.gate-error {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: rgb(var(--c-danger));
+}
+
+.run-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-right: 8px;
+}
+
+.replay {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.replay-step {
+  min-width: 56px;
+  text-align: center;
+  font-size: 11px;
+  color: rgb(var(--c-muted));
+}
+
+.event-current {
+  outline: 1px solid rgb(var(--c-accent));
+  outline-offset: -1px;
+}

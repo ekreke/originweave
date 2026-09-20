@@ -71,4 +71,26 @@ describe('runDetailToGraph', () => {
     const b = runDetailToGraph(sampleRunDetail())
     expect(a).toEqual(b)
   })
+
+  it('hides nodes and drops dangling edges when given visibleIds', () => {
+    const graph = runDetailToGraph(sampleRunDetail(), new Set(['origin', 'goal', 'f1']))
+
+    const ids = graph.nodes.map((n) => n.id)
+    expect(ids).toContain('origin')
+    expect(ids).toContain('goal')
+    expect(ids).toContain('f1')
+    expect(ids).not.toContain('c1')
+    expect(ids).not.toContain('i1')
+    // No rendered edge points at a hidden node.
+    for (const edge of graph.edges) {
+      expect(ids).toContain(edge.source)
+      expect(ids).toContain(edge.target)
+    }
+  })
+
+  it('always keeps the anchors, even for an empty visible set', () => {
+    const graph = runDetailToGraph(sampleRunDetail(), new Set())
+    expect(graph.nodes.map((n) => n.id)).toEqual(['origin', 'goal'])
+    expect(graph.edges).toEqual([])
+  })
 })

@@ -3,9 +3,14 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { AWAITING_POLL_MS, awaitingPollInterval, useAddHint } from '@/api/hooks'
+import {
+  AWAITING_POLL_MS,
+  awaitingPollInterval,
+  useAddHint,
+  useSubmitHumanInput,
+} from '@/api/hooks'
 
-const mocks = vi.hoisted(() => ({ addHint: vi.fn() }))
+const mocks = vi.hoisted(() => ({ addHint: vi.fn(), submitHumanInput: vi.fn() }))
 
 vi.mock('@/api/client', () => ({ client: mocks }))
 
@@ -46,6 +51,37 @@ describe('useAddHint', () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
 
     result.current.mutate('check it')
+
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['run', 'run_001'] }))
+  })
+})
+
+describe('useSubmitHumanInput', () => {
+  beforeEach(() => {
+    mocks.submitHumanInput.mockReset().mockResolvedValue({ run: { id: 'run_001' } })
+  })
+
+  it('submits the gate, decision and note with the run id', async () => {
+    const { result } = renderHook(() => useSubmitHumanInput('run_001'), { wrapper })
+
+    result.current.mutate({ gate: 'confirm-claim', decision: 'edit', text: 'revise' })
+
+    await waitFor(() =>
+      expect(mocks.submitHumanInput).toHaveBeenCalledWith({
+        runId: 'run_001',
+        gate: 'confirm-claim',
+        decision: 'edit',
+        text: 'revise',
+        targets: [],
+      }),
+    )
+  })
+
+  it('refetches the run after resolving a gate', async () => {
+    const { result } = renderHook(() => useSubmitHumanInput('run_001'), { wrapper })
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+
+    result.current.mutate({ gate: 'arbitrate', decision: 'approve' })
 
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['run', 'run_001'] }))
   })

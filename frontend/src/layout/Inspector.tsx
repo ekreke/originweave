@@ -15,7 +15,9 @@ export interface InspectorProps {
   intents?: Intent[]
   hints?: Hint[]
   waitingFor?: WaitingFor
-  onDecision?: (decision: GateDecision) => void
+  onDecision?: (decision: GateDecision, text: string) => void
+  decisionPending?: boolean
+  decisionError?: string
   onAddHint?: (text: string) => void | Promise<void>
 }
 
@@ -90,6 +92,52 @@ function HintsPanel({
         </button>
       </div>
       {error ? <p className="hint-error">{error}</p> : null}
+    </div>
+  )
+}
+
+// Gate A/B card: approve/edit/reject plus an optional correction note (used by
+// `edit`). The gate id is rendered as-is so Gate C works unchanged once M3 enables it.
+function GateCard({
+  waitingFor,
+  onDecision,
+  pending,
+  error,
+}: {
+  waitingFor: WaitingFor
+  onDecision?: (decision: GateDecision, text: string) => void
+  pending?: boolean
+  error?: string
+}) {
+  const [note, setNote] = useState('')
+  return (
+    <div className="gate-card">
+      <div className="gate-hd">
+        <span className="status-badge status-awaiting_human">{waitingFor.gate}</span>
+      </div>
+      <p>{waitingFor.question}</p>
+      <input
+        className="btn gate-note"
+        aria-label="gate note"
+        placeholder="修正说明（edit 时使用）"
+        value={note}
+        disabled={!onDecision || pending}
+        onChange={(event) => setNote(event.target.value)}
+      />
+      <div className="gate-actions">
+        {(['approve', 'edit', 'reject'] as const).map((decision) => (
+          <button
+            key={decision}
+            type="button"
+            className="btn"
+            disabled={!onDecision || pending}
+            onClick={() => onDecision?.(decision, note.trim())}
+          >
+            {decision}
+          </button>
+        ))}
+      </div>
+      {error ? <p className="gate-error">{error}</p> : null}
     </div>
   )
 }
@@ -181,6 +229,8 @@ export function Inspector({
   hints,
   waitingFor,
   onDecision,
+  decisionPending,
+  decisionError,
   onAddHint,
 }: InspectorProps) {
   const counts = intents && intents.length > 0 ? countByStatus(intents) : null
@@ -191,25 +241,12 @@ export function Inspector({
       <h3>INSPECTOR</h3>
 
       {waitingFor ? (
-        <div className="gate-card">
-          <div className="gate-hd">
-            <span className="status-badge status-awaiting_human">{waitingFor.gate}</span>
-          </div>
-          <p>{waitingFor.question}</p>
-          <div className="gate-actions">
-            {(['approve', 'edit', 'reject'] as const).map((d) => (
-              <button
-                key={d}
-                type="button"
-                className="btn"
-                disabled={!onDecision}
-                onClick={() => onDecision?.(d)}
-              >
-                {d}
-              </button>
-            ))}
-          </div>
-        </div>
+        <GateCard
+          waitingFor={waitingFor}
+          onDecision={onDecision}
+          pending={decisionPending}
+          error={decisionError}
+        />
       ) : null}
 
       {selection?.type === 'fact' ? <FactDetail fact={selection.fact} /> : null}

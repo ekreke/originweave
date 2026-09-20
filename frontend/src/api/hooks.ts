@@ -38,13 +38,39 @@ export function useRun(runId: string | undefined) {
 }
 
 // Writing a Hint is non-blocking (the server appends a HINT event and the run keeps
-// going). Refetch the run so the new hint shows up in the Inspector right away.
+// going). Refetch the run so the new hint appears in the Inspector right away.
 export function useAddHint(runId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (text: string) => {
       if (!runId) throw new Error('cannot add a hint without a run id')
       return client.addHint({ runId, text })
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['run', runId] }),
+  })
+}
+
+export interface GateSubmission {
+  gate: string
+  decision: string
+  text?: string
+  targets?: string[]
+}
+
+// Resolving a HITL gate (Gate A/B): the server writes HUMAN_INPUT and resumes (or
+// stops) the run. Refetch so `awaiting_human` clears once the server accepts it.
+export function useSubmitHumanInput(runId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (submission: GateSubmission) => {
+      if (!runId) throw new Error('cannot submit a gate decision without a run id')
+      return client.submitHumanInput({
+        runId,
+        gate: submission.gate,
+        decision: submission.decision,
+        text: submission.text ?? '',
+        targets: submission.targets ?? [],
+      })
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['run', runId] }),
   })
