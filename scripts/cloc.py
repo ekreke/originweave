@@ -11,7 +11,7 @@ import sys
 import tokenize
 from pathlib import Path
 
-SKIP_DIRS = {"tests", "fixtures", "generated", "vendor", "__pycache__"}
+SKIP_DIRS = {"tests", "fixtures", "generated", "vendor", "v1", "gen", "__pycache__"}
 
 
 def _python_counts(path: Path) -> tuple[int, int, int]:

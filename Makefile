@@ -2,6 +2,8 @@ SHELL := /bin/bash
 
 UV ?= uv
 PKG ?= src/originweave
+# Paths counted by `make cloc` (hand-written code; generated v1/gen excluded below).
+CLOC_PATHS ?= src/originweave frontend/src
 # RUN_DIR is the committed sample fixture read by replay/ui.
 # RUNS_DIR is where the server writes runtime runs (gitignored), never the sample.
 RUN_DIR ?= examples/copilot_productivity
@@ -84,13 +86,13 @@ ui: install ## Serve the read-only run view
 replay: install ## Replay a run directory offline (deterministic, no network)
 	$(UV) run originweave replay $(RUN_DIR)
 
-cloc: ## Count logical lines under src/originweave (excludes tests/fixtures/generated/vendor)
+cloc: ## Count logical lines under src/originweave + frontend/src (excludes tests/fixtures/generated/vendor)
 	@if command -v tokei >/dev/null 2>&1; then \
-		tokei $(PKG) --exclude tests --exclude fixtures --exclude generated --exclude vendor; \
+		tokei $(CLOC_PATHS) --exclude tests --exclude fixtures --exclude generated --exclude vendor --exclude v1 --exclude gen; \
 	elif command -v cloc >/dev/null 2>&1; then \
-		cloc $(PKG) --exclude-dir=tests,fixtures,generated,vendor; \
+		cloc $(CLOC_PATHS) --exclude-dir=tests,fixtures,generated,vendor,v1,gen; \
 	else \
-		$(UV) run python scripts/cloc.py $(PKG); \
+		$(UV) run python scripts/cloc.py $(CLOC_PATHS); \
 	fi
 
 clean: ## Remove caches and temporary runs
