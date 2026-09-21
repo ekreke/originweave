@@ -77,6 +77,22 @@ describe('project', () => {
     expect(screen.getByTestId('run-card-run_009')).toHaveClass('run-card-alert')
   })
 
+  it('filters the runs by status from the header select', async () => {
+    renderAt('/projects/copilot-productivity')
+    expect(await screen.findByTestId('run-card-run_009')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('按状态过滤'), { target: { value: 'completed' } })
+
+    expect(screen.getByTestId('run-card-run_008')).toBeInTheDocument()
+    expect(screen.queryByTestId('run-card-run_009')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('run-card-run_007')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('按状态过滤'), { target: { value: '' } })
+
+    expect(screen.getByTestId('run-card-run_009')).toBeInTheDocument()
+    expect(screen.getByTestId('run-card-run_007')).toBeInTheDocument()
+  })
+
   it('opens the run console from a run card', async () => {
     const { container } = renderAt('/projects/copilot-productivity')
     fireEvent.click(await screen.findByRole('link', { name: '已完成核验' }))

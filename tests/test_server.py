@@ -141,11 +141,17 @@ async def _create_run(client: httpx.AsyncClient, *, auto: bool | None = None) ->
     return response.json()["run"]
 
 
-def _write_run(runs_dir: Path, run_id: str, *, project_id: str, complete: bool = True) -> None:
+def _write_run(
+    runs_dir: Path,
+    run_id: str,
+    *,
+    project_id: str,
+    complete: bool = True,
+    at: str = "2026-01-01T00:00:0{}",
+) -> None:
     store = RunStore(runs_dir / run_id)
     store.init_layout()
     store.write_run_meta({"id": run_id, "project_id": project_id, "title": "T", "goal": "g"})
-    at = "2026-01-01T00:00:0{}"
     store.append_event("PROJECT", {"origin": _ORIGIN, "goal": _GOAL}, at=at.format(0))
     store.append_event(
         "INTENT",
@@ -680,9 +686,22 @@ async def test_list_runs_filters_by_project(tmp_path: Path) -> None:
         filtered = await _post(client, "ListRuns", {"projectId": "p"})
         project_runs = await _post(client, "ListProjectRuns", {"projectId": "q"})
 
-    assert [run["id"] for run in all_runs.json()["runs"]] == ["run_001", "run_002"]
+    # Equal created_at: the run_id-descending tie-break decides.
+    assert [run["id"] for run in all_runs.json()["runs"]] == ["run_002", "run_001"]
     assert [run["id"] for run in filtered.json()["runs"]] == ["run_001"]
     assert [run["id"] for run in project_runs.json()["runs"]] == ["run_002"]
+
+
+async def test_list_runs_orders_by_created_at_desc(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p", at="2026-03-01T00:00:0{}")
+    _write_run(tmp_path / "runs", "run_002", project_id="p", at="2026-01-01T00:00:0{}")
+    _write_run(tmp_path / "runs", "run_003", project_id="p", at="2026-02-01T00:00:0{}")
+
+    async with _client(tmp_path) as client:
+        response = await _post(client, "ListProjectRuns", {"projectId": "p"})
+
+    # Newest first regardless of run_id order (dashboard.md §4.1).
+    assert [run["id"] for run in response.json()["runs"]] == ["run_001", "run_003", "run_002"]
 
 
 # --------------------------------------------------------------- C3b: CreateRun

@@ -119,6 +119,8 @@ boundary 灰、compare 青、deviation 红）；`Intent` 为**状态色迷你卡
 | `UpdateSettings` | `UpdateSettingsRequest{settings}` | `UpdateSettingsResponse{settings}` | 校验后写回项目 `originweave.toml` 并应用（未知 provider/tool 报错；**M6 P3**） |
 | `Search` | `SearchRequest{query, num_results?}` | `SearchResponse{text}` | 经 `[capability.search]` 执行检索；供 Pi 的 TS 搜索扩展回调（**M6 P3，消费于 P4**） |
 
+`ListProjectRuns` / `ListRuns` 返回的 run 列表按创建时间**倒序**（`created_at` 降序，`run_id` 降序作平局裁决），最新 run 排最前。
+
 错误沿用 Connect 的统一错误模型（`code` + `message`）。
 
 ### 4.2 RunDetail

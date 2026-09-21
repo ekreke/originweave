@@ -673,6 +673,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             if project_id is not None and run.project_id != project_id:
                 continue
             runs.append(run)
+        # Newest first (dashboard.md §4); run_id desc breaks ties so the order is
+        # deterministic even when timestamps collide.
+        runs.sort(key=lambda run: (run.created_at, run.id), reverse=True)
         return runs
 
     def _read_store(self, run_id: str) -> RunStore:

@@ -821,12 +821,38 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* The title truncates; actions must keep their natural width ("重试" never wraps). */
+  flex-shrink: 0;
 }
 
 .run-retry {
   padding: 2px 7px;
   font-size: 10.5px;
   text-decoration: none;
+  white-space: nowrap;
+}
+
+/* Project page header: status filter select beside the "新建核验" link. */
+.run-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.run-filter {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  padding: 3px 6px;
+  color: rgb(var(--c-ink));
+  background: rgb(var(--c-panel));
+  border: 1px solid rgb(var(--c-hairline));
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.run-filter:focus-visible {
+  border-color: rgb(var(--c-accent));
+  outline: none;
 }
 
 /* Dense graph workspace: keep navigation on the edges and the evidence field quiet. */
