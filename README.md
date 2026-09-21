@@ -55,7 +55,7 @@ make frontend-e2e        # Playwright 浏览器 e2e（构建真实 dist + fake-p
 | `dev` | 起**可写** server（`originweave ui --port 8765`，服务 cwd 下 `runs/` + `projects/`）；先在 UI 建项目再建 run。 |
 | `demo` | 端到端跑样例（server + 前端）。**归 M4，尚未接线。** |
 | `fixtures` | 重新生成样例的 `events.jsonl`（确定性、产物入库）。 |
-| `proto` | 由 `proto/` 生成 server Python 代码（需 `buf` + `protoc-gen-connect-python`；M1c-1）。 |
+| `proto` | 由 `proto/` 生成 server Python 代码（需 `buf` + `protoc` + `protoc-gen-connect-python`；M1c-1）。 |
 | `frontend-install` / `frontend-gen` / `frontend-dev` / `frontend-build` / `frontend-lint` / `frontend-typecheck` / `frontend-test` | 前端（`frontend/`，M1b）：安装 / proto 生成 / dev / 构建 / lint / tsc / vitest。 |
 | `frontend-e2e` | 浏览器端到端（`@playwright/test`）：构建真实 `frontend/dist` + 启动 fake-provider server（`scripts/e2e_server.py`），跑 `frontend/e2e/`。 |
 | `test` | `pytest`。 |

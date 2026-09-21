@@ -3,9 +3,12 @@
 # TypeScript for the frontend is generated separately by frontend/buf.gen.yaml
 # (`pnpm --dir frontend gen`).
 #
-# Toolchain (M1c; install once):
-#   python                     -> protoc/buf builtin (no extra binary)
-#   protoc-gen-connect-python  -> Connect Python plugin
+# Toolchain (install once):
+#   protoc                     -> REQUIRED: `protoc_builtin: python` shells out to the
+#                                 real `protoc` (buf does not bundle per-language code
+#                                 generators). macOS: `brew install protobuf`;
+#                                 Debian/Ubuntu: `apt-get install protobuf-compiler`.
+#   protoc-gen-connect-python  -> Connect Python plugin (from the dev deps)
 #
 # Run from the repo root:
 #   make proto            # buf generate proto with .venv/bin on PATH

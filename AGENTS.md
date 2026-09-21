@@ -38,7 +38,7 @@
    `run(auto=True)` 跳过。**I6 收敛已落地**：`_continue` 多轮 Reason→dispatch，仅在产生新 Fact 时再
   Reason，至 `COMPLETE`／死胡同（保持 `running`）；`Engine(max_rounds=10)` 为安全阀。
   **server（M1c-1）C1–C4 已落地**：**C1** codegen + Connect app 骨架——`make proto`
-  （需 buf + `protoc-gen-connect-python`）生成 `src/originweave/v1`（`originweave.v1.*`，不入库，
+  （需 buf + **`protoc`** + `protoc-gen-connect-python`）生成 `src/originweave/v1`（`originweave.v1.*`，不入库，
   ruff/mypy exclude）；`server/app.py` 的 `create_app` 挂载 Connect ASGI app，`ListProjects` 空表、
   其余 `UNIMPLEMENTED`。**C2** 持久化已落地——`persistence.py`（`Run`/`Project`/`summarize_run`/
   `allocate_run_id`/`ProjectRegistry`），`run.json`（静态元数据）+ `projects/<id>/project.json`，
@@ -130,7 +130,7 @@ make install                # uv sync
 make test                   # pytest（addopts=-q）
 make lint                   # ruff check src tests scripts + mypy src（mypy strict，只查 src）
 make fmt                    # ruff format src tests scripts
-make proto                  # buf generate proto -> src/originweave/v1（M1c-1；需 buf + protoc-gen-connect-python）
+make proto                  # buf generate proto -> src/originweave/v1（M1c-1；需 buf + protoc + protoc-gen-connect-python）
 make image                  # 烤 runtime 容器镜像（M3a；需 Docker）；[worker].execution=container 时每次调用起一个
 make smoke                  # 端到端冒烟（进程内 fake worker → CreateRun/Gate/记分卡）
 make dev                    # 起可写 server（cwd 下 runs/ + projects/；UI 里建项目/run）

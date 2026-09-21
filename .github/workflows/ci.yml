@@ -29,6 +29,11 @@ jobs:
         with:
           version: "1.70.0"
 
+      # buf.gen.yaml uses `protoc_builtin: python`, which shells out to the real
+      # `protoc` binary (buf does not bundle per-language code generators).
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Generate Python proto/Connect code
         run: make proto
 
@@ -108,6 +113,7 @@ jobs:
 
       - name: Install Python deps and generate Connect code
         run: |
+          sudo apt-get update && sudo apt-get install -y protobuf-compiler
           uv sync --frozen || uv sync
           make proto
 

@@ -42,7 +42,10 @@ image: proto ## Build the runtime container image (M3a; requires Docker)
 fixtures: ## Regenerate the committed sample fixtures (events.jsonl)
 	$(UV) run python scripts/build_sample_fixtures.py
 
-proto: install ## Generate Python from proto/ (server; M1c. Requires buf + protoc-gen-connect-python)
+proto: install ## Generate Python from proto/ (server; M1c. Requires buf + protoc + protoc-gen-connect-python)
+	@command -v protoc >/dev/null 2>&1 || { \
+		echo "protoc not found; install protobuf (macOS: brew install protobuf; Debian/Ubuntu: apt-get install protobuf-compiler)"; \
+		exit 1; }
 	PATH="$(CURDIR)/.venv/bin:$$PATH" buf generate proto
 
 frontend-install: ## pnpm install in frontend/
