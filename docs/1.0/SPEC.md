@@ -332,8 +332,13 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 - [ ] 容器池（后续优化）：`[worker].max_concurrency` 预热 N 个容器、调用时复用（先 per-call 起/销毁）
 - [x] server 侧容器生命周期管理（创建/监控/回收）与 Dispatcher 接入（协议唯一写入者）— **M3a**：
       `ContainerWorker` 每次起/销毁容器（`docker run/rm`）+ `GET /health` 就绪轮询；Engine 仍为唯一写入者
-- [ ] 预算执行：`max_steps` / `max_wall` / `max_cost` 触顶即停并落盘中间态
-- [ ] 可控性：随时停止/恢复，状态完整保留；Intent 心跳超时释放
+- [x] 预算执行：`max_steps` / `max_wall` / `max_cost` 触顶即停并落盘中间态 — **M3b**：`engine.py`
+      （`_budget_exceeded` / `_stop_for_budget`，轮次边界检查 → `STOPPED{reason:"budget exceeded",budget}`）、
+      `pricing.py`（models.dev 定价）、usage 链路（`ModelResult`/`WorkerReply.usage`/SESSION payload）；
+      事件日志即中间态（append-only，可 replay 到 STOPPED）
+- [x] 可控性：随时停止/恢复，状态完整保留；Intent 心跳超时释放 — **M3b**：`PAUSED`/`RESUMED` 事件 +
+      `PauseRun`/`ResumeRun` RPC（`engine.request_pause`/`resume_from_pause`，轮次边界挂起，计数器从黑板重建）；
+      心跳释放 I4 已落地
 - [ ] 异步 Hint 注入（`author=human|agent`）不阻塞 run
 - [ ] **Gate C（最终审阅）**：记分卡产出前人工确认，可要求重查（新生 Intent）
 - [ ] `prompt` provider `langfuse` 真实接入（`local` 已于 M1 可用）

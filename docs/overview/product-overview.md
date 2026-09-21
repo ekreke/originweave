@@ -191,14 +191,15 @@ Report {
 ```text
 Event {
   id, at, type,           # type: PROJECT | INTENT | EXECUTE | CONCLUDE | REASON |
-  message, tone,          #       COMPLETE | HEARTBEAT | RELEASE | HINT |
+  message, tone,          #       COMPLETE | HEARTBEAT | RELEASE | HINT | PAUSED | RESUMED |
   payload                 #       REQUEST_HUMAN | HUMAN_INPUT | FAILED | STOPPED |
 }                          #       VALIDATE | SESSION | WORKER_STEP | ENTITY | RELATION
                            # tone: info | success | warning | danger
 ```
 事件类型（黑板协议）：`PROJECT` / `INTENT` / `EXECUTE` / `CONCLUDE` / `REASON` /
 `COMPLETE` / `HEARTBEAT` / `RELEASE` / `HINT` / `REQUEST_HUMAN` / `HUMAN_INPUT` /
-`FAILED` / `STOPPED` / `VALIDATE` / `SESSION` / `WORKER_STEP` / `ENTITY` / `RELATION`。
+`FAILED` / `STOPPED` / `PAUSED` / `RESUMED` / `VALIDATE` / `SESSION` / `WORKER_STEP` /
+`ENTITY` / `RELATION`。
 `type` 决定事件种类，`payload` 携带该种类的结构化字段（逐事件字段表见
 [`blackboard-protocol.md`](blackboard-protocol.md) 第 5 节）；`message` / `tone` 仅用于展示。
 

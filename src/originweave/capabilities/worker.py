@@ -21,7 +21,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from ..blackboard import Board
 from .base import PromptTemplate
-from .model import ChatMessage, ModelProvider
+from .model import ChatMessage, ModelProvider, Usage
 
 # The directive issued to a worker for one turn. This is a different axis from
 # blackboard.IntentType (decompose/explore/verify): an "Explore" task executes one
@@ -68,11 +68,16 @@ class WorkerStep:
 
 @dataclass
 class WorkerReply:
-    """A worker's reply: raw text plus the raw input and steps for the session."""
+    """A worker's reply: raw text plus the raw input and steps for the session.
+
+    ``usage`` carries token counts when the provider reports them (M3b; the Pi runtime
+    does not surface usage yet, so it stays ``None`` there).
+    """
 
     text: str
     input: dict[str, Any] = field(default_factory=dict)
     steps: list[WorkerStep] = field(default_factory=list)
+    usage: Usage | None = None
 
 
 @runtime_checkable
@@ -159,9 +164,12 @@ class LocalWorker:
     ) -> WorkerReply:
         messages = render_messages(task, template, board, extra=extra)
         text = await self._model.complete(messages)
+        # ModelResult (a str subclass) may carry usage; plain-str providers do not.
+        usage = getattr(text, "usage", None)
         return WorkerReply(
             text=text,
             input={"system": messages[0].content, "user": messages[1].content},
+            usage=usage if isinstance(usage, Usage) else None,
         )
 
 

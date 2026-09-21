@@ -202,6 +202,13 @@ def reduce(events: Iterable[Event]) -> Board:
             _require_string(payload, "reason")
             status = "stopped"
             waiting = None
+        elif event.type == "PAUSED":
+            # Recoverable pause (M3b): RESUMED brings the run back to running.
+            status = "paused"
+            waiting = None
+        elif event.type == "RESUMED":
+            status = "running"
+            waiting = None
         # REASON carries no derivable state in M0c.
 
     if origin is None or goal is None:

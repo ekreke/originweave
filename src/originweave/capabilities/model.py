@@ -28,6 +28,32 @@ class ChatMessage:
     content: str
 
 
+@dataclass(frozen=True)
+class Usage:
+    """Token usage reported by an OpenAI-compatible endpoint (M3b)."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class ModelResult(str):
+    """The assistant text, optionally carrying token ``usage`` (M3b).
+
+    A ``str`` subclass so ``ModelProvider.complete`` keeps its ``-> str`` contract --
+    plain-string test fakes stay valid -- while attaching usage to the *value*. This is
+    concurrency-safe: I4 runs several Worker passes against one shared provider, so
+    usage must not live on the provider instance.
+    """
+
+    usage: Usage | None
+
+    def __new__(cls, text: str, *, usage: Usage | None = None) -> ModelResult:
+        result = super().__new__(cls, text)
+        result.usage = usage
+        return result
+
+
 @runtime_checkable
 class ModelProvider(Protocol):
     name: str
@@ -35,6 +61,20 @@ class ModelProvider(Protocol):
     async def complete(self, messages: Sequence[ChatMessage]) -> str:
         """Return the assistant's raw text for ``messages``."""
         ...
+
+
+def _extract_usage(payload: object) -> Usage | None:
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get("usage")
+    if not isinstance(raw, dict):
+        return None
+    prompt = raw.get("prompt_tokens")
+    completion = raw.get("completion_tokens")
+    total = raw.get("total_tokens")
+    if not (isinstance(prompt, int) and isinstance(completion, int) and isinstance(total, int)):
+        return None
+    return Usage(prompt_tokens=prompt, completion_tokens=completion, total_tokens=total)
 
 
 def _extract_content(payload: object) -> str | None:
@@ -113,7 +153,7 @@ class OpenAIModel:
         content = _extract_content(payload)
         if content is None:
             raise ProviderError(f"{self.name} returned no assistant content")
-        return content
+        return ModelResult(content, usage=_extract_usage(payload))
 
 
 __all__ = [
@@ -121,6 +161,8 @@ __all__ = [
     "ChatMessage",
     "ENV_VAR",
     "ModelProvider",
+    "ModelResult",
     "OpenAIModel",
     "TIMEOUT_SECONDS",
+    "Usage",
 ]

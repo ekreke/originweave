@@ -361,7 +361,9 @@ run 的全部状态由 append-only 事件派生。事件取代此前的领域事
 | `REQUEST_HUMAN` | 关键节点请求人工介入，run → `awaiting_human` | `gate`, `question` |
 | `HUMAN_INPUT` | 人类输入 | `gate`, `decision`, `text?`, `targets?`, `author=human` |
 | `FAILED` | 执行异常终止，run → `failed` | `reason` |
-| `STOPPED` | 预算触顶或人工终止，run → `stopped` | `reason`, `budget?` |
+| `STOPPED` | 预算触顶或人工终止，run → `stopped`（终态） | `reason`, `budget?`（`{steps, wall_seconds, cost, limits}`） |
+| `PAUSED` | 可恢复暂停（`PauseRun`），run → `paused` | `reason?` |
+| `RESUMED` | 从 `paused` 恢复（`ResumeRun`），run → `running` | — |
 | `VALIDATE` | Validate 判重任务开始/结束 | `phase`(start\|end), `candidates`, `kept?`, `dropped?`, `drops[]?`（`{index, duplicateOf, reason}`）|
 | `SESSION` | 一次 Worker 调用的会话元数据（索引，指向会话快照） | `sessionId`, `task`, `worker`, `intentId?`, `ref`（run dir 相对路径） |
 | `WORKER_STEP` | 会话内的执行步骤（turn/tool 级；文本截断） | `sessionId`, `worker`, `intentId?`, `seq`, `kind`(turn-start\|tool-call\|tool-result\|message\|turn-end), `name?`, `text?`, `ok?` |
@@ -382,8 +384,8 @@ Event {
   at,
   type,      # PROJECT | INTENT | EXECUTE | CONCLUDE | REASON | COMPLETE |
              # HEARTBEAT | RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT |
-             # FAILED | STOPPED | VALIDATE | SESSION | WORKER_STEP |
-             # ENTITY | RELATION
+             # FAILED | STOPPED | PAUSED | RESUMED | VALIDATE | SESSION |
+             # WORKER_STEP | ENTITY | RELATION
   message,   # 人类可读摘要（UI 时间线）
   tone,      # info | success | warning | danger
   payload    # 与 type 对应的结构化字段，见上表
@@ -436,8 +438,9 @@ Worker A 写入新 Fact  →  图变化（环境更新）  →  Worker B 下一�
 
 - **随时停止/恢复**：run 状态完整保留，可从任意事件点恢复。
 - **终止态落盘**：异常终止写 `FAILED`（→ `status=failed`），预算触顶/人工终止写 `STOPPED`
-  （→ `status=stopped`）；两者都是事件，`replay` 可复现到终止点。`paused`（可恢复）尚无事件，
-  随 M3 可控性引入。
+  （→ `status=stopped`）；两者都是事件，`replay` 可复现到终止点。**`PAUSED`/`RESUMED`（M3b）**：
+  `PauseRun` 在轮次边界写 `PAUSED`（→ `status=paused`，可恢复），`ResumeRun` 写 `RESUMED` 续跑；
+  `paused` 状态下计数器从黑板重建，可在新 `Engine` 上恢复。
 - **Intent 心跳与超时（I4）**：执行中引擎按 `[worker].heartbeat_interval` 写 `HEARTBEAT`；
   超过 `[worker].heartbeat_timeout` 判定 Worker 失活，不再永久占住 Intent：`heartbeat_on_timeout=release`
   写 `RELEASE` 把 Intent 退回 `open`（后续轮次若因新 Fact 触发 Reason 才会重派；完整重试/调度归 M3），

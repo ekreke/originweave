@@ -67,6 +67,7 @@ def create_app(
     """
     scheduler = None
     managed_service = None
+    pricing = None
     if service is None:
         context = ServerContext.build(
             config=config, providers=providers, root=root, run_dir=run_dir
@@ -74,10 +75,15 @@ def create_app(
         service = Service(context)
         scheduler = context.scheduler
         managed_service = service
+        pricing = context.pricing
 
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         try:
+            # Load model pricing (models.dev) once so budget max_cost can trip (M3b).
+            # Best-effort: a failure logs and leaves the table empty.
+            if pricing is not None:
+                await pricing.refresh()
             yield
         finally:
             # Shared Pi leases must be failed and reclaimed before waiting for other

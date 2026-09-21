@@ -1684,3 +1684,28 @@ async def test_end_to_end_create_run_to_scorecard(tmp_path: Path) -> None:
     assert detail["report"]["verdict"] == "\u90e8\u5206\u504f\u5dee"
     assert detail["deviations"][0]["severity"] == "high"
     assert (tmp_path / "runs" / run_id / "report.md").is_file()
+
+
+async def test_pause_and_resume_run(tmp_path: Path) -> None:
+    """M3b: PauseRun stops a running run at a boundary; ResumeRun continues it."""
+    providers = Providers(
+        worker=LocalWorker(model=_SlowModel(0.2, _bootstrap("A claim"), NO_REASON, NO_REASON)),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+    )
+    ctx = _ctx_with(tmp_path, providers)
+    async with _client_for(ctx) as client:
+        run = await _create_run(client, auto=True)
+        run_id = str(run["id"])
+
+        paused = await _post(client, "PauseRun", {"runId": run_id})
+        assert paused.status_code == 200, paused.text
+        assert paused.json()["run"]["status"] == "paused"
+
+        resumed = await _post(client, "ResumeRun", {"runId": run_id})
+        assert resumed.status_code == 200, resumed.text
+        assert resumed.json()["run"]["status"] == "running"
+        await ctx.scheduler.drain()
+
+    types = [event.type for event in RunStore(tmp_path / "runs" / run_id).read_events()]
+    assert "PAUSED" in types and "RESUMED" in types

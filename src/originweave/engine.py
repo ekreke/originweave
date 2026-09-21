@@ -18,12 +18,16 @@ import contextlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from .blackboard import BlackboardError, Board, Edge, Evidence, Fact, Intent
 from .capabilities.base import CapabilityError, PromptProvider, PromptTemplate, SearchProvider
+from .capabilities.model import Usage
 from .capabilities.worker import TaskKind, Worker, WorkerReply
+from .config import BudgetConfig, parse_duration
 from .events import Event, now_iso
+from .pricing import PricingTable
 from .reduce import reduce
 from .report import SEVERITY_STATUS, ReportError, derive_report, parse_severity, render_report
 from .store import RunStore
@@ -58,6 +62,24 @@ DISPATCHABLE_TYPES: tuple[str, ...] = ("explore", "decompose", "verify")
 # What an "explore" Intent may produce (blackboard-protocol.md section 2.2): it chases
 # citations/sources. "decompose" yields sub-claims, checked separately via Fact.role.
 _EXPLORE_FACT_KINDS: frozenset[str] = frozenset({"citation", "source"})
+
+
+def _elapsed_seconds(start: str, end: str) -> float:
+    """Seconds between two ISO timestamps (0.0 when either cannot be parsed).
+
+    Timestamps may be tz-aware (``now_iso``) or naive (some fixtures); normalise before
+    subtracting so a mixed pair never raises.
+    """
+    try:
+        first = datetime.fromisoformat(start)
+        last = datetime.fromisoformat(end)
+        if first.tzinfo is None and last.tzinfo is not None:
+            first = first.replace(tzinfo=last.tzinfo)
+        elif last.tzinfo is None and first.tzinfo is not None:
+            last = last.replace(tzinfo=first.tzinfo)
+        return max(0.0, (last - first).total_seconds())
+    except (ValueError, TypeError):
+        return 0.0
 
 # What a "verify" Intent must produce (M2): exactly one compare node plus 0..N deviations.
 _COMPARE_KIND = "compare"
@@ -439,6 +461,8 @@ class Engine:
         heartbeat_on_timeout: str = "release",
         auto: bool = False,
         max_rounds: int = 10,
+        budget: BudgetConfig | None = None,
+        pricing: PricingTable | None = None,
     ) -> None:
         if max_concurrency <= 0:
             raise ValueError(f"max_concurrency must be > 0, got {max_concurrency}")
@@ -471,6 +495,16 @@ class Engine:
         self._auto = auto
         # Safety valve on the Stigmergy loop (I6); see ``_continue``.
         self._max_rounds = max_rounds
+        # Budget enforcement (M3b): steps/wall/cost are checked at round boundaries.
+        self._budget = budget
+        self._max_wall_seconds = (
+            parse_duration(budget.max_wall, "worker.budget.max_wall") if budget is not None else 0.0
+        )
+        self._pricing = pricing
+        self._tokens_used = 0
+        self._cost_used = 0.0
+        # Pause request (M3b): an RPC sets it; the loop honours it at a round boundary.
+        self._pause_requested = asyncio.Event()
         self._fact_seq: dict[str, int] = {}
         self._intent_seq = 0
         self._session_seq = 0
@@ -507,7 +541,29 @@ class Engine:
         started = now_iso()
         reply = await self._worker.run(task, template, board, extra=extra)
         ended = now_iso()
+        self._accumulate_usage(reply)
         return reply, started, ended, session_id
+
+    def _usage_cost(self, usage: Usage | None) -> tuple[int, float]:
+        """Return ``(tokens, cost)`` for one reply (cost is 0 without a known price)."""
+        if usage is None:
+            return 0, 0.0
+        if self._pricing is None:
+            return usage.total_tokens, 0.0
+        price = self._pricing.lookup(self._worker_model)
+        if price is None:
+            return usage.total_tokens, 0.0
+        cost = (
+            usage.prompt_tokens * price.input_per_1m
+            + usage.completion_tokens * price.output_per_1m
+        ) / 1_000_000
+        return usage.total_tokens, cost
+
+    def _accumulate_usage(self, reply: WorkerReply) -> None:
+        """Add one reply's token usage (and derived cost) to the run totals (M3b)."""
+        tokens, cost = self._usage_cost(reply.usage)
+        self._tokens_used += tokens
+        self._cost_used += cost
 
     def _next_session_id(self) -> str:
         self._session_seq += 1
@@ -548,11 +604,16 @@ class Engine:
         if intent_id is not None:
             session["intentId"] = intent_id
         self._store.write_session(session_id, session)
+        tokens, cost = self._usage_cost(reply.usage)
         session_event: dict[str, Any] = {
             "sessionId": session_id,
             "task": task,
             "worker": worker,
             "ref": f"sessions/{session_id}.json",
+            # Per-call budget counters (M3b); the reducer ignores SESSION, so the board
+            # is unaffected, and summarize_run sums these into Run.budget.
+            "tokens": tokens,
+            "cost": round(cost, 6),
         }
         if intent_id is not None:
             session_event["intentId"] = intent_id
@@ -677,12 +738,64 @@ class Engine:
             return reduce(self._store.read_events())
         return await self._continue()
 
+    async def resume_from_pause(self) -> Board:
+        """Continue a run paused via ``PAUSED`` (M3b).
+
+        Writes ``RESUMED`` then re-enters the Stigmergy loop. Counters are rebuilt from
+        the board, so this works on a fresh ``Engine`` over the same run directory.
+        """
+        events = self._store.read_events()
+        board = reduce(events)
+        if board.status != "paused":
+            raise EngineError("run is not paused")
+        self._restore_counters(board, events)
+        self._pause_requested.clear()  # otherwise the loop would pause again immediately
+        self._store.append_event("RESUMED", {}, message="resumed")
+        return await self._continue()
+
     async def fail_runtime(self, reason: str) -> Board:
         """Record a server-owned runtime shutdown through the Engine write path."""
         board = reduce(self._store.read_events())
         if board.status not in {"completed", "failed", "stopped"}:
             self._store.append_event("FAILED", {"reason": reason})
         return reduce(self._store.read_events())
+
+    def request_pause(self) -> None:
+        """Ask the running loop to pause at the next round boundary (M3b)."""
+        self._pause_requested.set()
+
+    def _budget_exceeded(self, board: Board) -> dict[str, Any] | None:
+        """Budget-breach details for a ``STOPPED`` event, or ``None`` when within budget."""
+        if self._budget is None:
+            return None
+        events = self._store.read_events()
+        started_at = events[0].at if events else ""
+        elapsed = _elapsed_seconds(started_at, now_iso())
+        steps = self._session_seq
+        cost = round(self._cost_used, 6)
+        if not (
+            steps >= self._budget.max_steps
+            or elapsed >= self._max_wall_seconds
+            or cost >= self._budget.max_cost
+        ):
+            return None
+        return {
+            "steps": steps,
+            "wall_seconds": round(elapsed, 3),
+            "cost": cost,
+            "limits": {
+                "max_steps": self._budget.max_steps,
+                "max_wall": self._budget.max_wall,
+                "max_cost": self._budget.max_cost,
+            },
+        }
+
+    def _stop_for_budget(self, info: dict[str, Any]) -> None:
+        self._store.append_event(
+            "STOPPED",
+            {"reason": "budget exceeded", "budget": info},
+            message="budget exceeded",
+        )
 
     def _restore_counters(self, board: Board, events: Sequence[Event]) -> None:
         """Rebuild the deterministic id counters from an existing run (I5 resume).
@@ -708,6 +821,21 @@ class Engine:
             ),
             default=0,
         )
+        # Rebuild the budget counters too (M3b): a resume runs on a fresh Engine, so
+        # without this the cost/token totals — and thus max_cost — would reset to zero.
+        tokens = 0
+        cost = 0.0
+        for event in events:
+            if event.type != "SESSION":
+                continue
+            raw_tokens = event.payload.get("tokens")
+            if isinstance(raw_tokens, int):
+                tokens += raw_tokens
+            raw_cost = event.payload.get("cost")
+            if isinstance(raw_cost, (int, float)):
+                cost += float(raw_cost)
+        self._tokens_used = tokens
+        self._cost_used = cost
 
     async def _continue(self) -> Board:
         """Run the Stigmergy loop: Reason, dispatch, then Reason again on new facts (I6).
@@ -722,6 +850,17 @@ class Engine:
         rounds = 0
         while True:
             before = reduce(self._store.read_events())
+            # M3b: honour a pause request and the budget at this round boundary, before
+            # starting any new work (never mid-Worker-call).
+            if self._pause_requested.is_set():
+                self._store.append_event(
+                    "PAUSED", {"reason": "paused by request"}, message="paused"
+                )
+                return reduce(self._store.read_events())
+            breach = self._budget_exceeded(before)
+            if breach is not None:
+                self._stop_for_budget(breach)
+                return reduce(self._store.read_events())
             # ``reasoned`` starts empty on entry (including resume). Gate A precedes the
             # loop, so the first pass legitimately triggers on every fact on the board.
             new_facts = [fact.id for fact in before.facts if fact.id not in reasoned]

@@ -115,6 +115,8 @@ boundary 灰、compare 青、deviation 红）；`Intent` 为**状态色迷你卡
 | `CreateRun` | `CreateRunRequest` | `CreateRunResponse{run}` | 新建 run（**起一次核验的唯一入口**） |
 | `AddHint` | `AddHintRequest{run_id, text}` | `AddHintResponse{hint}` | 写一条 Hint（`author=human`，非阻塞） |
 | `SubmitHumanInput` | `SubmitHumanInputRequest` | `SubmitHumanInputResponse{run}` | 提交 Gate 决策，解除 `awaiting_human` |
+| `PauseRun` | `PauseRunRequest{run_id}` | `PauseRunResponse{run}` | 暂停运行中的 run（轮次边界，→ `paused`，可恢复；**M3b**） |
+| `ResumeRun` | `ResumeRunRequest{run_id}` | `ResumeRunResponse{run}` | 恢复 `paused` 的 run（**M3b**） |
 | `GetSettings` | `GetSettingsRequest{}` | `GetSettingsResponse{settings}` | 读项目设置（`[worker]` + `[capability.model]`；**M6 P3**） |
 | `UpdateSettings` | `UpdateSettingsRequest{settings}` | `UpdateSettingsResponse{settings}` | 校验后写回项目 `originweave.toml` 并应用（未知 provider/tool 报错；**M6 P3**） |
 | `Search` | `SearchRequest{query, num_results?}` | `SearchResponse{text}` | 经 `[capability.search]` 执行检索；供 Pi 的 TS 搜索扩展回调（**M6 P3，消费于 P4**） |

@@ -25,6 +25,7 @@ from typing import Any
 import httpx
 
 from ..capabilities.base import CapabilityError, PromptTemplate
+from ..capabilities.model import Usage
 from ..capabilities.worker import TaskKind, WorkerReply, WorkerStep, board_payload
 
 # Container-side HTTP port; the host port is assigned by Docker and read back.
@@ -61,6 +62,18 @@ async def _run_command(argv: list[str], *, check: bool = True) -> str:
         detail = stderr.decode(errors="replace").strip() or stdout.decode(errors="replace").strip()
         raise ContainerError(f"{argv[0]} failed (exit {process.returncode}): {detail}")
     return stdout.decode(errors="replace")
+
+
+def _parse_usage(value: object) -> Usage | None:
+    """Parse the runner's ``usage`` field into a :class:`Usage` (M3b; ``None`` if absent)."""
+    if not isinstance(value, dict):
+        return None
+    prompt = value.get("prompt_tokens")
+    completion = value.get("completion_tokens")
+    total = value.get("total_tokens")
+    if not (isinstance(prompt, int) and isinstance(completion, int) and isinstance(total, int)):
+        return None
+    return Usage(prompt_tokens=prompt, completion_tokens=completion, total_tokens=total)
 
 
 def _first_host_port(port_output: str) -> str:
@@ -222,6 +235,7 @@ class ContainerWorker:
                 text=str(data.get("text", "")),
                 input=dict(data.get("input") or {}),
                 steps=steps,
+                usage=_parse_usage(data.get("usage")),
             )
         except (AttributeError, TypeError, ValueError) as exc:
             raise ContainerError(f"worker container returned a malformed reply: {exc}") from exc

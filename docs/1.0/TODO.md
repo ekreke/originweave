@@ -7,7 +7,7 @@
 
 - **M2 · 偏差记分卡（已完成）**（进度真相见 `SPEC.md` M2；详情见「已完成（近期）」）：
   verify 派发 + compare pass + deviation 记分 + 严格 `COMPLETE` + `report.md` + Gate B。
-  **下一步**：**M3** 进行中（**M3a 容器化 runtime 已完成**；待做 **M3b** 预算执行 + 可控性 →
+  **下一步**：**M3** 进行中（**M3a / M3b 已完成**；待做 **M3c** 异步 Hint + Gate C →
   **M3c** 异步 Hint + Gate C → **M3d** langfuse + capabilities + mcp → **M3e** 集成测试）；其后 **M5**。
 - **M5 · 实体/组织关系图（进行中）**（进度真相见 `SPEC.md` M5）。已拆为 **M5a–M5e**：
   **M5a（已完成）** 领域/事件/reducer；**下一步 M5b** 引擎 `extract`/`relate`（`Engine(analysis)`、
@@ -222,6 +222,15 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M3b · 预算执行 + 可控性**：**usage 链路**（`ModelResult`(str 子类) 携带 `Usage`；`WorkerReply.usage`；
+  `runtime/{container,runner}` 透传；`engine._accumulate_usage` 累计）。**定价**（`pricing.py`：models.dev
+  `api.json`，每进程拉取一次、失败降级为 0；`ServerContext.pricing`）。**预算执行**（`engine._budget_exceeded`
+  在轮次边界查 `max_steps`/`max_wall`/`max_cost`，触顶写 `STOPPED{reason:"budget exceeded",budget}`；
+  `SESSION` payload 记 `tokens`/`cost`，`summarize_run` 派生 `Run.budget`）。**可控性**（`PAUSED`/`RESUMED`
+  事件 + `PauseRun`/`ResumeRun` RPC；`engine.request_pause`/`resume_from_pause`；`RunScheduler` 持有运行中
+  engine）。文档同步 `blackboard-protocol §5/§8`、`product-overview`、`dashboard §4`、proto `Event.type`。
+  测试 `tests/test_budget.py` + server pause/resume。`make lint`/`test`/`smoke` 全绿。
 
 - **前端 · 图数据拆分 + 图渲染重构**：proto 新增 **`GetRunGraph`/`GetFactDetail`/`ListEvents`/
   `ListSessions`** 与 `RunGraph`/`FactSummary`（`dashboard.md §4.1/§4.2a`）——控制台轮询轻量图投影

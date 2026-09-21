@@ -28,7 +28,9 @@ from ..capabilities import (
 )
 from ..capabilities.model import BASE_URL_ENV_VAR, ENV_VAR
 from ..config import Config
+from ..engine import Engine
 from ..persistence import ProjectRegistry
+from ..pricing import PricingTable
 from ..runtime import ContainerManager, ContainerWorker, RunContainerWorker
 from ..runtime.container import ENV_BASE_URL, ENV_MODEL, ENV_PROVIDER, ENV_TOOLS
 from ..store import RunStore
@@ -78,6 +80,7 @@ class RunScheduler:
     runs_dir: Path
     _stores: dict[str, RunStore] = field(default_factory=dict, init=False)
     _tasks: dict[str, asyncio.Task[Board]] = field(default_factory=dict, init=False)
+    _engines: dict[str, Engine] = field(default_factory=dict, init=False)
 
     def store_for(self, run_id: str) -> RunStore:
         """Return the cached store for ``run_id`` (created on first use)."""
@@ -87,13 +90,36 @@ class RunScheduler:
             self._stores[run_id] = store
         return store
 
-    def start(self, run_id: str, coro: Awaitable[Board]) -> asyncio.Task[Board]:
-        """Schedule ``coro`` as a background task, tracked per run."""
+    def start(
+        self, run_id: str, coro: Awaitable[Board], *, engine: Engine | None = None
+    ) -> asyncio.Task[Board]:
+        """Schedule ``coro`` as a background task, tracked per run.
+
+        ``engine`` is kept so a ``PauseRun`` RPC can ask the running loop to pause at its
+        next round boundary (M3b).
+        """
         task = asyncio.ensure_future(coro)
         task.set_name(f"run:{run_id}")
         self._tasks[run_id] = task
+        if engine is not None:
+            self._engines[run_id] = engine
         task.add_done_callback(self._on_done)
         return task
+
+    def request_pause(self, run_id: str) -> bool:
+        """Ask a running engine to pause; ``False`` when no run is active."""
+        engine = self._engines.get(run_id)
+        if engine is None:
+            return False
+        engine.request_pause()
+        return True
+
+    def register_engine(self, run_id: str, engine: Engine) -> None:
+        """Track an engine whose loop runs inline (SubmitHumanInput resume) for pause."""
+        self._engines[run_id] = engine
+
+    def unregister_engine(self, run_id: str) -> None:
+        self._engines.pop(run_id, None)
 
     def _on_done(self, task: asyncio.Task[Board]) -> None:
         # Drop the finished task (and its store) so long-lived servers do not grow
@@ -101,6 +127,7 @@ class RunScheduler:
         run_id = task.get_name().removeprefix("run:")
         self._tasks.pop(run_id, None)
         self._stores.pop(run_id, None)
+        self._engines.pop(run_id, None)
         # Retrieve the exception so asyncio never warns about an unretrieved one; the
         # engine reports failures on the board (FAILED), so this is a defensive log.
         if task.cancelled():
@@ -143,6 +170,8 @@ class ServerContext:
     providers_factory: Callable[[Config], Providers] = build_providers
     # Runtime container manager (M3a); built when [worker].execution == "container".
     container_manager: ContainerManager | None = None
+    # Model pricing from models.dev (M3b); refreshed best-effort at startup.
+    pricing: PricingTable = field(default_factory=PricingTable)
     # Run-scoped Pi workers retain their lease across a human Gate. They are keyed by
     # resolved run directory so a fresh Engine used by SubmitHumanInput finds the same
     # container rather than starting another one.

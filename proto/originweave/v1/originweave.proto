@@ -256,6 +256,7 @@ message Event {
   string at = 2;
   // PROJECT | INTENT | EXECUTE | CONCLUDE | REASON | COMPLETE | HEARTBEAT |
   // RELEASE | HINT | REQUEST_HUMAN | HUMAN_INPUT | FAILED | STOPPED |
+  // PAUSED | RESUMED |
   // VALIDATE | SESSION | WORKER_STEP | ENTITY | RELATION
   string type = 3;
   string message = 4;
@@ -376,6 +377,8 @@ service OriginweaveService {
   rpc CreateRun(CreateRunRequest) returns (CreateRunResponse);
   rpc AddHint(AddHintRequest) returns (AddHintResponse);
   rpc SubmitHumanInput(SubmitHumanInputRequest) returns (SubmitHumanInputResponse);
+  rpc PauseRun(PauseRunRequest) returns (PauseRunResponse);
+  rpc ResumeRun(ResumeRunRequest) returns (ResumeRunResponse);
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
   rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
   rpc Search(SearchRequest) returns (SearchResponse);
@@ -471,6 +474,22 @@ message SubmitHumanInputRequest {
 }
 
 message SubmitHumanInputResponse {
+  Run run = 1;
+}
+
+message PauseRunRequest {
+  string run_id = 1;
+}
+
+message PauseRunResponse {
+  Run run = 1;
+}
+
+message ResumeRunRequest {
+  string run_id = 1;
+}
+
+message ResumeRunResponse {
   Run run = 1;
 }
 

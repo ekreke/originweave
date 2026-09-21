@@ -391,7 +391,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         auto = bool(request.auto) if request.HasField("auto") else self._ctx.config.hitl.auto
         engine = self._build_engine(store, auto=auto)
         task = self._ctx.scheduler.start(
-            run_id, self._run_initial(engine, store, origin=origin, goal=goal, auto=auto)
+            run_id,
+            self._run_initial(engine, store, origin=origin, goal=goal, auto=auto),
+            engine=engine,
         )
         await self._await_project(store, task)
         run = summarize_run(store, meta=meta, budget=self._ctx.config.worker.budget)
@@ -431,6 +433,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         if request.decision not in ("approve", "edit", "reject"):
             raise ConnectError(Code.INVALID_ARGUMENT, f"unknown decision {request.decision!r}")
         engine = self._build_engine(store, auto=False)
+        # Register the engine while the (inline) resume loop runs so PauseRun can reach it.
+        self._ctx.scheduler.register_engine(request.run_id, engine)
         try:
             await engine.resume(
                 decision=request.decision,
@@ -439,11 +443,61 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             )
         except EngineError as exc:
             raise ConnectError(Code.FAILED_PRECONDITION, str(exc)) from exc
+        finally:
+            self._ctx.scheduler.unregister_engine(request.run_id)
         await self._release_if_terminal(store)
         run = summarize_run(
             store, meta=store.read_run_meta(), budget=self._ctx.config.worker.budget
         )
         return pb.SubmitHumanInputResponse(run=convert.run_pb(run))
+
+    async def pause_run(self, request: Any, ctx: Any) -> Any:
+        """Pause a running run at its next round boundary (M3b, recoverable)."""
+        self._reject_if_pinned()
+        run_id = request.run_id
+        store = self._require_run_store(run_id)
+        try:
+            board = reduce(store.read_events())
+        except (BlackboardError, ReduceError) as exc:
+            raise ConnectError(
+                Code.INTERNAL, f"run {run_id!r} has a malformed event log: {exc}"
+            ) from exc
+        if board.status != "running" or not self._ctx.scheduler.request_pause(run_id):
+            raise ConnectError(Code.FAILED_PRECONDITION, "run is not running")
+        # The loop honours the request at its next round boundary (never mid-Worker).
+        # Wait until PAUSED lands; if the run finishes first, we raced it.
+        for _ in range(3000):
+            if reduce(store.read_events()).status != "running":
+                break
+            await asyncio.sleep(0.01)
+        if not any(event.type == "PAUSED" for event in store.read_events()):
+            raise ConnectError(Code.FAILED_PRECONDITION, "run did not pause")
+        run = summarize_run(
+            store, meta=store.read_run_meta(), budget=self._ctx.config.worker.budget
+        )
+        return pb.PauseRunResponse(run=convert.run_pb(run))
+
+    async def resume_run(self, request: Any, ctx: Any) -> Any:
+        """Continue a paused run (M3b); a fresh engine rebuilds counters from the board."""
+        self._reject_if_pinned()
+        run_id = request.run_id
+        store = self._require_run_store(run_id)
+        try:
+            board = reduce(store.read_events())
+        except (BlackboardError, ReduceError) as exc:
+            raise ConnectError(
+                Code.INTERNAL, f"run {run_id!r} has a malformed event log: {exc}"
+            ) from exc
+        if board.status != "paused":
+            raise ConnectError(Code.FAILED_PRECONDITION, "run is not paused")
+        engine = self._build_engine(store, auto=False)
+        self._ctx.scheduler.start(run_id, engine.resume_from_pause(), engine=engine)
+        # RESUMED is appended before the first await, so one yield makes it visible.
+        await asyncio.sleep(0)
+        run = summarize_run(
+            store, meta=store.read_run_meta(), budget=self._ctx.config.worker.budget
+        )
+        return pb.ResumeRunResponse(run=convert.run_pb(run))
 
     async def get_settings(self, request: Any, ctx: Any) -> Any:
         """Return the live project settings (M6 P3; read-only, allowed when pinned)."""
@@ -534,6 +588,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             heartbeat_timeout=parse_duration(worker.heartbeat_timeout, "worker.heartbeat_timeout"),
             heartbeat_on_timeout=worker.heartbeat_on_timeout,
             auto=auto,
+            budget=worker.budget,
+            pricing=self._ctx.pricing,
         )
         if isinstance(resolved_worker, RunContainerWorker):
             async def fail_lease(reason: str) -> None:

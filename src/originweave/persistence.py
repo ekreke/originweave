@@ -20,6 +20,7 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -230,6 +231,27 @@ def allocate_run_id(runs_dir: Path) -> str:
     return f"run_{highest + 1:03d}"
 
 
+def _format_elapsed(events: Sequence[Event]) -> str:
+    """Human-readable wall time between the first and last event (e.g. ``1m02s``)."""
+    if len(events) < 2:
+        return ""
+    try:
+        first = datetime.fromisoformat(events[0].at)
+        last = datetime.fromisoformat(events[-1].at)
+        if first.tzinfo is None and last.tzinfo is not None:
+            first = first.replace(tzinfo=last.tzinfo)
+        elif last.tzinfo is None and first.tzinfo is not None:
+            last = last.replace(tzinfo=first.tzinfo)
+        seconds = (last - first).total_seconds()
+    except (ValueError, TypeError):
+        return ""
+    seconds = max(0.0, seconds)
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, rest = divmod(int(seconds), 60)
+    return f"{minutes}m{rest:02d}s"
+
+
 def summarize_run(
     store: RunStore,
     *,
@@ -243,9 +265,9 @@ def summarize_run(
     Works for directories without ``run.json`` (e.g. the committed sample), which
     is why the static fields that can only come from metadata fall back to the
     directory name / defaults. Result fields (status/updated_at/counts) are always
-    derived from the events; a ``status`` in ``run.json`` is ignored. ``confidence``,
-    the real ``budget`` counters and ``entities``/``relations`` stay zero until the
-    milestones that produce them (M2/M5/M6).
+    derived from the events; a ``status`` in ``run.json`` is ignored. ``confidence``
+    stays zero until the milestone that produces it. ``budget`` tokens/cost come from
+    the per-call ``SESSION`` events (M3b) and ``elapsed`` from the first/last event.
 
     ``events`` overrides the log to fold (Replay's ``at_event`` passes a prefix); the
     default reads the full log from ``store``. Passing ``events`` (even an empty
@@ -269,6 +291,8 @@ def summarize_run(
         max_steps = budget.max_steps
 
     sessions = sum(1 for event in events if event.type == "SESSION")
+    tokens = sum(_int(event.payload.get("tokens")) for event in events if event.type == "SESSION")
+    cost = sum(_float(event.payload.get("cost")) for event in events if event.type == "SESSION")
     return Run(
         id=_str(meta.get("id")) or store.root.name,
         project_id=_str(meta.get("project_id")),
@@ -288,6 +312,7 @@ def summarize_run(
         else 0,
         intents=intents,
         steps=Steps(current=sessions, total=max_steps),
+        budget=Budget(tokens=tokens, cost=cost, elapsed=_format_elapsed(events)),
         created_at=_str(meta.get("created_at")) or (events[0].at if events else ""),
         updated_at=events[-1].at if events else "",
     )

@@ -85,11 +85,19 @@ async def _run(request: Request) -> JSONResponse:
         detail = _redact(f"{type(exc).__name__}: {exc}")
         logger.error("worker task %r failed: %s", body.get("task"), detail)
         return JSONResponse({"error": detail}, status_code=500)
+    usage = reply.usage
     return JSONResponse(
         {
             "text": reply.text,
             "input": reply.input,
             "steps": [step.to_session_dict() for step in reply.steps],
+            "usage": None
+            if usage is None
+            else {
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "total_tokens": usage.total_tokens,
+            },
         }
     )
 
