@@ -19,6 +19,7 @@ pytest.importorskip("originweave.v1.originweave_connect")
 
 from originweave import config as config_module  # noqa: E402
 from originweave.capabilities import PromptTemplate, ProviderError  # noqa: E402
+from originweave.capabilities.model import ChatMessage  # noqa: E402
 from originweave.capabilities.worker import LocalWorker  # noqa: E402
 from originweave.config import Config, WorkerConfig  # noqa: E402
 from originweave.persistence import Project, ProjectRegistry  # noqa: E402
@@ -78,6 +79,33 @@ class _FakePrompt:
 
     async def get(self, name: str) -> PromptTemplate:
         return PromptTemplate(name=name, text=name.upper())
+
+
+class _MidRunHintModel:
+    """A slow Explore pass during which the test injects a hint via AddHint.
+
+    Records every Reason board so the test can assert the injected hint reaches the
+    next round's Observe step -- the non-blocking contract (M3).
+    """
+
+    name = "midrun-hint"
+
+    def __init__(self, replies: dict[str, list[str]], delay: float) -> None:
+        self._replies = {task: list(items) for task, items in replies.items()}
+        self._delay = delay
+        self.explore_started = asyncio.Event()
+        self.reason_boards: list[dict[str, object]] = []
+
+    async def complete(self, messages: Sequence[ChatMessage]) -> str:
+        payload = json.loads(messages[1].content)
+        task = str(payload["task"])
+        if task == "Reason":
+            self.reason_boards.append(payload["board"])
+        if task == "Explore":
+            self.explore_started.set()
+            await asyncio.sleep(self._delay)
+        queue = self._replies[task]
+        return queue.pop(0) if queue else NO_REASON
 
 
 def _bootstrap(*labels: str) -> str:
@@ -802,6 +830,93 @@ async def test_add_hint_missing_run_reports_not_found(tmp_path: Path) -> None:
     async with _client_for(ctx) as client:
         response = await _post(client, "AddHint", {"runId": "run_404", "text": "x"})
     assert response.status_code == 404
+
+
+async def test_add_hint_midrun_reaches_the_next_reason_round(tmp_path: Path) -> None:
+    """A hint injected while a pass runs shows up in the next Reason round (M3)."""
+    reason_decompose = json.dumps(
+        {
+            "facts": [],
+            "intents": [{"type": "decompose", "from": "f1", "question": "Split f1."}],
+            "complete": None,
+        }
+    )
+    keep = json.dumps({"keep": [0], "drop": []})
+    sub_claim = json.dumps(
+        {
+            "facts": [
+                {
+                    "label": "sub claim",
+                    "kind": "fact",
+                    "role": "sub-claim",
+                    "status": "open",
+                    "confidence": 0.5,
+                }
+            ],
+            "intents": [],
+            "complete": None,
+        }
+    )
+    model = _MidRunHintModel(
+        {
+            "Bootstrap": [_bootstrap("A claim")],
+            "Reason": [reason_decompose],  # round 2 falls through to NO_REASON
+            "Validate": [keep],
+            "Explore": [sub_claim],
+        },
+        delay=0.2,
+    )
+    ProjectRegistry(tmp_path / "projects", tmp_path / "runs").write(Project(id="p", name="P"))
+    config = Config(worker=WorkerConfig(execution="in-process", container_scope="per-call"))
+    ctx = ServerContext.build(
+        config=config,
+        providers=Providers(
+            worker=LocalWorker(model=model), search=_FakeSearch(), prompt=_FakePrompt()
+        ),
+        root=tmp_path,
+    )
+    async with _client_for(ctx) as client:
+        await _create_run(client, auto=True)
+        await asyncio.wait_for(model.explore_started.wait(), timeout=5)
+        hinted = await _post(
+            client, "AddHint", {"runId": "run_001", "text": "prefer the primary study"}
+        )
+        assert hinted.status_code == 200
+        assert hinted.json()["hint"]["id"] == "h1"
+        await ctx.scheduler.wait("run_001")
+
+    assert len(model.reason_boards) == 2
+    # Round 1 ran before the injection; round 2 observes the hint from the event log.
+    assert model.reason_boards[0]["hints"] == []
+    hints = model.reason_boards[1]["hints"]
+    assert [hint["id"] for hint in hints] == ["h1"]  # type: ignore[index]
+    assert hints[0]["author"] == "human"  # type: ignore[index]
+    assert hints[0]["text"] == "prefer the primary study"  # type: ignore[index]
+
+
+async def test_add_hint_and_agent_hints_share_the_id_counter(tmp_path: Path) -> None:
+    """A run dead-ends with an agent hint; AddHint afterwards continues at h2 (M3)."""
+    ctx = _ctx(
+        tmp_path,
+        _bootstrap("A claim"),
+        json.dumps({"facts": [], "intents": [], "complete": None, "hint": "nothing new here"}),
+    )
+    async with _client_for(ctx) as client:
+        await _create_run(client, auto=True)
+        await ctx.scheduler.wait("run_001")
+        events = RunStore(tmp_path / "runs" / "run_001").read_events()
+        hints = [event for event in events if event.type == "HINT"]
+        assert [event.payload["hint"]["id"] for event in hints] == ["h1"]
+        assert hints[0].payload["hint"]["author"] == "agent"
+
+        response = await _post(client, "AddHint", {"runId": "run_001", "text": "human note"})
+        await ctx.scheduler.drain()
+
+    assert response.status_code == 200
+    assert response.json()["hint"]["id"] == "h2"
+    store = RunStore(tmp_path / "runs" / "run_001")
+    hint_events = [event for event in store.read_events() if event.type == "HINT"]
+    assert [event.payload["hint"]["id"] for event in hint_events] == ["h1", "h2"]
 
 
 async def test_submit_human_input_approves_gate_a(tmp_path: Path) -> None:

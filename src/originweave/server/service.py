@@ -403,8 +403,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         """Append a human Hint (non-blocking, C3b)."""
         self._reject_if_pinned()
         store = self._require_run_store(request.run_id)
-        next_index = sum(1 for event in store.iter_events() if event.type == "HINT") + 1
-        hint = Hint(id=f"h{next_index}", text=request.text, author="human", createdAt=now_iso())
+        # Ids derive from the event log, shared with the engine's agent hints (M3).
+        hint = Hint(id=store.next_hint_id(), text=request.text, author="human", createdAt=now_iso())
         store.append_event("HINT", {"hint": hint.to_dict()}, message="Hint added")
         return pb.AddHintResponse(hint=convert.hint_pb(hint))
 

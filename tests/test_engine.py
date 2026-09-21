@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from originweave.blackboard import Fact
+from originweave.blackboard import Fact, Hint
 from originweave.capabilities.base import PromptTemplate, ProviderError
 from originweave.capabilities.model import ChatMessage
 from originweave.capabilities.worker import LocalWorker, WorkerReply, render_messages
@@ -170,6 +170,10 @@ def _validate(*keep: int, drop: list[dict[str, object]] | None = None) -> str:
 
 def _complete(verdict: str) -> str:
     return json.dumps({"facts": [], "intents": [], "complete": {"verdict": verdict}})
+
+
+def _complete_with_hint(verdict: str, hint: str) -> str:
+    return json.dumps({"facts": [], "intents": [], "complete": {"verdict": verdict}, "hint": hint})
 
 
 def _explore_reply(*facts: dict[str, object]) -> str:
@@ -1623,6 +1627,158 @@ async def test_stigmergy_reason_error_after_a_productive_round_fails_run(tmp_pat
         if event.type == "REASON" and event.payload["phase"] == "start"
     ]
     assert triggers == [["f1"], ["f2"]]
+
+
+async def test_reason_hint_on_completion_writes_agent_hint(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("Core claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+        _reason({"type": "explore", "from": "f2", "question": "Source f2."}),
+        _validate(0),
+        _explore_reply(_source_fact("Primary source")),
+        _reason({"type": "verify", "from": "f2", "question": "Compare f2."}),
+        _validate(0),
+        _compare_reply(),
+        # Convergence: the goal is met and Reason leaves a note for later readers.
+        _complete_with_hint("部分偏差", "prefer the original lab study over summaries"),
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "completed"
+    hints = [event for event in store.read_events() if event.type == "HINT"]
+    assert [event.payload["hint"]["id"] for event in hints] == ["h1"]
+    assert hints[0].payload["hint"]["author"] == "agent"
+    assert hints[0].payload["hint"]["text"] == "prefer the original lab study over summaries"
+    # The hint lands before COMPLETE, so a replay folds it into the final board.
+    event_types = [event.type for event in store.read_events()]
+    assert event_types.index("HINT") < event_types.index("COMPLETE")
+    assert [hint.id for hint in board.hints] == ["h1"]
+    assert board.hints[0].author == "agent"
+
+
+async def test_reason_hint_on_dead_end_keeps_run_running(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    dead_end = json.dumps(
+        {"facts": [], "intents": [], "complete": None, "hint": "no source claims this"}
+    )
+    board = await _engine(
+        store,
+        _bootstrap("Core claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+        dead_end,  # round 2 offers no direction but leaves a note
+    ).run(origin=_origin(), goal=_goal())
+
+    # The dead-end hint is kept on the board; the run stays running (no terminal).
+    assert board.status == "running"
+    hints = [event for event in store.read_events() if event.type == "HINT"]
+    assert [event.payload["hint"]["id"] for event in hints] == ["h1"]
+    assert hints[0].payload["hint"]["author"] == "agent"
+    assert [hint.text for hint in board.hints] == ["no source claims this"]
+
+
+async def test_reason_hint_alongside_intents_is_ignored(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    reason = json.dumps(
+        {
+            "facts": [],
+            "intents": [{"type": "decompose", "from": "f1", "question": "Split f1."}],
+            "complete": None,
+            "hint": "work in progress, not a convergence note",
+        }
+    )
+    await _engine(
+        store,
+        _bootstrap("A claim"),
+        reason,
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+        NO_REASON,
+    ).run(origin=_origin(), goal=_goal())
+
+    # A hint next to Intents is not a convergence note (M3): it is dropped.
+    assert not [event for event in store.read_events() if event.type == "HINT"]
+
+
+async def test_reason_hint_without_satisfied_goal_is_ignored(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("A claim"),
+        _complete_with_hint("部分偏差", "too early to conclude"),
+    ).run(origin=_origin(), goal=_goal())
+
+    # The structural stop condition does not hold yet (no decompose/compare), so the
+    # intermediate convergence call leaves no hint and no COMPLETE (M2 rule preserved).
+    assert board.status == "running"
+    assert not [event for event in store.read_events() if event.type == "HINT"]
+    assert all(event.type != "COMPLETE" for event in store.read_events())
+
+
+async def test_explore_reply_rejects_hint(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    explore = json.dumps(
+        {"facts": [], "intents": [], "complete": None, "hint": "explore may not hint"}
+    )
+    board = await _engine(
+        store,
+        _bootstrap("A claim"),
+        _reason({"type": "explore", "from": "f1", "question": "Source f1."}),
+        _validate(0),
+        explore,
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    events = store.read_events()
+    assert events[-1].type == "FAILED"
+    assert "hint" in events[-1].payload["reason"]
+
+
+async def test_human_and_agent_hints_get_distinct_ids(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    store.append_event(
+        "HINT",
+        {"hint": Hint(id="h1", text="check the benchmark env", author="human").to_dict()},
+        message="Hint added",
+    )
+    board = await _engine(
+        store,
+        _bootstrap("Core claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+        _reason({"type": "explore", "from": "f2", "question": "Source f2."}),
+        _validate(0),
+        _explore_reply(_source_fact("Primary source")),
+        _reason({"type": "verify", "from": "f2", "question": "Compare f2."}),
+        _validate(0),
+        _compare_reply(),
+        _complete_with_hint("部分偏差", "convergence note"),
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "completed"
+    hint_events = [event for event in store.read_events() if event.type == "HINT"]
+    # The agent hint continues the event-log numbering instead of colliding with h1.
+    assert [event.payload["hint"]["id"] for event in hint_events] == ["h1", "h2"]
+    assert [event.payload["hint"]["author"] for event in hint_events] == ["human", "agent"]
+
+
+def test_parse_result_hint_requires_reason_task() -> None:
+    reply = json.dumps({"facts": [], "intents": [], "complete": None, "hint": "note"})
+    with pytest.raises(EngineError):
+        parse_result(reply)  # Bootstrap/Explore calls do not allow hints
+    result = parse_result(reply, allow_hint=True)
+    assert result.hint == "note"
+
+
+def test_parse_result_rejects_empty_hint() -> None:
+    reply = json.dumps({"facts": [], "intents": [], "complete": None, "hint": "   "})
+    with pytest.raises(EngineError):
+        parse_result(reply, allow_hint=True)
 
 
 async def test_bootstrap_bad_reply_fails_run(tmp_path: Path) -> None:

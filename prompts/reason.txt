@@ -16,6 +16,9 @@ Guidance:
   sourced and its deviations judged); otherwise use null.
 - "complete" and "intents" are mutually exclusive: when "complete" is non-null, leave
   "intents" empty.
+- When the run converges -- "complete" is non-null, or no new direction remains -- you
+  may set "hint" to one short experiential note for later readers (e.g. a dead end you
+  hit, or a source to prefer). Omit "hint" whenever you still propose Intents.
 
 Reply with exactly one JSON object and nothing else: no prose, no markdown fences.
 
@@ -24,5 +27,6 @@ Reply with exactly one JSON object and nothing else: no prose, no markdown fence
   "intents": [
     { "type": "decompose", "from": "f1", "question": "Split this claim into sub-claims." }
   ],
-  "complete": null
+  "complete": null,
+  "hint": null
 }

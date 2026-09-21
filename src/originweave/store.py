@@ -123,6 +123,15 @@ class RunStore:
     def read_events(self) -> list[Event]:
         return list(self.iter_events())
 
+    def next_hint_id(self) -> str:
+        """The next Hint id (``h<N>``), derived from the HINT events already written.
+
+        Both writers of hints (the server's ``AddHint`` and the engine's agent-side
+        Reason hints) must derive ids from the event log so a human hint and an agent
+        hint interleaved in the same run never collide (blackboard-protocol.md §2.3).
+        """
+        return f"h{sum(1 for event in self.iter_events() if event.type == 'HINT') + 1}"
+
     def read_sessions(self) -> list[dict[str, Any]]:
         """Read the worker session snapshots under ``sessions/`` (M6 P3c).
 

@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from .blackboard import BlackboardError, Board, Edge, Evidence, Fact, Intent
+from .blackboard import BlackboardError, Board, Edge, Evidence, Fact, Hint, Intent
 from .capabilities.base import CapabilityError, PromptProvider, PromptTemplate, SearchProvider
 from .capabilities.model import Usage
 from .capabilities.worker import TaskKind, Worker, WorkerReply
@@ -109,11 +109,12 @@ class _ExploreTimeout(Exception):
 class WorkerResult:
     """Parsed worker reply; ids are placeholders until the engine assigns them.
 
-    Bootstrap writes ``facts``; Reason writes ``intents`` (and may set ``complete``);
-    Explore writes the facts behind one Intent. A reply may also carry semantic
-    ``edges`` (section 2.4) and, for a verify pass, a ``gate`` request (Gate B).
-    ``fact_keys`` maps a worker-local ``key`` to the index of the fact it names, so
-    edges can reference facts from the same reply before real ids are assigned.
+    Bootstrap writes ``facts``; Reason writes ``intents`` (and may set ``complete``,
+    plus an experiential ``hint`` when the run converges, M3); Explore writes the
+    facts behind one Intent. A reply may also carry semantic ``edges`` (section 2.4)
+    and, for a verify pass, a ``gate`` request (Gate B). ``fact_keys`` maps a
+    worker-local ``key`` to the index of the fact it names, so edges can reference
+    facts from the same reply before real ids are assigned.
     """
 
     facts: list[Fact] = field(default_factory=list)
@@ -121,6 +122,7 @@ class WorkerResult:
     complete: str | None = None
     edges: list[dict[str, Any]] = field(default_factory=list)
     gate: dict[str, str] | None = None
+    hint: str | None = None
     fact_keys: dict[str, int] = field(default_factory=dict)
 
 
@@ -192,14 +194,17 @@ def _parse_intent(item: Any) -> Intent:
         raise EngineError(f"invalid intent: {exc}") from exc
 
 
-def parse_result(text: str, *, allow_edges: bool = False, allow_gate: bool = False) -> WorkerResult:
+def parse_result(
+    text: str, *, allow_edges: bool = False, allow_gate: bool = False, allow_hint: bool = False
+) -> WorkerResult:
     """Parse a worker's strict-JSON reply into a :class:`WorkerResult`.
 
     The reply must be a single JSON object (no markdown fences) carrying ``facts``,
     ``intents`` and ``complete``; enum values are validated against the blackboard
     domains. An Explore reply may additionally carry semantic ``edges`` (section 2.4)
-    and a ``gate`` request (Gate B); ``allow_edges``/``allow_gate`` bound which tasks
-    may. Malformed replies raise :class:`EngineError`.
+    and a ``gate`` request (Gate B); a Reason reply may carry an experiential
+    ``hint`` (M3, written only when the run converges). ``allow_edges``/``allow_gate``/
+    ``allow_hint`` bound which tasks may. Malformed replies raise :class:`EngineError`.
     """
     try:
         data = json.loads(text)
@@ -260,12 +265,22 @@ def parse_result(text: str, *, allow_edges: bool = False, allow_gate: bool = Fal
             raise EngineError("a reply must not carry both 'gate' and 'intents'")
         gate = {"gate": gate_name, "question": question}
 
+    raw_hint = data.get("hint")
+    hint: str | None = None
+    if raw_hint is not None:
+        if not allow_hint:
+            raise EngineError("this task must not carry 'hint'")
+        if not isinstance(raw_hint, str) or not raw_hint.strip():
+            raise EngineError("'hint' must be a non-empty string")
+        hint = raw_hint
+
     return WorkerResult(
         facts=facts,
         intents=intents,
         complete=complete,
         edges=edges,
         gate=gate,
+        hint=hint,
         fact_keys=fact_keys,
     )
 
@@ -920,6 +935,15 @@ class Engine:
                 return False
         return True
 
+    def _write_agent_hint(self, text: str) -> None:
+        """Write Reason's convergence note as an agent-authored hint (M3).
+
+        Ids come from the event log (``RunStore.next_hint_id``), so an agent hint
+        cannot collide with a human hint added mid-run through ``AddHint``.
+        """
+        hint = Hint(id=self._store.next_hint_id(), text=text, author="agent", createdAt=now_iso())
+        self._store.append_event("HINT", {"hint": hint.to_dict()}, message="Reason left a hint")
+
     def _write_report(self) -> None:
         """Write ``report.md`` for a completed run (a derived artifact, never an event)."""
         board = reduce(self._store.read_events())
@@ -1043,7 +1067,7 @@ class Engine:
             self._store.append_event("FAILED", {"reason": str(exc)})
             return
         try:
-            result = parse_result(reply.text)
+            result = parse_result(reply.text, allow_hint=True)
             if result.facts:
                 raise EngineError("Reason must not produce facts; that is Explore's job")
             if result.complete is not None and result.intents:
@@ -1067,6 +1091,11 @@ class Engine:
             )
             return
         if result.complete is not None:
+            satisfied = self._goal_satisfied(board)
+            if result.hint is not None and satisfied:
+                # Reason's convergence note (M3): only a convergence that actually ends
+                # the run leaves a hint, so intermediate "complete" calls add no noise.
+                self._write_agent_hint(result.hint)
             self._store.append_event(
                 "REASON", {"phase": "end", "triggerFacts": triggers}, message="Reason: end"
             )
@@ -1078,7 +1107,7 @@ class Engine:
                 started=started,
                 ended=ended,
             )
-            if not self._goal_satisfied(board):
+            if not satisfied:
                 # The model judged the goal met, but the structural stop condition is not
                 # satisfied yet (every claim decomposed and sourced, deviations scored).
                 # Keep the run going instead of completing early; a later round can still
@@ -1118,6 +1147,10 @@ class Engine:
                 duplicateOf=decision.duplicate_of if decision is not None else None,
             )
             self._store.append_event("INTENT", {"intent": intent.to_dict()})
+        if result.hint is not None and not result.intents:
+            # Dead-end convergence (no runnable direction was offered): keep Reason's
+            # note on the board. A hint alongside Intents is ignored (M3).
+            self._write_agent_hint(result.hint)
         self._store.append_event(
             "REASON", {"phase": "end", "triggerFacts": triggers}, message="Reason: end"
         )

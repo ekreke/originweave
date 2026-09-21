@@ -130,7 +130,7 @@ Observe → Orient → Decide → Act → Write Back → (回 Observe)
 | 任务 | 做什么 | 产出 |
 |---|---|---|
 | `Bootstrap` | 直接尝试解决整个问题：抽取核心抽象论点 + 直接尝试判定 | Fact + 可能的 Complete |
-| `Reason` | 读图判断：完成了吗？下一步往哪走？ | Complete / 新 Intent / 无操作 |
+| `Reason` | 读图判断：完成了吗？下一步往哪走？ | Complete / 新 Intent / 无操作（收敛时可附 `hint`，M3） |
 | `Explore` | 认领一条 Intent，执行探索 | 一个 Fact |
 | `Validate` | 对 `Reason` 的候选 Intent 判重/取舍（独立 pass，复用 `model`） | 候选的 keep / drop（drop → `dropped` Intent） |
 
@@ -171,6 +171,11 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
   Reason 判定 `COMPLETE`、死胡同（无可派发 Intent）或本轮无新 Fact。`Engine(max_rounds=…)` 为安全阀
   （命中保持 `running`）；真正的预算 `STOPPED` 归 M3。**M2 起** `COMPLETE` 需过严格判据（论点全部
   拆解、子断言回链或 `open`、已有 compare），否则被忽略；完成后落 run dir `report.md`。
+- **异步 Hint（M3）**：`HINT` 是普通事件、非阻塞——dispatch 期间经 `AddHint` 注入的 Hint，
+  只要循环继续（本轮产生了新 Fact），必然进入下一轮 Reason 的 Observe（引擎每轮从事件日志折
+  Board）；agent 侧 Hint 由引擎在 Reason 收敛时写入（`author=agent`，id 与 human hint 共用事件
+  日志计数，见 `blackboard-protocol.md` §2.3/§7）。已停止循环的 run（仍 `running`）不因 Hint 到达
+  而自动重启（归 M3 完整调度）。
 - **Dispatcher**：调度与容器生命周期，是协议的唯一写入者；Worker 不直接认领
   Intent、不发心跳，只接收 prompt 并返回结构化结果。
 

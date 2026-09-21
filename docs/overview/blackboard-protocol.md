@@ -94,7 +94,11 @@ Intent {
 Hint { id, text, author, createdAt }   # author: human | agent
 ```
 Hint 表达"经验提示"（如"优先核对原始 benchmark 的测试环境"），不参与 DAG 连通性，
-不改变事实，只影响 Reason 的取向。人类可随时写入。
+不改变事实，只影响 Reason 的取向。两种写入方（M3）：
+- **human**：经 `AddHint` 随时写入，非阻塞（§7）。
+- **agent**：引擎在 **Reason 收敛时**写入（Reason reply 带可选 `hint`，§4.2）——
+  仅当本轮真正收敛（结构判据满足的 `complete`，或提不出任何新 Intent 的死胡同）才落盘；
+  与 `intents` 同携的 `hint` 被忽略。id（`h<N>`）由两处写入方共同从事件日志推导，绝不冲突。
 
 ### 2.4 Edge（provenance 边）
 ```text
@@ -170,7 +174,7 @@ Write Back → 把结论写回黑板（Fact + Evidence）
 | 任务 | 做什么 | 产出 |
 |---|---|---|
 | `Bootstrap` | 初始阶段直接尝试解决整个问题：**抽取核心抽象论点 + 直接尝试判定** | Fact + 可能的 Complete |
-| `Reason` | 读图判断：完成了吗？下一步往哪走？ | Complete / 新 Intent(s) / 无操作 |
+| `Reason` | 读图判断：完成了吗？下一步往哪走？ | Complete / 新 Intent(s) / 无操作（收敛时可附 `hint`） |
 | `Explore` | 认领一条 Intent，执行探索，产出结论 | 一个 Fact（`extract`/`relate` 时产出 Entity/Relation） |
 | `Validate` | 对 `Reason` 产出的候选 Intent 判重/取舍（独立 pass） | 每个候选的 keep / drop（drop → `dropped` Intent） |
 
@@ -188,7 +192,8 @@ Dispatcher / reducer 分配与推导（§2.4），**语义**边由 Worker 显式
   "edges": [ { "source": "origin", "target": "c1", "relation": "main-chain", "note": "..." } ],
   "gate": { "gate": "arbitrate", "question": "..." },
   "intents": [ { "type": "decompose", "from": "f1", "question": "..." } ],
-  "complete": { "verdict": "..." }
+  "complete": { "verdict": "..." },
+  "hint": "..."
 }
 ```
 
@@ -202,6 +207,9 @@ Dispatcher / reducer 分配与推导（§2.4），**语义**边由 Worker 显式
   `Explore` 可携带，`Reason`/`Validate` 携带即失败。
 - **`gate`**（M2，可选）：`gate` 仅 `arbitrate`（Gate B），与 `complete`/`intents` 互斥；**仅
   `Explore`（verify 型）可携带**。
+- **`hint`**（M3，可选）：一条经验提示文本，**仅 `Reason` 可携带**（其余任务携带即失败）。
+  引擎只在**收敛**时落盘为 `HINT{author:"agent"}`（结构判据满足的 `complete`，或无新 Intent 的
+  死胡同）；与 `intents` 同携时忽略，非收敛的 `complete`（结构判据未满足）也不落盘。
 
 `Validate` 指令的输出是**另一套 schema**（对候选 Intent 的取舍，而非新事实）：
 
@@ -412,8 +420,14 @@ Worker A 写入新 Fact  →  图变化（环境更新）  →  Worker B 下一�
 
 | 模式 | 机制 | 阻塞 |
 |---|---|---|
-| 主动注入 | 随时写 `Hint(author=human)` | 否 |
+| 主动注入 | 随时写 `Hint(author=human\|agent)` | 否 |
 | 被动 Gate | 关键节点发 `REQUEST_HUMAN`，run → `awaiting_human`，输入后继续 | 是 |
+
+主动注入的**消费时机**（M3）：`HINT` 是普通事件，引擎每轮循环从事件日志折出 Board，因此
+**dispatch 执行期间注入的 Hint，只要循环继续（本轮产生了新 Fact），必然进入下一轮 Reason 的
+Observe**，run 不会被阻塞或打断。边界：循环已停止的 run（死胡同、或本轮无新 Fact 而退出，
+均仍 `running`）不因 Hint 到达而自动重启——重启/重试归 M3 的完整调度；注入的 Hint 会留在
+Board 上等下一轮 Reason。
 
 三个关键 Gate：
 - **Gate A · 论点确认**（Bootstrap 之后、Reason 之前）：确认核心抽象论点（`role=main-claim`）
