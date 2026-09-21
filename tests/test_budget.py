@@ -194,8 +194,11 @@ async def test_within_budget_does_not_stop(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     budget = BudgetConfig(max_steps=99, max_wall="10m", max_cost=999.0)
     board = await _engine(store, NO_REASON, budget=budget).run(origin=_origin(), goal=_goal())
-    assert board.status == "running"  # dead-end, but within budget -> no stop
-    assert all(e.type != "STOPPED" for e in store.read_events())
+    # No runnable direction, so the loop stops as a dead-end -- not a budget stop.
+    assert board.status == "stopped"
+    stopped = [e for e in store.read_events() if e.type == "STOPPED"]
+    assert [e.payload["reason"] for e in stopped] == ["dead-end: no runnable intent"]
+    assert all("budget" not in e.payload for e in stopped)
 
 
 async def test_resume_on_a_fresh_engine_keeps_the_budget(tmp_path: Path) -> None:
@@ -243,7 +246,8 @@ async def test_pause_then_resume(tmp_path: Path) -> None:
     assert any(e.type == "PAUSED" for e in store.read_events())
 
     resumed = await engine.resume_from_pause()
-    assert resumed.status == "running"
+    # Resume re-enters the loop, which then dead-ends on ``NO_REASON`` (a terminal stop).
+    assert resumed.status == "stopped"
     assert any(e.type == "RESUMED" for e in store.read_events())
 
 

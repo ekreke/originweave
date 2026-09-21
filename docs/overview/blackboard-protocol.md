@@ -220,6 +220,10 @@ Dispatcher / reducer 分配与推导（§2.4），**语义**边由 Worker 显式
 
 - `index` 是候选 Intent 在本次 `Reason` 输出里的下标；`duplicateOf` 指向黑板上的既有 Intent id
   （批内重复时可空）。每个候选必须**恰好**出现在 `keep` 或 `drop` 之一，否则视为失败。
+- **判重对象**：只有真正可运行/已执行的 Intent（`open`/`claimed`/`done`）才可作为重复依据；`dropped`
+  的 Intent 从未执行，只作「曾考虑过」的上下文。引擎因此对**指向 `dropped` 的 drop 做确定性翻盘**——
+  该候选保留为 `open`（`dropped` 的重做是合法方向，例如新证据到达后），被翻盘的 drop 记入
+  `VALIDATE{phase:"end"}.overridden` 留痕。这防止 Validate 误杀重做导致无可派发 Intent 的死胡同。
 - 被判重的候选仍以 `INTENT` 事件写入，但 `status=dropped`（保留"考虑过但未采纳"的因果链）；
   keep 的写为 `status=open` 待派发。去重是**产出期**行为，发生在 Dispatcher 写入 `INTENT` 之前。
 - **无结构预筛**：全部候选都交给 Validate 做语义判重（每轮 Reason 因此多一次模型调用）；
@@ -253,12 +257,14 @@ worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` �
 
 **收敛（I6）**：派发轮结束后，若产生了新 Fact，则对**新增 facts** 再跑一次 Reason（`REASON.start` 的
 `triggerFacts` 只记自上次 Reason 以来的新增 facts），如此循环（Stigmergy）。循环终止于：Reason 写
-`COMPLETE`（→ `completed`）／Reason 未产出可派发的 `open` Intent（死胡同，run 保持 `running`）／本轮
-未新增 Fact（无进展）。`Engine(max_rounds=…)` 是安全阀，命中后同样保持 `running`，不写终态事件（真正
-的预算执行 → `STOPPED` 归 M3）。**M2 起 `COMPLETE` 需过严格判据**（§4.3 第 8 步）：抽象论点全部拆解、
+`COMPLETE`（→ `completed`）；或三个非完成出口各写 `STOPPED`（→ `stopped`，携带 `reason`）：Reason 未
+产出可派发的 `open` Intent（死胡同，`reason="dead-end: no runnable intent"`）、本轮未新增 Fact（无进展，
+`reason="stalled: dispatch produced no new facts"`）、命中安全阀 `Engine(max_rounds=…)`
+（`reason="max rounds reached"`）。三者都落终态，run 不再停在 `running`。**M2 起 `COMPLETE` 需过严格判据**（§4.3 第 8 步）：抽象论点全部拆解、
 子断言全部被 `explore` 或 `verify` 处理（追过来源或判定过）、且已有 compare 判定偏差，否则 Reason 的
 `complete` 被忽略、run 继续（`running`）。**注意**：被 `RELEASE` 退回 `open` 的 Intent 只有在后续某轮因其他新 Fact 触发 Reason 时
-才会被重新派发；本轮若再无新 Fact，循环即停（完整的重试/调度归 M3）。
+才会被重新派发；本轮若再无新 Fact，循环即停并写 `STOPPED{reason="stalled: dispatch produced no new facts"}`
+（完整的重试/调度归 M3）。
 
 ### 4.3 一道题的完整生命周期
 ```text
@@ -369,10 +375,10 @@ run 的全部状态由 append-only 事件派生。事件取代此前的领域事
 | `REQUEST_HUMAN` | 关键节点请求人工介入，run → `awaiting_human` | `gate`, `question` |
 | `HUMAN_INPUT` | 人类输入 | `gate`, `decision`, `text?`, `targets?`, `author=human` |
 | `FAILED` | 执行异常终止，run → `failed` | `reason` |
-| `STOPPED` | 预算触顶或人工终止，run → `stopped`（终态） | `reason`, `budget?`（`{steps, wall_seconds, cost, limits}`） |
+| `STOPPED` | 预算触顶、人工终止，或收敛循环的非完成出口（死胡同/无新 Fact/`max_rounds`），run → `stopped`（终态） | `reason`, `budget?`（`{steps, wall_seconds, cost, limits}`）, `rounds?`（`max_rounds` 命中时） |
 | `PAUSED` | 可恢复暂停（`PauseRun`），run → `paused` | `reason?` |
 | `RESUMED` | 从 `paused` 恢复（`ResumeRun`），run → `running` | — |
-| `VALIDATE` | Validate 判重任务开始/结束 | `phase`(start\|end), `candidates`, `kept?`, `dropped?`, `drops[]?`（`{index, duplicateOf, reason}`）|
+| `VALIDATE` | Validate 判重任务开始/结束 | `phase`(start\|end), `candidates`, `kept?`, `dropped?`, `drops[]?`（`{index, duplicateOf, reason}`）, `overridden[]?`（`{index, duplicateOf, reason}`，被引擎翻盘的 drop） |
 | `SESSION` | 一次 Worker 调用的会话元数据（索引，指向会话快照） | `sessionId`, `task`, `worker`, `intentId?`, `ref`（run dir 相对路径） |
 | `WORKER_STEP` | 会话内的执行步骤（turn/tool 级；文本截断） | `sessionId`, `worker`, `intentId?`, `seq`, `kind`(turn-start\|tool-call\|tool-result\|message\|turn-end), `name?`, `text?`, `ok?` |
 | `ENTITY` | 抽取/归并到实体 | `entity: Entity` |
@@ -425,8 +431,8 @@ Worker A 写入新 Fact  →  图变化（环境更新）  →  Worker B 下一�
 
 主动注入的**消费时机**（M3）：`HINT` 是普通事件，引擎每轮循环从事件日志折出 Board，因此
 **dispatch 执行期间注入的 Hint，只要循环继续（本轮产生了新 Fact），必然进入下一轮 Reason 的
-Observe**，run 不会被阻塞或打断。边界：循环已停止的 run（死胡同、或本轮无新 Fact 而退出，
-均仍 `running`）不因 Hint 到达而自动重启——重启/重试归 M3 的完整调度；注入的 Hint 会留在
+Observe**，run 不会被阻塞或打断。边界：循环已停止的 run（死胡同、或本轮无新 Fact 而退出，均落
+`stopped` 终态）不因 Hint 到达而自动重启——重启/重试归 M3 的完整调度；注入的 Hint 会留在
 Board 上等下一轮 Reason。
 
 三个关键 Gate：
@@ -451,8 +457,9 @@ Board 上等下一轮 Reason。
 ## 8. 可控性（内嵌协议）
 
 - **随时停止/恢复**：run 状态完整保留，可从任意事件点恢复。
-- **终止态落盘**：异常终止写 `FAILED`（→ `status=failed`），预算触顶/人工终止写 `STOPPED`
-  （→ `status=stopped`）；两者都是事件，`replay` 可复现到终止点。**`PAUSED`/`RESUMED`（M3b）**：
+- **终止态落盘**：异常终止写 `FAILED`（→ `status=failed`）；预算触顶、人工终止，以及收敛循环的非完成
+  出口（死胡同/无新 Fact/`max_rounds`）写 `STOPPED`（→ `status=stopped`）；两者都是事件，`replay` 可复现
+  到终止点。**`PAUSED`/`RESUMED`（M3b）**：
   `PauseRun` 在轮次边界写 `PAUSED`（→ `status=paused`，可恢复），`ResumeRun` 写 `RESUMED` 续跑；
   `paused` 状态下计数器从黑板重建，可在新 `Engine` 上恢复。
 - **Intent 心跳与超时（I4）**：执行中引擎按 `[worker].heartbeat_interval` 写 `HEARTBEAT`；

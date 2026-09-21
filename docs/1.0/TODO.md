@@ -114,7 +114,9 @@
   拆解树」改为后续 Gate/切片再评估；`edit` 目前仅记录（`text`/`targets` 入 `HUMAN_INPUT`），
   修改 Fact 需契约新增「事实取代」事件（I5 定）
 - [x] Stigmergy 收敛语义（I6 定）→ 终止于 `COMPLETE` / 死胡同（无可派发 Intent）/ 本轮无新 Fact；
-  死胡同与安全阀命中均保持 `running`（不写终态）；`REASON.triggerFacts` = 自上次 Reason 的新增 facts；
+  （后续修复）三者均写 `STOPPED` 终态（`reason` 分别为 `dead-end: no runnable intent` /
+  `stalled: dispatch produced no new facts` / `max rounds reached`），run 不再停在 `running`；
+  `REASON.triggerFacts` = 自上次 Reason 的新增 facts；
   安全阀 `Engine(max_rounds=…)` 默认 **10**，真正预算 `STOPPED` 归 M3
 - [ ] HITL Gate 的默认范围与配置粒度（三个 Gate 是否可逐项开关；`auto` 是否支持 per-gate）→
   本轮（I5）维持**全局 `[hitl].auto`**；per-gate 开关待 Gate B/C（M2/M3）再评估
@@ -222,6 +224,21 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **修复 · run 卡死 `running`（死路不落终态）+ Validate 误杀重做 Intent**：run_008 暴露两处——
+  （A）`prompts/validate.txt` 指示模型把 `dropped` 的 Intent 也当查重对象，而 dropped 从未执行；
+  Reason 用新证据重做 f21/f18 的 verify（指向早前被 drop 的 i19/i21）被判重复 → 板上无 `open`
+  Intent。（B）`_continue` 的死胡同/本轮无新 Fact/`max_rounds` 三个出口**不写终态事件**，run 永久停在
+  `running` 且无恢复路径（`SUBMITTED` 的 `resume` 只认 `awaiting_human`、`resume_from_pause` 只认
+  `paused`）。**修复 A**：validate 提示词限定「仅 open/claimed/done 可作重复依据，dropped 只作上下文」，
+  并在 `engine._validate` 加**确定性兜底**——`duplicateOf` 指向 `dropped` Intent 时该 drop 无效、候选保留，
+  被翻盘的 drop 记入 `VALIDATE{phase:"end"}.overridden` 留痕。**修复 B**：新增 `engine._stop`，三个出口
+  各写 `STOPPED{reason}`（`dead-end: no runnable intent` / `stalled: dispatch produced no new facts` /
+  `max rounds reached`，末者携 `rounds`），run → `stopped` 终态。文档同步 `blackboard-protocol §4.2/§5/§8`、
+  `agent-design §3.5/§4`、`SPEC` I6/Validate 两条；`blackboard-protocol §2.3/§5` 补 `VALIDATE.overridden`
+  字段与判重对象语义。测试：新增 3 条（dropped 目标翻盘保留 / `open` 目标不翻盘 / 批内 `null` 不翻盘）；
+  约 20 处旧断言由 `running` 改为 `stopped`（含三种 `reason`）。`make lint`/`test`（453 passed, 1 skipped）/
+  `smoke` 全绿，`build_sample_fixtures.py --check` 通过。
 
 - **M3b · 预算执行 + 可控性**：**usage 链路**（`ModelResult`(str 子类) 携带 `Usage`；`WorkerReply.usage`；
   `runtime/{container,runner}` 透传；`engine._accumulate_usage` 累计）。**定价**（`pricing.py`：models.dev
@@ -495,7 +512,8 @@
   无新 Fact。新增 `Engine(max_rounds=…，默认 10)` 安全阀，命中/死胡同均保持 `running`（无终态事件；
   真正预算 `STOPPED` 归 M3）。确定性：跨轮 id 续号、每轮按 id 序提交、`triggerFacts` 确定。
   契约同步 `blackboard-protocol §4.2/§4.4`、`agent-design §3.5`。`make lint` + `make test`
-  （229 passed, 1 skipped）全绿，`make replay` 不变。
+  （229 passed, 1 skipped）全绿，`make replay` 不变。**（后续修复）** 这三个出口改为写 `STOPPED`
+  终态，见「已完成（近期）」顶部条目。
 
 - **M1 I5 · HITL Gate A（挂起/恢复）**：`engine.py` 增 `auto`（默认 `False`，产品默认人工介入）与
   `GATE_A="confirm-claim"`。`run(origin, goal, auto=None)` 在 Bootstrap 后、Reason 之前，非 auto 时

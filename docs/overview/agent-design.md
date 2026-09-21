@@ -168,14 +168,16 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
   `[worker].heartbeat_timeout` 时按 `heartbeat_on_timeout` 写 `RELEASE`（Intent 回 `open`）或
   `FAILED`（终止 run）。心跳由引擎（唯一写入者）代发，Worker 不自行认领/心跳（红线 5）。
 - **收敛（I6，Stigmergy）**：每个 dispatch 轮产生新 Fact 后，对新增 facts 再跑一次 Reason，循环至
-  Reason 判定 `COMPLETE`、死胡同（无可派发 Intent）或本轮无新 Fact。`Engine(max_rounds=…)` 为安全阀
-  （命中保持 `running`）；真正的预算 `STOPPED` 归 M3。**M2 起** `COMPLETE` 需过严格判据（论点全部
-  拆解、子断言回链或 `open`、已有 compare），否则被忽略；完成后落 run dir `report.md`。
+  Reason 判定 `COMPLETE`，或三个非完成出口写 `STOPPED`（死胡同 `dead-end: no runnable intent`、本轮
+  无新 Fact `stalled: dispatch produced no new facts`、`Engine(max_rounds=…)` 安全阀
+  `max rounds reached`）——都落终态，run 不再停在 `running`；预算触顶同样 `STOPPED`（M3）。**M2 起**
+  `COMPLETE` 需过严格判据（论点全部拆解、子断言回链或 `open`、已有 compare），否则被忽略；完成后落
+  run dir `report.md`。
 - **异步 Hint（M3）**：`HINT` 是普通事件、非阻塞——dispatch 期间经 `AddHint` 注入的 Hint，
   只要循环继续（本轮产生了新 Fact），必然进入下一轮 Reason 的 Observe（引擎每轮从事件日志折
   Board）；agent 侧 Hint 由引擎在 Reason 收敛时写入（`author=agent`，id 与 human hint 共用事件
-  日志计数，见 `blackboard-protocol.md` §2.3/§7）。已停止循环的 run（仍 `running`）不因 Hint 到达
-  而自动重启（归 M3 完整调度）。
+  日志计数，见 `blackboard-protocol.md` §2.3/§7）。已落终态的 run（`stopped`/`completed`/`failed`）
+  不因 Hint 到达而自动重启（归 M3 完整调度）。
 - **Dispatcher**：调度与容器生命周期，是协议的唯一写入者；Worker 不直接认领
   Intent、不发心跳，只接收 prompt 并返回结构化结果。
 
@@ -197,7 +199,8 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 完成标准"——抽象论点全部拆解、回链、判定偏差之后才算 COMPLETE。
 `goal` 同时派生 `boundary` 边缘事实节点，用于判定"是否越过停止条件"。
 
-其他停止情形：① 证据链连通 ② 无可用 Intent（dead-end）③ 人工 Gate 挂起。
+其他停止情形：① 证据链连通（`COMPLETE`）② 无可用 Intent（dead-end → `STOPPED`）③ 人工 Gate 挂起
+（`awaiting_human`）。
 
 ## 5. 事件溯源与 run 目录
 

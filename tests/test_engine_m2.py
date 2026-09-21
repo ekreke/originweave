@@ -632,7 +632,8 @@ async def test_resume_approves_gate_b(tmp_path: Path) -> None:
     assert board.waitingFor is not None and board.waitingFor.gate == "arbitrate"
 
     board = await engine.resume(decision="approve")
-    assert board.status == "running"
+    # The resumed Reason proposes nothing, so the loop stops on a terminal dead-end.
+    assert board.status == "stopped"
 
 
 async def test_complete_without_deviations_writes_an_empty_scorecard(tmp_path: Path) -> None:

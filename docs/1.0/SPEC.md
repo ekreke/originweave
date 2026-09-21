@@ -109,8 +109,8 @@ API 与交互由 M1c-1 / M1c-2 落地；真实接入 `model`（OpenAI 兼容）�
 - [x] 抽象论点拆解：`Intent(decompose)` → `sub-claim` — `engine.py`（`_run_explore` 派发分支）+ `prompts/explore.txt`
 - [x] 来源回链：`citation` / `source` 节点与 `Evidence{quote,sourceTitle,url,locator}` 登记 — `engine.py`（explore 分支调 `search`，结果经 `extra` 注入 worker）+ `prompts/explore.txt`
 - [x] 多 Worker asyncio 任务并发认领 Intent + 心跳/超时释放（`HEARTBEAT`/`RELEASE`）；Dispatcher 按 Intent id 序确定性提交，保证 Board 确定 — `engine.py` `_dispatch`/`_run_explore`/`_heartbeat`、`config.py` `[worker].heartbeat_*`/`max_concurrency<=16`（I4）
-- [x] Stigmergy：新 Fact 触发新一轮 Reason（去重）— `engine.py` `_continue`（多轮循环；死胡同/`max_rounds` 停止；`REASON.triggerFacts` 只记新增 facts）（I6）
-- [x] Reason 产出 Intent 的去重：`Validate` pass（复用 `model`，纯 LLM 语义判重、无 L1 预筛，比对含 `done`/`dropped` 及批内候选）→ 重复项写 `status=dropped` 留痕（`Intent.duplicateOf`）— `engine.py` + `prompts/validate.txt`
+- [x] Stigmergy：新 Fact 触发新一轮 Reason（去重）— `engine.py` `_continue`（多轮循环；死胡同/无新 Fact/`max_rounds` 均写 `STOPPED` 终态；`REASON.triggerFacts` 只记新增 facts）（I6）
+- [x] Reason 产出 Intent 的去重：`Validate` pass（复用 `model`，纯 LLM 语义判重、无 L1 预筛，比对含 `open`/`claimed`/`done` 及批内候选；`dropped` 仅作上下文，未执行故不作为重复依据，引擎另有确定性兜底）→ 重复项写 `status=dropped` 留痕（`Intent.duplicateOf`）— `engine.py` + `prompts/validate.txt`
 - [x] Worker 执行后端可切换（`[worker].execution = in-process | container`）；Engine/Dispatcher 始终在
       server 侧编排，保持协议唯一写入者 — `server/context.py`（`worker_for`/`ContainerManager`）、
       `runtime/container.py`（M3a）
@@ -339,7 +339,11 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 - [x] 可控性：随时停止/恢复，状态完整保留；Intent 心跳超时释放 — **M3b**：`PAUSED`/`RESUMED` 事件 +
       `PauseRun`/`ResumeRun` RPC（`engine.request_pause`/`resume_from_pause`，轮次边界挂起，计数器从黑板重建）；
       心跳释放 I4 已落地
-- [ ] 异步 Hint 注入（`author=human|agent`）不阻塞 run
+- [x] 异步 Hint 注入（`author=human|agent`）不阻塞 run — `AddHint` 非阻塞追加 `HINT` 事件
+      （`server/service.py`，author 固定 `human`）；agent hint 经 Reason reply 产出、仅收敛轮落盘
+      （`engine.py`，与 Intent 同携的被忽略）；id 由 `store.next_hint_id()` 从事件日志推导，
+      human/agent 共用绝不冲突；Reason 消费 hints — `prompts/reason.txt`、
+      `tests/test_engine.py`、`tests/test_server.py`
 - [ ] **Gate C（最终审阅）**：记分卡产出前人工确认，可要求重查（新生 Intent）
 - [ ] `prompt` provider `langfuse` 真实接入（`local` 已于 M1 可用）
 - [ ] `originweave capabilities list|install-obscura` 实现

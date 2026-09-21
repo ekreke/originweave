@@ -8,8 +8,11 @@ duplicate of work the board already covers.
 Rules:
 - Compare by meaning, not by wording: two Intents that ask for the same thing are
   duplicates even when phrased differently.
-- Consider existing Intents of any status (open, claimed, done, dropped), and the
-  other candidates in this batch.
+- Treat only Intents that were runnable or actually executed (open, claimed, done) as
+  possible duplicates. An Intent with status "dropped" was never executed, so a candidate
+  that revisits the same direction is NOT a duplicate of it: it may be a legitimate redo
+  (for example, once new evidence has arrived). Use dropped Intents as context only.
+- Also consider the other candidates in this batch.
 - Classify EVERY candidate exactly once: list it either in "keep" or in "drop".
 - For each dropped candidate, set "duplicateOf" to the id of the existing Intent it
   duplicates (as shown on the board); if it duplicates another candidate in this

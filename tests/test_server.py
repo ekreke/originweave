@@ -740,10 +740,11 @@ async def test_create_run_persists_input_and_is_readable(tmp_path: Path) -> None
 
     async with _client_for(ctx) as client:
         run = await _create_run(client, auto=True)
-        # CreateRun waits only for PROJECT: the run is already readable at "running".
+        # CreateRun waits only for PROJECT: it returns a readable run without blocking
+        # until the (fast fake) engine loop terminates.
         assert run["id"] == "run_001"
         assert run["projectId"] == "p"
-        assert run["status"] == "running"
+        assert run["status"] in {"running", "stopped"}
         assert run["title"] == "Copilot cut task time by 55%."
 
         await ctx.scheduler.wait("run_001")
@@ -937,7 +938,7 @@ async def test_submit_human_input_approves_gate_a(tmp_path: Path) -> None:
         await ctx.scheduler.drain()
 
     assert response.status_code == 200
-    assert response.json()["run"]["status"] == "running"
+    assert response.json()["run"]["status"] == "stopped"
     events = RunStore(tmp_path / "runs" / "run_001").read_events()
     decisions = [event for event in events if event.type == "HUMAN_INPUT"]
     assert len(decisions) == 1

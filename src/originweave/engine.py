@@ -812,6 +812,17 @@ class Engine:
             message="budget exceeded",
         )
 
+    def _stop(self, reason: str, **extra: Any) -> Board:
+        """Write a terminal ``STOPPED`` (dead-end / no progress / max rounds) and fold.
+
+        The Stigmergy loop has three non-``COMPLETE`` exits besides failure: no runnable
+        Intent, a round that added no facts, and the ``max_rounds`` safety valve. Recording
+        ``STOPPED`` for each keeps the run out of a permanent ``running`` limbo that no
+        resume path could reach.
+        """
+        self._store.append_event("STOPPED", {"reason": reason, **extra}, message=reason)
+        return reduce(self._store.read_events())
+
     def _restore_counters(self, board: Board, events: Sequence[Event]) -> None:
         """Rebuild the deterministic id counters from an existing run (I5 resume).
 
@@ -857,9 +868,10 @@ class Engine:
 
         Each round re-reasons only when the previous dispatch added facts, so the run
         converges to ``COMPLETE`` (Reason judges the goal met) or stops at a dead-end (no
-        runnable open Intent, e.g. only ``verify`` left for M2). ``max_rounds`` is a safety
-        valve; hitting it leaves the run ``running`` (board intact, no terminal event), as
-        does a dead-end. The board is always folded from the event log, never mutated.
+        runnable open Intent). A dead-end, a round that added no facts, and hitting
+        ``max_rounds`` each record a terminal ``STOPPED``, so the run never sits in
+        ``running`` with no way forward. The board is always folded from the event log,
+        never mutated.
         """
         reasoned: set[str] = set()
         rounds = 0
@@ -892,7 +904,7 @@ class Engine:
             ]
             if not pending:
                 # Dead-end: Reason offered no runnable direction.
-                return board
+                return self._stop("dead-end: no runnable intent")
             await self._dispatch()
             board = reduce(self._store.read_events())
             if board.status != "running":
@@ -901,10 +913,10 @@ class Engine:
                 # No new facts -> nothing to reason about next round; stop. Facts are
                 # append-only. (M5's extract/relate rounds will need entities/relations
                 # in this progress check too.)
-                return board
+                return self._stop("stalled: dispatch produced no new facts")
             rounds += 1
             if rounds >= self._max_rounds:
-                return board
+                return self._stop("max rounds reached", rounds=rounds)
 
     def _goal_satisfied(self, board: Board) -> bool:
         """Whether the structural stop condition holds (M2, protocol section 4.3 step 8).
@@ -1534,6 +1546,28 @@ class Engine:
         )
         known_intent_ids = {intent.id for intent in board.intents}
         result = parse_validation(reply.text, len(candidates), known_intent_ids)
+        # A ``dropped`` Intent was never executed, so it is not a real duplicate target:
+        # a candidate the model dropped against one (e.g. a redo now that new evidence has
+        # arrived) is kept. This is deterministic -- never trust the model's obedience --
+        # and the flipped verdict is recorded on the VALIDATE event, so it stays auditable.
+        status_by_id = {intent.id: intent.status for intent in board.intents}
+        overridden: list[dict[str, Any]] = []
+        for decision in result.decisions:
+            if (
+                decision.drop
+                and decision.duplicate_of is not None
+                and status_by_id.get(decision.duplicate_of) == "dropped"
+            ):
+                overridden.append(
+                    {
+                        "index": decision.index,
+                        "duplicateOf": decision.duplicate_of,
+                        "reason": decision.reason,
+                    }
+                )
+                decision.drop = False
+                decision.duplicate_of = None
+                decision.reason = ""
         self._store.append_event(
             "VALIDATE",
             {
@@ -1550,6 +1584,7 @@ class Engine:
                     for decision in result.decisions
                     if decision.drop
                 ],
+                "overridden": overridden,
             },
             message="Validate: end",
         )

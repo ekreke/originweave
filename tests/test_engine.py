@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from originweave.blackboard import Fact, Hint
+from originweave.blackboard import Fact, Hint, Intent
 from originweave.capabilities.base import PromptTemplate, ProviderError
 from originweave.capabilities.model import ChatMessage
 from originweave.capabilities.worker import LocalWorker, WorkerReply, render_messages
@@ -257,6 +257,7 @@ async def test_bootstrap_produces_a_main_claim(tmp_path: Path) -> None:
         "REASON",
         "REASON",
         "SESSION",
+        "STOPPED",
     ]
     bootstrap_session = events[4]
     assert bootstrap_session.payload["task"] == "Bootstrap"
@@ -447,6 +448,7 @@ async def test_validate_emits_counted_events(tmp_path: Path) -> None:
     assert validate_events[1].payload["kept"] == 1
     assert validate_events[1].payload["dropped"] == 0
     assert validate_events[1].payload["drops"] == []
+    assert validate_events[1].payload["overridden"] == []
 
 
 async def test_validate_passes_candidates_to_worker(tmp_path: Path) -> None:
@@ -529,6 +531,89 @@ async def test_validate_event_records_drops(tmp_path: Path) -> None:
     assert end.payload["kept"] == 0
     assert end.payload["dropped"] == 1
     assert end.payload["drops"] == [{"index": 0, "duplicateOf": "i1", "reason": "same as i1"}]
+
+
+async def test_validate_keeps_redo_of_a_dropped_intent(tmp_path: Path) -> None:
+    # A dropped Intent was never executed, so it must not count as a duplicate target:
+    # Reason re-proposing the same direction (e.g. once new evidence arrived) is a
+    # legitimate redo. This is the run_008 dead-end regression.
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("A claim"),
+        _reason(
+            {"type": "decompose", "from": "f1", "question": "Split f1."},
+            {"type": "decompose", "from": "f1", "question": "Split f1 too."},
+        ),
+        _validate(1, drop=[{"index": 0, "duplicateOf": "i1", "reason": "same as i1"}]),
+        _explore_reply(_sub_claim("Sub claim")),
+        _reason({"type": "verify", "from": "f2", "question": "Judge f2."}),
+        # duplicateOf points at i2, which is itself dropped: the engine overrides the drop.
+        _validate(drop=[{"index": 0, "duplicateOf": "i2", "reason": "same as i2"}]),
+        _compare_reply(),
+        NO_REASON,
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.intents[1].status == "dropped"  # i2 stays dropped
+    redo = board.intents[3]  # i4
+    assert redo.id == "i4"
+    assert redo.status == "done"  # kept by the override, then executed
+    assert redo.duplicateOf is None
+
+    end = [
+        event
+        for event in store.read_events()
+        if event.type == "VALIDATE" and event.payload["phase"] == "end"
+    ][-1]
+    assert end.payload["kept"] == 1
+    assert end.payload["dropped"] == 0
+    assert end.payload["drops"] == []
+    assert end.payload["overridden"] == [
+        {"index": 0, "duplicateOf": "i2", "reason": "same as i2"}
+    ]
+
+
+async def test_validate_does_not_override_drop_of_a_live_intent(tmp_path: Path) -> None:
+    # Only a ``dropped`` duplicate target is overridden: an ``open`` Intent is a real
+    # duplicate, so the drop stands and keeps its ``duplicateOf``.
+    store = RunStore(tmp_path / "run_001")
+    store.append_event("PROJECT", {"origin": _origin().to_dict(), "goal": _goal().to_dict()})
+    store.append_event(
+        "INTENT",
+        {"intent": Intent(id="i1", type="explore", from_="origin", question="Re-scan.").to_dict()},
+    )
+    engine = _engine(store, _validate(drop=[{"index": 0, "duplicateOf": "i1", "reason": "same"}]))
+    board = reduce(store.read_events())
+
+    result = await engine._validate(
+        [Intent(id="i2", type="explore", from_="origin", question="Re-scan.")], board
+    )
+
+    assert result.decisions[0].drop is True
+    assert result.decisions[0].duplicate_of == "i1"
+
+
+async def test_validate_keeps_in_batch_drops(tmp_path: Path) -> None:
+    # An in-batch duplicate (``duplicateOf`` null) is not a dropped-target drop, so the
+    # override never touches it.
+    store = RunStore(tmp_path / "run_001")
+    store.append_event("PROJECT", {"origin": _origin().to_dict(), "goal": _goal().to_dict()})
+    engine = _engine(
+        store, _validate(1, drop=[{"index": 0, "duplicateOf": None, "reason": "same as 1"}])
+    )
+    board = reduce(store.read_events())
+
+    result = await engine._validate(
+        [
+            Intent(id="i1", type="explore", from_="origin", question="a"),
+            Intent(id="i2", type="explore", from_="origin", question="a"),
+        ],
+        board,
+    )
+
+    assert result.decisions[0].drop is True
+    assert result.decisions[0].duplicate_of is None
+    assert result.decisions[1].drop is False
 
 
 async def test_validate_rebuilds_candidate_lifecycle_fields(tmp_path: Path) -> None:
@@ -760,7 +845,7 @@ async def test_verify_intent_is_dispatched_to_compare(tmp_path: Path) -> None:
     assert verify.type == "verify"
     assert verify.status == "done"
     assert [fact.kind for fact in board.facts].count("compare") == 1
-    assert board.status == "running"
+    assert board.status == "stopped"
 
 
 async def test_explore_search_failure_fails_run(tmp_path: Path) -> None:
@@ -948,8 +1033,9 @@ async def test_explore_records_session_and_event_order(tmp_path: Path) -> None:
     await engine.run(origin=_origin(), goal=_goal())
 
     events = store.read_events()
-    assert [event.type for event in events[-3:]] == ["EXECUTE", "CONCLUDE", "SESSION"]
-    session = events[-1]
+    # The dispatch round commits, then the max_rounds safety valve writes a terminal STOPPED.
+    assert [event.type for event in events[-4:]] == ["EXECUTE", "CONCLUDE", "SESSION", "STOPPED"]
+    session = events[-2]
     assert session.payload["task"] == "Explore"
     assert session.payload["intentId"] == "i2"
     assert session.payload["ref"] == "sessions/sess_004.json"
@@ -1097,7 +1183,7 @@ async def test_heartbeat_is_emitted_while_worker_runs(tmp_path: Path) -> None:
     assert heartbeats  # the engine kept the lease alive during the slow call
     assert {event.payload["intentId"] for event in heartbeats} == {"i2"}
     assert board.intents[1].status == "done"
-    assert board.status == "running"
+    assert board.status == "stopped"  # max_rounds=1 safety valve, now a terminal STOPPED
 
 
 async def test_heartbeat_timeout_releases_intent(tmp_path: Path) -> None:
@@ -1118,9 +1204,12 @@ async def test_heartbeat_timeout_releases_intent(tmp_path: Path) -> None:
     releases = [event for event in events if event.type == "RELEASE"]
     assert releases and releases[-1].payload["intentId"] == "i2"
     assert not any(event.type == "FAILED" for event in events)
-    assert board.status == "running"
+    # The round added no facts, so the loop stops on a terminal stall; the released
+    # Intent stays open (I6 does not retry it).
+    assert board.status == "stopped"
+    assert events[-1].type == "STOPPED"
+    assert events[-1].payload["reason"] == "stalled: dispatch produced no new facts"
     intent = board.intents[1]
-    # Released back to open; I6 does not retry it because this round added no facts.
     assert intent.status == "open"
     assert intent.claimedBy is None
 
@@ -1203,8 +1292,9 @@ async def test_slow_search_trips_heartbeat_timeout(tmp_path: Path) -> None:
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
-    # The lease covers the search phase too, so a hung search does not hold the Intent.
-    assert board.status == "running"
+    # The lease covers the search phase too, so a hung search does not hold the Intent;
+    # the round then added no facts, so the loop stops on a terminal stall.
+    assert board.status == "stopped"
     assert any(event.type == "RELEASE" for event in store.read_events())
     assert board.intents[1].status == "open"
 
@@ -1257,7 +1347,7 @@ async def test_auto_skips_gate_a(tmp_path: Path) -> None:
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
-    assert board.status == "running"
+    assert board.status == "stopped"  # no runnable direction -> terminal dead-end
     assert not any(event.type == "REQUEST_HUMAN" for event in store.read_events())
 
 
@@ -1271,7 +1361,7 @@ async def test_run_auto_override_skips_gate(tmp_path: Path) -> None:
     )
     board = await engine.run(origin=_origin(), goal=_goal(), auto=True)
 
-    assert board.status == "running"
+    assert board.status == "stopped"  # no runnable direction -> terminal dead-end
     assert not any(event.type == "REQUEST_HUMAN" for event in store.read_events())
 
 
@@ -1322,7 +1412,8 @@ async def test_resume_approve_continues_the_run(tmp_path: Path) -> None:
 
     board = await engine.resume(decision="approve")
 
-    assert board.status == "running"
+    # One decompose round ran, then no runnable direction -> terminal dead-end.
+    assert board.status == "stopped"
     decisions = [event for event in store.read_events() if event.type == "HUMAN_INPUT"]
     assert decisions[0].payload["decision"] == "approve"
     assert decisions[0].payload["author"] == "human"
@@ -1346,7 +1437,8 @@ async def test_resume_edit_records_decision_and_continues(tmp_path: Path) -> Non
 
     board = await engine.resume(decision="edit", text="tighten the claim", targets=["f1"])
 
-    assert board.status == "running"
+    # One decompose round ran, then no runnable direction -> terminal dead-end.
+    assert board.status == "stopped"
     decision = next(event for event in store.read_events() if event.type == "HUMAN_INPUT")
     assert decision.payload["decision"] == "edit"
     assert decision.payload["text"] == "tighten the claim"
@@ -1519,9 +1611,12 @@ async def test_stigmergy_stops_at_dead_end(tmp_path: Path) -> None:
         NO_REASON,  # the next round offers no direction
     ).run(origin=_origin(), goal=_goal())
 
-    # Reason added facts, but round 2 proposes nothing: the loop stops (no terminal).
-    assert board.status == "running"
+    # Reason added facts, but round 2 proposes nothing: the loop stops on a terminal
+    # STOPPED (a dead-end used to leave the run permanently ``running``).
+    assert board.status == "stopped"
     assert [intent.status for intent in board.intents] == ["done", "done"]
+    stopped = [event for event in store.read_events() if event.type == "STOPPED"]
+    assert [event.payload["reason"] for event in stopped] == ["dead-end: no runnable intent"]
     starts = [
         event
         for event in store.read_events()
@@ -1543,7 +1638,9 @@ async def test_stigmergy_dedups_intents_across_rounds(tmp_path: Path) -> None:
     ).run(origin=_origin(), goal=_goal())
 
     dropped = board.intents[2]
-    assert board.status == "running"
+    # The duplicate targets a ``done`` Intent, so the drop stands; with no open Intent
+    # left the loop then stops on a terminal dead-end.
+    assert board.status == "stopped"
     assert dropped.id == "i3"
     assert dropped.status == "dropped"
     assert dropped.duplicateOf == "i2"
@@ -1569,8 +1666,12 @@ async def test_stigmergy_respects_max_rounds(tmp_path: Path) -> None:
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
-    # One productive round happened, then the safety valve stopped the loop.
-    assert board.status == "running"
+    # One productive round happened, then the safety valve stopped the loop with a
+    # terminal STOPPED recording how many rounds ran.
+    assert board.status == "stopped"
+    stopped = [event for event in store.read_events() if event.type == "STOPPED"]
+    assert [event.payload["reason"] for event in stopped] == ["max rounds reached"]
+    assert stopped[0].payload["rounds"] == 1
     assert [intent.id for intent in board.intents] == ["i1", "i2"]
     starts = [
         event
@@ -1659,7 +1760,7 @@ async def test_reason_hint_on_completion_writes_agent_hint(tmp_path: Path) -> No
     assert board.hints[0].author == "agent"
 
 
-async def test_reason_hint_on_dead_end_keeps_run_running(tmp_path: Path) -> None:
+async def test_reason_hint_on_dead_end_is_kept(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     dead_end = json.dumps(
         {"facts": [], "intents": [], "complete": None, "hint": "no source claims this"}
@@ -1673,8 +1774,8 @@ async def test_reason_hint_on_dead_end_keeps_run_running(tmp_path: Path) -> None
         dead_end,  # round 2 offers no direction but leaves a note
     ).run(origin=_origin(), goal=_goal())
 
-    # The dead-end hint is kept on the board; the run stays running (no terminal).
-    assert board.status == "running"
+    # The dead-end hint is kept on the board; the loop then stops with a terminal STOPPED.
+    assert board.status == "stopped"
     hints = [event for event in store.read_events() if event.type == "HINT"]
     assert [event.payload["hint"]["id"] for event in hints] == ["h1"]
     assert hints[0].payload["hint"]["author"] == "agent"
@@ -1713,8 +1814,9 @@ async def test_reason_hint_without_satisfied_goal_is_ignored(tmp_path: Path) -> 
     ).run(origin=_origin(), goal=_goal())
 
     # The structural stop condition does not hold yet (no decompose/compare), so the
-    # intermediate convergence call leaves no hint and no COMPLETE (M2 rule preserved).
-    assert board.status == "running"
+    # intermediate convergence call leaves no hint and no COMPLETE (M2 rule preserved);
+    # with no runnable direction the loop then stops on a terminal dead-end.
+    assert board.status == "stopped"
     assert not [event for event in store.read_events() if event.type == "HINT"]
     assert all(event.type != "COMPLETE" for event in store.read_events())
 
@@ -1837,9 +1939,9 @@ async def test_reason_complete_without_supporting_structure_is_ignored(
     board = await _engine(store, _bootstrap("A claim"), reason).run(origin=_origin(), goal=_goal())
 
     # M2: a bare "complete" no longer ends the run. The structural stop condition
-    # (every claim decomposed and sourced, deviations scored) must hold first, so the
-    # run stays "running" and no COMPLETE is written.
-    assert board.status == "running"
+    # (every claim decomposed and sourced, deviations scored) must hold first, so no
+    # COMPLETE is written; with no runnable direction the loop then stops on dead-end.
+    assert board.status == "stopped"
     events = store.read_events()
     assert all(event.type != "COMPLETE" for event in events)
     ends = [event for event in events if event.type == "REASON" and event.payload["phase"] == "end"]
