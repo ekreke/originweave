@@ -72,6 +72,24 @@ def _first_host_port(port_output: str) -> str:
     raise ContainerError(f"could not read the container port from {port_output!r}")
 
 
+def _error_detail(response: httpx.Response) -> str:
+    """The failure text of a non-200 runner response.
+
+    The runner returns ``{"error": "<Type>: <message>"}`` (see ``runtime/runner.py``);
+    prefer that over the raw JSON so the run's FAILED reason reads cleanly. Anything
+    else (a proxy error page, a truncated body) falls back to the raw text.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, str) and error:
+            return error
+    return response.text[:500]
+
+
 class ContainerManager:
     """Starts and reclaims one runtime container per Worker call (M3a)."""
 
@@ -192,7 +210,7 @@ class ContainerWorker:
             raise ContainerError(f"worker container request failed: {exc}") from exc
         if response.status_code != 200:
             raise ContainerError(
-                f"worker container returned {response.status_code}: {response.text[:500]}"
+                f"worker container returned {response.status_code}: {_error_detail(response)}"
             )
         try:
             data = response.json()

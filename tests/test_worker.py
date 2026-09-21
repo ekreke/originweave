@@ -273,6 +273,116 @@ async def test_pi_worker_maps_session_and_tool_events(
     assert provider["apiKey"] == "$OPENAI_API_KEY"
 
 
+def _text_delta(delta: str) -> MessageUpdateEvent:
+    return MessageUpdateEvent(
+        type="message_update",
+        assistantMessageEvent=AssistantMessageEvent(type="text_delta", delta=delta),
+    )
+
+
+async def test_pi_worker_folds_streaming_deltas_into_one_message_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    events = [
+        AgentStartEvent(type="agent_start"),
+        _text_delta("hel"),
+        _text_delta("lo"),
+        _text_delta(" "),
+        _text_delta("world"),
+        TurnEndEvent(type="turn_end"),
+    ]
+    agent = _FakePiAgent(events, text="hello world")
+    worker = PiWorker(
+        model=config.ModelConfig(model="test-model", base_url="https://model.example/v1"),
+        tools=(),
+        cwd=tmp_path,
+        agent_factory=_FakePiFactory(agent),
+        runtime_checker=lambda: None,
+    )
+
+    reply = await worker.run(
+        "Bootstrap", PromptTemplate(name="bootstrap", text="SYSTEM"), await _board(tmp_path)
+    )
+
+    assert [step.kind for step in reply.steps] == ["turn-start", "message", "turn-end"]
+    message = reply.steps[1]
+    assert message.text == "hello world"
+    assert message.seq == 2
+
+
+async def test_pi_worker_splits_message_steps_around_tool_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    events = [
+        AgentStartEvent(type="agent_start"),
+        _text_delta("think"),
+        _text_delta("ing"),
+        ToolExecutionStartEvent(type="tool_execution_start", toolName="read", args={"path": "a"}),
+        _text_delta("after"),
+        _text_delta(" tool"),
+        TurnEndEvent(type="turn_end"),
+    ]
+    agent = _FakePiAgent(events, text="thinkingafter tool")
+    worker = PiWorker(
+        model=config.ModelConfig(model="test-model", base_url="https://model.example/v1"),
+        tools=("read",),
+        cwd=tmp_path,
+        agent_factory=_FakePiFactory(agent),
+        runtime_checker=lambda: None,
+    )
+
+    reply = await worker.run(
+        "Bootstrap", PromptTemplate(name="bootstrap", text="SYSTEM"), await _board(tmp_path)
+    )
+
+    assert [step.kind for step in reply.steps] == [
+        "turn-start",
+        "message",
+        "tool-call",
+        "message",
+        "turn-end",
+    ]
+    assert reply.steps[1].text == "thinking"
+    assert reply.steps[3].text == "after tool"
+
+
+async def test_pi_worker_keeps_message_steps_separate_across_turns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    events = [
+        AgentStartEvent(type="agent_start"),
+        _text_delta("first"),
+        TurnEndEvent(type="turn_end"),
+        _text_delta("second"),
+        TurnEndEvent(type="turn_end"),
+    ]
+    agent = _FakePiAgent(events, text="firstsecond")
+    worker = PiWorker(
+        model=config.ModelConfig(model="test-model", base_url="https://model.example/v1"),
+        tools=(),
+        cwd=tmp_path,
+        agent_factory=_FakePiFactory(agent),
+        runtime_checker=lambda: None,
+    )
+
+    reply = await worker.run(
+        "Bootstrap", PromptTemplate(name="bootstrap", text="SYSTEM"), await _board(tmp_path)
+    )
+
+    assert [step.kind for step in reply.steps] == [
+        "turn-start",
+        "message",
+        "turn-end",
+        "message",
+        "turn-end",
+    ]
+    assert [step.text for step in reply.steps if step.kind == "message"] == ["first", "second"]
+    assert [step.seq for step in reply.steps] == [1, 2, 3, 4, 5]
+
+
 async def test_pi_worker_disables_tools_when_none_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

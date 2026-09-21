@@ -220,6 +220,7 @@ def run_pb(run: Run) -> Any:
         source_type=run.source_type,
         analysis=run.analysis,
         status=run.status,
+        status_reason=run.status_reason,
         goal=run.goal,
         facts=run.facts,
         deviations=run.deviations,

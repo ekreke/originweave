@@ -16,7 +16,7 @@ import uvicorn
 from smoke import _FakePrompt, _NoSearch, _replies, _ScriptedModel
 
 from originweave.capabilities.worker import LocalWorker
-from originweave.config import Config
+from originweave.config import Config, WorkerConfig
 from originweave.persistence import Project, ProjectRegistry
 from originweave.server import Providers, create_app
 
@@ -41,7 +41,14 @@ def main() -> None:
             prompt=_FakePrompt(),
         )
         # Let create_app build the context so the lifespan drains the run scheduler.
-        app = create_app(config=Config(), providers=providers, root=root, static_dir=static_dir)
+        # Force the injected fake worker: the production default is container execution,
+        # which would try to spawn Docker instead of running the scripted worker.
+        app = create_app(
+            config=Config(worker=WorkerConfig(execution="in-process", container_scope="per-call")),
+            providers=providers,
+            root=root,
+            static_dir=static_dir,
+        )
         uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
 
 

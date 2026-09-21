@@ -65,7 +65,9 @@ boundary 灰、compare 青、deviation 红）；`Intent` 为**状态色迷你卡
   - **ENTITIES** — 实体表：`ID | Name | Type | Aliases | Conf. | Mentions`。
   - **EVENTS** — 事件时间线，按 `tone` 着色（黑板协议事件）。
 - 右栏 **INSPECTOR**：顶部 **run 统计块**（FACTS / INTENTS / OPEN / HINTS 四格）+
-  元信息行（Status / Goal / Created / Steps / Conf. / Budget）；选中节点详情
+  元信息行（Status / Goal / Created / Steps / Conf. / Budget）；`status` 为 `failed`/`stopped`
+  且 `statusReason` 非空时，Status 行旁提供「失败原因 / 终止原因」按钮，点击展开
+  `statusReason`（由最后一个 `FAILED`/`STOPPED` 事件派生）；选中节点详情
   （Fact 摘要即时显示，`note` + 逐字引用 `quote + sourceTitle + locator` 经 `GetFactDetail`
   **按需加载**）、Intent 会话、`Hints`（含写 Hint 输入框）。
 - **HITL Gate 面板**：`run.status = awaiting_human` 时，INSPECTOR 顶部高亮门控卡片

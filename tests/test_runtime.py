@@ -253,6 +253,29 @@ async def test_container_worker_reaps_when_the_task_fails(tmp_path: Path) -> Non
     assert manager.removed == ["cid-1"]  # the container is reclaimed on failure too
 
 
+async def test_container_worker_surfaces_the_runner_error(tmp_path: Path) -> None:
+    manager = _FakeManager()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        # The runner's 500 body (runtime/runner.py): surface its message verbatim so the
+        # run's FAILED reason is diagnosable, not just "500 Internal Server Error".
+        return httpx.Response(500, json={"error": "RuntimeError: OPENAI_API_KEY is not set"})
+
+    worker = ContainerWorker(
+        manager=manager,  # type: ignore[arg-type]
+        run_dir=tmp_path,
+        env={},
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(container_module.ContainerError) as excinfo:
+        await worker.run("Bootstrap", PromptTemplate(name="bootstrap", text="B"), _board())
+    assert "worker container returned 500: RuntimeError: OPENAI_API_KEY is not set" in str(
+        excinfo.value
+    )
+
+
 async def test_run_container_worker_reuses_one_container_and_closes_at_run_end(
     tmp_path: Path,
 ) -> None:
@@ -461,3 +484,35 @@ async def test_runner_health_and_run(monkeypatch: pytest.MonkeyPatch) -> None:
         )
     assert response.status_code == 200
     assert response.json()["text"].startswith('{"facts"')
+
+
+async def test_runner_reports_a_worker_failure_as_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FailingWorker:
+        name = "failing"
+
+        async def run(self, *args: object, **kwargs: object) -> object:
+            raise RuntimeError("OPENAI_API_KEY is not set")
+
+    monkeypatch.setattr(runner_module, "build_container_worker", lambda: _FailingWorker())
+    app = runner_module.create_runner_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://runner"
+    ) as client:
+        response = await client.post(
+            "/run",
+            json={"task": "Bootstrap", "template": "B", "board": _board().to_dict()},
+        )
+    # The host records this body as the run's FAILED reason; an opaque 500 body would
+    # leave the failure undiagnosable.
+    assert response.status_code == 500
+    assert response.json()["error"] == "RuntimeError: OPENAI_API_KEY is not set"
+
+
+def test_runner_redacts_secret_env_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-super-secret-value")
+
+    detail = runner_module._redact("auth failed for sk-super-secret-value (visible)")
+
+    assert "sk-super-secret-value" not in detail
+    assert "***" in detail
+    assert "visible" in detail

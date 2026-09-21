@@ -48,6 +48,7 @@ Run {
   sourceType,              # url | text
   analysis,                # provenance | relation | both（默认 provenance）
   status,                  # queued | running | awaiting_human | paused | stopped | completed | failed
+  statusReason,            # status=stopped|failed 时的终止原因；其余态为空
   goal,                    # 停止条件 / 判定标准
   facts, deviations,       # 计数
   entities, relations,     # 实体-关系图计数（analysis != provenance 时）
@@ -62,6 +63,8 @@ Run {
 `paused` = 人工暂停（可恢复）；`stopped` = 预算（`max_steps`/`max_wall`/`max_cost`，`CreateRun` 字段）
 触顶或人工终止，已落盘中间态（不可续跑，需新建 run）；`failed` = 执行异常终止。
 `paused`/`stopped`/`failed` 的 run 在 `replay` 时仍可完整复现到终止点。
+`statusReason` 由事件派生：取日志中最后一个 `FAILED`/`STOPPED` 的 `reason`
+（`blackboard-protocol.md` §5），仅在终止态非空，前端 INSPECTOR 据此展示失败/终止原因。
 
 ### 黑板事实图
 ```text

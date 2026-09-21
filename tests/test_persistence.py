@@ -103,6 +103,53 @@ def test_summarize_run_derives_from_events(tmp_path: Path) -> None:
     assert run.steps == Steps(current=0, total=0)
 
 
+def test_summarize_run_surfaces_the_terminal_reason(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    store.init_layout()
+    store.append_event("PROJECT", {"origin": _ORIGIN, "goal": _GOAL})
+    store.append_event("FAILED", {"reason": "worker container returned 500: boom"})
+
+    run = summarize_run(store)
+
+    assert run.status == "failed"
+    assert run.status_reason == "worker container returned 500: boom"
+
+
+def test_summarize_run_surfaces_a_stopped_reason(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    store.init_layout()
+    store.append_event("PROJECT", {"origin": _ORIGIN, "goal": _GOAL})
+    store.append_event("STOPPED", {"reason": "budget max_steps=60"})
+
+    run = summarize_run(store)
+
+    assert run.status == "stopped"
+    assert run.status_reason == "budget max_steps=60"
+
+
+def test_summarize_run_hides_the_reason_for_a_replay_prefix(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    store.init_layout()
+    store.append_event("PROJECT", {"origin": _ORIGIN, "goal": _GOAL})
+    store.append_event("FAILED", {"reason": "boom"})
+    events = store.read_events()
+
+    # Folding only the prefix (Replay before the FAILED) must not leak a reason.
+    folded = summarize_run(store, events=events[:1])
+
+    assert folded.status == "running"
+    assert folded.status_reason == ""
+
+
+def test_summarize_run_reason_is_empty_without_a_terminal_event(tmp_path: Path) -> None:
+    store = _store_with_events(tmp_path / "run_001")
+
+    run = summarize_run(store)
+
+    assert run.status == "completed"
+    assert run.status_reason == ""
+
+
 def test_summarize_run_meta_overrides_static_fields(tmp_path: Path) -> None:
     store = _store_with_events(tmp_path / "run_001")
     meta = {
@@ -187,7 +234,14 @@ def test_summarize_run_sample_without_run_json() -> None:
 
 
 def test_run_dict_round_trip() -> None:
-    run = Run(id="run_001", project_id="p", facts=3, intents=IntentCounts(open=1, done=2))
+    run = Run(
+        id="run_001",
+        project_id="p",
+        facts=3,
+        intents=IntentCounts(open=1, done=2),
+        status="failed",
+        status_reason="RuntimeError: boom",
+    )
 
     assert Run.from_dict(run.to_dict()) == run
 

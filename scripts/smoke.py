@@ -19,7 +19,7 @@ import httpx
 
 from originweave.capabilities.base import PromptTemplate
 from originweave.capabilities.worker import LocalWorker
-from originweave.config import Config
+from originweave.config import Config, WorkerConfig
 from originweave.persistence import Project, ProjectRegistry
 from originweave.server import Providers, ServerContext, create_app
 from originweave.server.service import Service
@@ -156,7 +156,13 @@ async def _main() -> int:
             search=_NoSearch(),
             prompt=_FakePrompt(),
         )
-        ctx = ServerContext.build(config=Config(), providers=providers, root=root)
+        ctx = ServerContext.build(
+            # The smoke run is in-process by design: force the injected fake worker
+            # instead of the production container backend (the config default).
+            config=Config(worker=WorkerConfig(execution="in-process", container_scope="per-call")),
+            providers=providers,
+            root=root,
+        )
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=create_app(service=Service(ctx))),

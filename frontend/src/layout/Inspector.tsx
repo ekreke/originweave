@@ -205,6 +205,9 @@ function GateCard({
 
 // Run-level stat tiles + meta rows (dashboard.md §2 INSPECTOR).
 function RunStats({ run, intents, hints }: { run: Run; intents?: Intent[]; hints?: Hint[] }) {
+  // Keyed by run id: navigating to another run must start collapsed again (the
+  // Inspector component instance is reused across runs by the console).
+  const [openReasonFor, setOpenReasonFor] = useState<string | null>(null)
   const open = (intents ?? []).filter((it) => it.status === 'open').length
   const stats = [
     [run.facts, 'FACTS'],
@@ -212,6 +215,12 @@ function RunStats({ run, intents, hints }: { run: Run; intents?: Intent[]; hints
     [open, 'OPEN'],
     [hints?.length ?? 0, 'HINTS'],
   ] as const
+  // A failed/stopped run carries its terminal reason (derived from the event log);
+  // an opaque status badge alone leaves the user unable to tell why it died.
+  const terminal = run.status === 'failed' || run.status === 'stopped'
+  const reasonLabel = run.status === 'failed' ? '失败原因' : '终止原因'
+  const reason = terminal ? run.statusReason : ''
+  const showReason = openReasonFor === run.id
   return (
     <div className="run-stats">
       <div className="stat-grid">
@@ -226,6 +235,17 @@ function RunStats({ run, intents, hints }: { run: Run; intents?: Intent[]; hints
         <dt>Status</dt>
         <dd>
           <span className={`status-badge status-${run.status}`}>{run.status}</span>
+          {reason ? (
+            <button
+              className="btn status-reason-toggle"
+              type="button"
+              aria-expanded={showReason}
+              aria-controls="run-status-reason"
+              onClick={() => setOpenReasonFor(showReason ? null : run.id)}
+            >
+              {showReason ? '收起' : reasonLabel}
+            </button>
+          ) : null}
         </dd>
         {run.goal ? (
           <>
@@ -250,6 +270,12 @@ function RunStats({ run, intents, hints }: { run: Run; intents?: Intent[]; hints
           tok {String(run.budget?.tokens ?? 0n)} · ${(run.budget?.cost ?? 0).toFixed(2)}
         </dd>
       </dl>
+      {reason && showReason ? (
+        <div id="run-status-reason" className="status-reason" role="note">
+          <h4>{reasonLabel}</h4>
+          <p className="status-reason-text">{reason}</p>
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -86,6 +86,9 @@ message Run {
   Budget budget = 15;
   string created_at = 16;
   string updated_at = 17;
+  // Terminal reason for status=stopped|failed (the last STOPPED/FAILED event's
+  // `reason`); empty while queued/running/awaiting_human/paused/completed.
+  string status_reason = 18;
 }
 
 // ---------------------------------------------------------------- board elements

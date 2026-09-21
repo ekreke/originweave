@@ -140,6 +140,7 @@ export function run(overrides: Partial<Run> = {}): Run {
     sourceType: 'text',
     analysis: 'provenance',
     status: 'running',
+    statusReason: '',
     goal: '',
     facts: 0,
     deviations: 0,

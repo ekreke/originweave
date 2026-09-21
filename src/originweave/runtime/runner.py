@@ -12,6 +12,7 @@ The worker body is rebuilt from environment variables injected at ``docker run``
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -27,6 +28,21 @@ from ..capabilities.model import OpenAIModel
 from ..capabilities.worker import LocalWorker, Worker
 from ..config import ModelConfig
 from .container import CONTAINER_PORT, ENV_BASE_URL, ENV_MODEL, ENV_PROVIDER, ENV_TOOLS
+
+logger = logging.getLogger(__name__)
+
+# Env values whose name hints at a credential are masked before a failure text is
+# logged or returned: the host persists the body to the run's event log and renders
+# it in the UI, so a leaked key would outlive the container.
+_SECRET_NAME_HINTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
+
+
+def _redact(text: str) -> str:
+    """Mask credential-shaped environment values appearing in ``text``."""
+    for name, value in os.environ.items():
+        if len(value) >= 8 and any(hint in name.upper() for hint in _SECRET_NAME_HINTS):
+            text = text.replace(value, "***")
+    return text
 
 
 def build_container_worker() -> Worker:
@@ -52,11 +68,23 @@ async def _health(_request: Request) -> JSONResponse:
 
 async def _run(request: Request) -> JSONResponse:
     body: dict[str, Any] = await request.json()
-    worker = build_container_worker()
-    template = PromptTemplate(name=str(body.get("task", "")), text=str(body.get("template", "")))
-    board = Board.from_dict(body.get("board") or {})
-    extra = body.get("extra") or None
-    reply = await worker.run(body["task"], template, board, extra=extra)
+    try:
+        worker = build_container_worker()
+        template = PromptTemplate(
+            name=str(body.get("task", "")), text=str(body.get("template", ""))
+        )
+        board = Board.from_dict(body.get("board") or {})
+        extra = body.get("extra") or None
+        reply = await worker.run(body["task"], template, board, extra=extra)
+    except Exception as exc:
+        # A worker failure (missing credential, runtime error, ...) must not become an
+        # opaque "500 Internal Server Error": the host records the body as the run's
+        # FAILED reason, so surface the exception type and message there. Redact first
+        # (`logger.error` rather than `logger.exception` so the raw traceback, which can
+        # echo the credential, never lands in the container log either).
+        detail = _redact(f"{type(exc).__name__}: {exc}")
+        logger.error("worker task %r failed: %s", body.get("task"), detail)
+        return JSONResponse({"error": detail}, status_code=500)
     return JSONResponse(
         {
             "text": reply.text,

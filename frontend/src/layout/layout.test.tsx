@@ -144,6 +144,43 @@ describe('Inspector', () => {
     render(<Inspector selection={{ type: 'intent', intent: detail.intents[1]! }} />)
     expect(screen.queryByRole('heading', { name: '会话' })).not.toBeInTheDocument()
   })
+
+  it('reveals a failed run reason behind a toggle', () => {
+    render(
+      <Inspector
+        run={run({ status: 'failed', statusReason: 'worker container returned 500: boom' })}
+      />,
+    )
+    // The reason stays hidden until asked for; the badge alone is not a diagnosis.
+    expect(screen.queryByText('worker container returned 500: boom')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '失败原因' }))
+    expect(screen.getByText('worker container returned 500: boom')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '收起' }))
+    expect(screen.queryByText('worker container returned 500: boom')).not.toBeInTheDocument()
+  })
+
+  it('labels a stopped run reason as 终止原因', () => {
+    render(<Inspector run={run({ status: 'stopped', statusReason: 'budget max_steps=60' })} />)
+    expect(screen.getByRole('button', { name: '终止原因' })).toBeInTheDocument()
+  })
+
+  it('collapses the reason again when switching to another run', () => {
+    const first = run({ id: 'run_a', status: 'failed', statusReason: 'boom' })
+    const { rerender } = render(<Inspector run={first} />)
+    fireEvent.click(screen.getByRole('button', { name: '失败原因' }))
+    expect(screen.getByText('boom')).toBeInTheDocument()
+
+    rerender(<Inspector run={run({ id: 'run_b', status: 'failed', statusReason: 'other' })} />)
+
+    expect(screen.queryByText('other')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '失败原因' })).toBeInTheDocument()
+  })
+
+  it('hides the reason toggle without a terminal reason', () => {
+    render(<Inspector run={run({ status: 'running' })} />)
+    expect(screen.queryByRole('button', { name: '失败原因' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '终止原因' })).not.toBeInTheDocument()
+  })
 })
 
 describe('RunList', () => {

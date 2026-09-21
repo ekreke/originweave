@@ -49,6 +49,20 @@ def _float(value: Any) -> float:
     return float(value)
 
 
+def _terminal_reason(events: Sequence[Event]) -> str:
+    """The last ``FAILED``/``STOPPED`` event's ``reason`` ("" when there is none).
+
+    The terminal reason is a *derived* field: it lives in the event log and is only
+    surfaced when the folded board ends in a terminal state (see ``summarize_run``).
+    """
+    reason = ""
+    for event in events:
+        if event.type in ("FAILED", "STOPPED"):
+            value = event.payload.get("reason")
+            reason = value if isinstance(value, str) else ""
+    return reason
+
+
 @dataclass
 class IntentCounts:
     open: int = 0
@@ -103,6 +117,7 @@ class Run:
     source_type: str = "text"
     analysis: str = "provenance"
     status: str = "queued"
+    status_reason: str = ""
     goal: str = ""
     facts: int = 0
     deviations: int = 0
@@ -123,6 +138,7 @@ class Run:
             "source_type": self.source_type,
             "analysis": self.analysis,
             "status": self.status,
+            "status_reason": self.status_reason,
             "goal": self.goal,
             "facts": self.facts,
             "deviations": self.deviations,
@@ -148,6 +164,7 @@ class Run:
             source_type=_str(data.get("source_type")) or "text",
             analysis=_str(data.get("analysis")) or "provenance",
             status=_str(data.get("status")) or "queued",
+            status_reason=_str(data.get("status_reason")),
             goal=_str(data.get("goal")),
             facts=_int(data.get("facts")),
             deviations=_int(data.get("deviations")),
@@ -259,6 +276,11 @@ def summarize_run(
         source_type=_str(meta.get("source_type")) or "text",
         analysis=_str(meta.get("analysis")) or "provenance",
         status=board.status if board is not None else "queued",
+        status_reason=(
+            _terminal_reason(events)
+            if board is not None and board.status in {"failed", "stopped"}
+            else ""
+        ),
         goal=_str(meta.get("goal")) or (board.goal.label if board is not None else ""),
         facts=len(board.facts) if board is not None else 0,
         deviations=sum(1 for fact in board.facts if fact.kind == "deviation")

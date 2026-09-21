@@ -276,12 +276,22 @@ class PiWorker:
         def append(kind: str, *, name: str = "", text: str = "", ok: bool | None = None) -> None:
             steps.append(WorkerStep(seq=len(steps) + 1, kind=kind, name=name, text=text, ok=ok))
 
+        def append_message_delta(delta: str) -> None:
+            # Assistant text arrives as token/character-sized streaming deltas; fold a
+            # contiguous run into one ``message`` step so the step chain stays readable.
+            # Any following tool call/result or turn-end breaks the run into a new step.
+            last = steps[-1] if steps else None
+            if last is not None and last.kind == "message":
+                last.text += delta
+            else:
+                append("message", text=delta)
+
         if isinstance(event, AgentStartEvent):
             append("turn-start")
         elif isinstance(event, MessageUpdateEvent):
             update = event.assistantMessageEvent
             if update is not None and update.type == "text_delta" and update.delta:
-                append("message", text=update.delta)
+                append_message_delta(update.delta)
         elif isinstance(event, ToolExecutionStartEvent):
             append("tool-call", name=event.toolName or "", text=_render_value(event.args))
         elif isinstance(event, ToolExecutionEndEvent):
