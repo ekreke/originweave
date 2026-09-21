@@ -21,107 +21,46 @@
 
 ## 当前实现状态
 
-- 已实现：`originweave init`（写 `originweave.toml`，已存在需 `--force`）、
-  `originweave capabilities list`、配置加载/校验、capability 注册表，
-  事件日志 → 黑板 reducer → `originweave replay <run-dir>`（只读、不触网），
-  以及 **M1 库层 OODA 引擎的 Bootstrap / Reason / Validate / Explore pass + Stigmergy 收敛**（I1–I6）
-  与 **M2 的 verify 型 `compare` pass / 偏差记分卡 / Gate B**（`src/originweave/engine.py`、
-  `src/originweave/report.py`、`prompts/{bootstrap,reason,validate,explore,compare}.txt`）。
-- **引擎是库层**：`Engine` 是黑板的**唯一写入者**（事件经 `RunStore.append_event`），
-  进程内 Dispatcher 是 M3 容器化前的临时态。**不经 CLI 暴露**，由 M1c-1 的 server 进程内调用
-  （容器化归 M3）；`verify` 型 Intent 自 M2 起经 `compare` pass 派发。**I4 并发已落地**：一轮内先按
-  id 序 `EXECUTE` 认领，再受 `[worker].max_concurrency`（<=16）并发执行、**按 id 序提交**（Board
-  确定）；执行期引擎代发 `HEARTBEAT`，超过 `[worker].heartbeat_timeout` 按
-  `heartbeat_on_timeout=release|fail` 写 `RELEASE`/`FAILED`。**I5 HITL 已落地**：`Engine(auto=...)`
-  非 auto 时 `run` 在 Bootstrap 后写 `REQUEST_HUMAN{gate:"confirm-claim"}` 停在 Gate A，
-  `Engine.resume(decision, text?, targets?)` 写 `HUMAN_INPUT` 继续（`reject`→`STOPPED`）或
-   `run(auto=True)` 跳过。**I6 收敛已落地**：`_continue` 多轮 Reason→dispatch，仅在产生新 Fact 时再
-  Reason，至 `COMPLETE`／死胡同（保持 `running`）；`Engine(max_rounds=10)` 为安全阀。
-  **server（M1c-1）C1–C4 已落地**：**C1** codegen + Connect app 骨架——`make proto`
-  （需 buf + **`protoc`** + `protoc-gen-connect-python`）生成 `src/originweave/v1`（`originweave.v1.*`，不入库，
-  ruff/mypy exclude）；`server/app.py` 的 `create_app` 挂载 Connect ASGI app，`ListProjects` 空表、
-  其余 `UNIMPLEMENTED`。**C2** 持久化已落地——`persistence.py`（`Run`/`Project`/`summarize_run`/
-  `allocate_run_id`/`ProjectRegistry`），`run.json`（静态元数据）+ `projects/<id>/project.json`，
-  配置 `[project].dir`。**C3a** 只读接线已落地——`server/context.py`（`ServerContext`/`Providers`，
-  `create_app(config/providers/root)` 注入）、`server/convert.py`（→ `originweave.v1.*`），
-  `service.py` 实现 `ListProjects`/`GetProject`/`ListProjectRuns`/`ListRuns`/`GetRun`。
-  **C3b** 写 RPC 已落地——`CreateRun`（`source_text` → `input/document.md` + `run.json`，后台
-  asyncio 任务跑 `Engine.run`，等 `PROJECT` 落盘后返回）、`AddHint`、`SubmitHumanInput`；`server/context.py`
-  增 `RunScheduler`（每 run 单例 `RunStore` + 任务持有/`drain`）。**C4** `originweave ui` 已落地——
-  `create_app(..., static_dir, run_dir)` 把 Connect 挂在 proto path、SPA 静态挂 `/`、lifespan 收尾
-  `scheduler.drain()`；`--run <dir>` 单 run 只读（写 RPC 拒）。起 run 仍走 server/proto
-  （`CreateRun` 经 `source_text` 收资料 A）。**M4a**：`CreateProject`（proto + `server/service.py`；
-  重复 → `ALREADY_EXISTS`）+ 前端 `/projects/new`（`routes/NewProject.tsx`）+ `Makefile dev`（可写；
-  `ui`/`run` 仍只读样例）——**起 run 前必须先建项目**。**`make proto` 是 `make lint`/`test` 的前置**
-  （无 gen 时 server 测试 `importorskip` 跳过）。
-- **M2 偏差记分卡已落地**：verify 型 Intent 经 `compare` pass 派发（`prompts/compare.txt`、不检索），
-  产出 `compare` + `deviation` Fact（带 `severity`/`confidence`）；`COMPLETE` 走严格判据（论点全部
-  拆解、子断言回链或 `open`、已有 compare）；`report.py`（`derive_report`/`render_report`）经
-  `store.write_report` 落 run dir `report.md`（派生物，`replay` 不重写）；**Gate B（`arbitrate`）**
-  由 reply `gate` 触发，server `SubmitHumanInput` 放行 `arbitrate`；server `RunDetail.report`/
-  `deviations` 暴露记分卡（`server/convert.py`）。
-- **CLI 无 `trace`**：起 run 走 **server / proto API**（`CreateRun`，见 `dashboard.md` §4 与
-  `proto/`），编排归 server。CLI 只保留 `init` / `replay` / `ui` / `capabilities` / `mcp`。
-- **stub（打印 “not implemented yet”、返回 0）**：`mcp` / `capabilities install-obscura`。
-  `ui` 已接线（M1c-1 C4）：Connect API + `frontend/dist`（存在时，SPA 回退）统一端口 8765，
-  `--run <dir>` 单 run 只读；`make run` / `make ui` 可用。`demo` 归 M4。
-  `replay` 已接线，`examples/copilot_productivity/` 已含 `events.jsonl`（M0d），`make replay`
-  可不触网复现 Board。
-- 样例 fixture 由 `scripts/build_sample_fixtures.py` 确定性生成（`--check` 校验）；
-  改样例事件后要重跑该脚本。资料 A 与来源是**冻结快照**，重新联网结果具时效性。
-- **能力为真实调用**（Phase R 已移除离线/cache/录制回放）：`search`（免费 MCP 端点，
-  `exa`/`parallel`，**免 key**）、`model`（OpenAI 兼容）与 prompt `local` 已落地；
-  prompt `langfuse` 为 M3 前 stub。凭据只从环境变量读、**多为可选**：`EXA_API_KEY` /
-  `PARALLEL_API_KEY`（可选，换配额）、`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、
-  `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
-  单元测试**注入 fake provider**（`httpx.MockTransport`），不打真网。
-- **prompt 模板在 `prompts/`**（已存在，如 `prompts/bootstrap.txt`）：`local` provider 按
-  `[capability.prompt].directory` 读 `<name>.txt|.md`；新增任务指令要同时加模板文件。
-- `proto/` 契约已定义；生成代码**不入库**（`buf generate` 产出、**勿手改**）：前端 TS 由
-  `pnpm --dir frontend gen`（`frontend/buf.gen.yaml`，落到 `frontend/src/gen/`），
-  server Python 由 `make proto`（根 `buf.gen.yaml`，落到 `src/originweave/v1` → `originweave.v1.*`）。
-- **前端（`frontend/`，M1b 脚手架 + M1c-2b 接线 + M6 P5 + 图数据拆分/重构）**：React + Vite + TS +
-  React Flow + Connect；**M1c-2b 2b-1–2b-5 全部落地**（`@tanstack/react-query`；
-  `api/{queryClient,hooks}.ts`，活动态轮询；`Overview`/`Project`/`AppShell`/`Console` 读真实数据；
-  图/表格选中 → Inspector；Hints `AddHint`；Gate A/B → `SubmitHumanInput`；Replay 走服务端折算；
-  新建核验表单 + 顶栏；`transport` 默认同源）。
-  **图数据拆分已落地**：控制台轮询**轻量 `GetRunGraph`**（`RunGraph`/`FactSummary`，无 note/evidence/
-  events/sessions），`useFactDetail` 点节点才取全量 Fact（Replay 下 `staleTime=Infinity`）、
-  `useRunEvents` 仅 EVENTS 页签激活时取、`useRunSessions` 按需取（不轮询）；`GetRun` 保留给
-  NewRun 重试预填（`source_text`）与兼容。`graph.event_count` 是 Replay 游标上界。
-  **图渲染已重构**：节点为**紧凑矩形卡**（id+kind chip 头部、截断预览正文；颜色按 kind，去形状
-  clip-path）、布局用 **`@dagrejs/dagre`**（`graph/layout.ts`，TB 分层、确定性、非零 `Fact.position`
-  逐节点优先、dagre 补缺）、画布带 Controls/MiniMap/图例、选中高亮入射边其余变暗（`classifyEdges`）；
-  中栏顶栏为面包屑 + 标题 + 状态/预算 + Replay 控件，右栏 INSPECTOR 顶部为 run 统计块
-  （FACTS/INTENTS/OPEN/HINTS）+ 元信息行，左栏 run 卡片 `run-card-active` 高亮当前 run。
-  **浏览器 e2e**：`@playwright/test`（`frontend/e2e/`，`make frontend-e2e`）驱动真实 `frontend/dist` +
-  fake-provider server（`scripts/e2e_server.py`）。
-  **M6 P5 已落地**：Settings 页（`routes/Settings.tsx` + `settingsModel.ts`；`useSettings`/`useUpdateSettings`
-  回传**全量 `[worker]` 块**）、INSPECTOR 会话视图（`SessionView`；原始输入/输出 + 步骤链）、EVENTS 按 worker
-  过滤（`tabs/events.ts`）。**不接 mock**（fixture 仅测试用）。
-- **M3（进行中，见 `SPEC.md` M3）**：**M3a 已落地** —— **container-per-worker**（每个 Worker 调用一个
-  临时容器）：`runtime/{container,runner}.py`（`ContainerWorker` 每次起/销毁容器 + 容器内 `runner`
-  的 `POST /run`/`GET /health`（`runner.py`））、`Dockerfile.runtime` + `make image`、`[worker].execution`
-  （`in-process`|`container`，默认 `in-process`）+ `[worker].image`。Engine/Dispatcher 仍在 server
-  （编排 + 黑板唯一写入者），容器只跑 Worker。**容器池预热**（`max_concurrency` 预热复用）为后续优化（见 TODO）。
-- **M6（进行中，见 `SPEC.md` M6）**：把执行体抽为可插拔 **`Worker`**（`[worker].provider = local | pi`）；
-  **P2 `PiWorker` 已落地**，经固定 `pi-py-sdk` 驱动官方 TS agent 运行时（运行时需 **Node + `pi` 二进制**，
-  仅 CI 之外；**live 有配置目录环境变量名 bug，见「约定与坑」**）。
-  每次 Worker 调用 = 一个**隔离会话**，原始输入/输出 + 步骤链落 run dir `sessions/<id>.json`，
-  并由 `SESSION`/`WORKER_STEP` 事件索引（reducer 忽略，Board 不变）。检索类工具由 **TS 扩展回调
-  server `Search` RPC**（provider 选择留 Python，红线 5）——**P4 已落地**：
-  `src/originweave/pi_extensions/search.ts`（包内资源，`ORIGINWEAVE_SERVER_URL` 默认
-  `http://127.0.0.1:8765`）；`PiWorker` 注入 `-e <ext>` + `--tools search` + server URL、暴露 `tools`；
-  worker 拥有 `search` 工具时 `explore` 由 agent 自主检索（引擎不预取）。**P2 的 agent-dir 环境变量名
-  bug 已修**（`resolve_agent_dir_env_name` 按二进制 `package.json` 推导）。
-  **P3 已拆为 P3a/P3b/P3c（全部落地）**：**P3a** proto 增 `Session`/`SessionStep`/`Settings`/
-  `WorkerSettings`/`WorkerBudget`/`LlmSettings`、`RunDetail.sessions` 与 `GetSettings`/`UpdateSettings` RPC，
-  `config.save`（校验后原子写 toml）+ `ServerContext.apply_settings`（重建 provider，后续 run 生效），
-  `update_settings` 的 `worker` 块为权威值（含 `[capability.model]`），非法 → `INVALID_ARGUMENT`，pinned 拒绝；
-  **P3b** `Search` RPC（只读，空 query/非法 `num_results` → `INVALID_ARGUMENT`，provider 失败 → `UNAVAILABLE`）；
-  **P3c** `RunDetail.sessions`（读 `sessions/*.json`，原始输入/输出 + 步骤链）。
-  **P5 前端已落地**（Settings 页 / INSPECTOR 会话视图 / EVENTS 按 worker 过滤，见前端一节）；
-  余 **P6 容器化（并入 M3）**。P1/P2 不依赖 server；P3–P5 依赖 M1c-1。
+逐片落地史见 `docs/1.0/SPEC.md` 的 checkbox（进度唯一载体），此处只留速览与持续有效的结论。
+
+- **已落地**：
+  - CLI：`init`（写 `originweave.toml`，已存在需 `--force`）/ `replay`（只读不触网，样例
+    `examples/copilot_productivity/` 可复现 Board）/ `ui` / `capabilities list`；
+    `mcp` 与 `capabilities install-obscura` 为 stub（打印 “not implemented yet”）。**CLI 无 `trace`**。
+  - M1 库层 OODA 引擎（`engine.py`）：Bootstrap/Reason/Validate/Explore pass + Stigmergy 收敛、
+    并发 + 心跳超时释放（I4）、HITL Gate A（I5，`Engine.resume`）、多轮收敛（I6）；`Engine` 是
+    黑板**唯一写入者**。M2 偏差记分卡：verify 型经 `compare` pass、`deviation` Fact、严格
+    `COMPLETE`、run dir `report.md`、Gate B（`arbitrate`）。任务指令模板在 `prompts/*.txt`。
+  - server（M1c-1）：Connect ASGI app（`server/`，**18 个 RPC 全部实现**，含 `CreateRun`/
+    `SubmitHumanInput`/`PauseRun`/`ResumeRun`/`GetSettings`/`Search`）、持久化（`run.json` 只存
+    静态元数据，结果由 `events.jsonl` 派生）、`RunScheduler`、`originweave ui`（端口 8765，
+    `--run <dir>` 单 run 只读、写 RPC 拒）。
+  - M3a+M3b：container-per-worker（`runtime/`、`Dockerfile.runtime`、`make image`）；预算触顶
+    `STOPPED{reason:"budget exceeded"}`（`pricing.py` 计价、usage 链路）；`PAUSED`/`RESUMED` +
+    `PauseRun`/`ResumeRun`（`engine.request_pause`/`resume_from_pause`，轮次边界挂起）。
+  - M6：可插拔 `Worker`（`[worker].provider`，默认 `pi`，`capabilities/pi.py` 经 `pi-py-sdk` 驱动
+    TS agent 运行时，需 **Node + `pi` 二进制**，CI 之外）；每次调用 = 隔离会话落
+    `sessions/<id>.json`；TS 搜索扩展（`pi_extensions/search.ts`）回调 server `Search`；
+    前端 Settings 页 / INSPECTOR 会话视图 / EVENTS 按 worker 过滤。
+  - 前端（`frontend/`）：React Query 真实数据接线（不接 mock）、React Flow + `@dagrejs/dagre`
+    图渲染、Gate A/B UI、Replay 服务端折算；控制台轮询走轻量 `GetRunGraph`，点节点才取全量
+    Fact，EVENTS/Sessions 按需取；浏览器 e2e 为 Playwright（真实 dist + fake-provider server）。
+  - M5 仅落地契约层：`ENTITY`/`RELATION` 事件 writer + reducer、`Entity`/`Relation`/`EntityGraph`
+    模型；上层（`extract`/`relate` Intent、消歧、UI 页签）未做。
+- **操作要点**：server 测试与前端 e2e 需先 `make proto`（无 gen 时 server 测试整段
+  `importorskip` 跳过；需 buf + `protoc` + `protoc-gen-connect-python`）；**起 run 前必须先建项目**
+  （`CreateProject` + `/projects/new`；`make dev` 起可写 server，`ui`/`run` 只读样例）；
+  `[worker].execution` **默认 `container`**——跑真实 run 前先 `make image`（需 Docker）。
+- **Hint**：Reason 任务消费 hints——agent 在 reply 里产 `hint`、human 走 `AddHint` RPC；
+  id（`h<N>`）由两处写入方**共同从事件日志推导**（`store.next_hint_id`），绝不冲突；
+  agent hint 仅在收敛轮落盘（goal 满足或死胡同，与 Intent 同携的 `hint` 被忽略）。
+- 样例 fixture 由 `scripts/build_sample_fixtures.py` 确定性生成（`--check` 校验）；改样例事件后
+  要重跑。资料 A 与来源是**冻结快照**，重新联网结果具时效性。
+- **能力为真实调用**（Phase R 已移除离线/cache/录制回放）：`search`（免费 MCP 端点
+  `exa`/`parallel`，**免 key**）、`model`（OpenAI 兼容）、prompt `local` 已落地；
+  prompt `langfuse` 仍未接入。单元测试**注入 fake provider**（`httpx.MockTransport`），不打真网。
+- `proto/` 契约已定义；生成代码**不入库、勿手改**：前端 TS 由 `pnpm --dir frontend gen` 落
+  `frontend/src/gen/`；server Python 由 `make proto` 落 `src/originweave/v1`（`originweave.v1.*`）。
 
 ## 常用命令
 
@@ -131,11 +70,11 @@ make test                   # pytest（addopts=-q）
 make lint                   # ruff check src tests scripts + mypy src（mypy strict，只查 src）
 make fmt                    # ruff format src tests scripts
 make proto                  # buf generate proto -> src/originweave/v1（M1c-1；需 buf + protoc + protoc-gen-connect-python）
-make image                  # 烤 runtime 容器镜像（M3a；需 Docker）；[worker].execution=container 时每次调用起一个
+make image                  # 烤 runtime 容器镜像（M3a；需 Docker，先跑 make proto）；execution=container 时每次调用起一个
 make smoke                  # 端到端冒烟（进程内 fake worker → CreateRun/Gate/记分卡）
 make dev                    # 起可写 server（cwd 下 runs/ + projects/；UI 里建项目/run）
 make fixtures               # 重生成样例事件 events.jsonl（scripts/build_sample_fixtures.py，另有 --check 校验）
-make cloc                   # 仅统计 src/originweave 逻辑行数
+make cloc                   # 统计 src/originweave + frontend/src 逻辑行数（排除生成/测试/fixtures）
 uv run pytest tests/test_config.py::test_default_values   # 跑单个测试
 ```
 
@@ -169,8 +108,9 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   `ConfigError`（防 `max_step` 之类拼写错误被静默忽略）。`CONFIG_FILENAME` 是**相对路径**，
   测试靠 `monkeypatch.chdir(tmp_path)`，不要在库代码里假设绝对路径。
   `[capability.model]` 默认 `openai` / `deepseek-v4.1-flash`，端点由 `OPENAI_BASE_URL` 提供
-  （内网地址不入库）。**M6** 顶层 `[worker]`：`provider`(local\|pi，默认 `pi`)、`max_concurrency`(>0 且
-  <=16)、`tools`(Pi 工具白名单)、`heartbeat_interval`(默认 `"15s"`)/`heartbeat_timeout`(默认 `"5m"`，
+  （内网地址不入库）。顶层 `[worker]`：`provider`(local\|pi，默认 `pi`)、`execution`(in-process\|container，
+  **默认 `container`**)、`image`、`tools`(Pi 工具白名单)、`max_concurrency`(>0 且
+  <=16)、`heartbeat_interval`(默认 `"15s"`)/`heartbeat_timeout`(默认 `"5m"`，
   须 `> interval`)/`heartbeat_on_timeout`(`release`\|`fail`)、`budget`（`max_steps` / `max_wall` /
   `max_cost`）；时长均为正整数加 `ms|s|m|h|d`（`config.parse_duration`）。Pi 的 model/base_url 复用
   `[capability.model]`。顶层 `[budget]` 已退役，旧配置会报错。**M1c-1** 顶层 `[project]`：
@@ -195,14 +135,16 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   `testTimeout` 杀不掉「microtask 自旋饿死定时器」的挂死（曾致 4 个 worker 烧 CPU 3.7h），
   看门狗默认 300s 强杀进程组，`VITEST_WATCHDOG_TIMEOUT`（秒）可调。
 - **事件字段名是契约**：`Event{id,at,type,message,tone,payload}`；reducer 只消费 `type`+`payload`，
-  `message`/`tone` 仅展示。已实现 16 种类型（M1 增 `FAILED`/`STOPPED` → `status=failed|stopped`
-  与 `VALIDATE`（Validate pass）；M6 增 `SESSION`/`WORKER_STEP`，reducer 忽略、Board 不变）；
-  `ENTITY`/`RELATION` 属 M5。见 `docs/overview/blackboard-protocol.md` §5。
+  `message`/`tone` 仅展示。已实现 **20 种类型**（M1 增 `FAILED`/`STOPPED` → `status=failed|stopped`
+  与 `VALIDATE`；M3b 增 `PAUSED`/`RESUMED`；M6 增 `SESSION`/`WORKER_STEP`，reducer 忽略、Board
+  不变；M5 契约层 `ENTITY`/`RELATION` 的 writer+reducer 已落地）。见
+  `docs/overview/blackboard-protocol.md` §5。
 - `events.jsonl` 的唯一写入口是 `RunStore.append_event()`（id 单调递增、append-only）；reducer
   是纯 fold（`reduce(events) -> Board`，`src/originweave/reduce.py`），同事件必得同 `Board`。
   语义边（`main-chain`/`dependency`/`goal-derived`）必须显式写进事件 payload，结构边由 reducer 派生。
-- **实体-关系图（M5）走同一 reducer**：事件 `ENTITY`/`RELATION`、模型 `Entity`/`Relation`/`EntityGraph`，
-  契约见 `blackboard-protocol.md` §2.6/§5；仅当 `Run.analysis` 含 `relation` 时启用。
+- **实体-关系图（M5）走同一 reducer**：事件 `ENTITY`/`RELATION`、模型 `Entity`/`Relation`/`EntityGraph`
+  均已落地，契约见 `blackboard-protocol.md` §2.6/§5；仅当 `Run.analysis` 含 `relation` 时启用，
+  上层 Intent/消歧/UI 未做。
 - `runs/` 与 `*.jsonl` 不入库（`.gitignore` 已就绪；`examples/**/*.jsonl` 例外放行，样例事件入库）；
   运行产物不要提交。
 - 布局：src layout，包在 `src/originweave/`；测试 `tests/`；样例 `examples/`；proto 契约
