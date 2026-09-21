@@ -7,8 +7,8 @@
 
 - **M2 · 偏差记分卡（已完成）**（进度真相见 `SPEC.md` M2；详情见「已完成（近期）」）：
   verify 派发 + compare pass + deviation 记分 + 严格 `COMPLETE` + `report.md` + Gate B。
-  **下一步**：**M3** 进行中（**M3a / M3b 已完成**；待做 **M3c** 异步 Hint + Gate C →
-  **M3c** 异步 Hint + Gate C → **M3d** langfuse + capabilities + mcp → **M3e** 集成测试）；其后 **M5**。
+  **下一步**：**M3** 进行中（**M3a / M3b / M3c 已完成**——**M3c** 异步 Hint + Gate C 均已落地；
+  下一步 **M3d** langfuse + capabilities + mcp → **M3e** 集成测试）；其后 **M5**。
 - **M5 · 实体/组织关系图（进行中）**（进度真相见 `SPEC.md` M5）。已拆为 **M5a–M5e**：
   **M5a（已完成）** 领域/事件/reducer；**下一步 M5b** 引擎 `extract`/`relate`（`Engine(analysis)`、
   `prompts/{reason,extract,relate}.txt`、reply `entities`/`relations`、规范化归并 upsert、进度/COMPLETE
@@ -224,6 +224,20 @@
   `WORKER_ID`。）
 
 ## 已完成（近期）
+
+- **M3c · Gate C（最终审阅）**：`engine.py` 增 `GATE_C="review"`（连同 `_GATE_LABELS`）。非 auto 时，
+  `_reason` 在 `_goal_satisfied` 满足后**不直接写 `COMPLETE`**，而是写
+  `REQUEST_HUMAN{gate:"review", question, verdict, hint?}` 并停在 `awaiting_human`（verdict/hint 随 payload
+  携带，reducer 忽略多余键、Board 模型不变）。`resume` 白名单加 `review` 并委派 `_resume_review`：
+  `approve`/`edit` 取最新 Gate C payload 折回 verdict + hint 写 `COMPLETE`/`report.md`；`reject` 生成重查
+  Intent——`targets` 中每个**板上字符串 fact id**（去重、忽略非法/重复）生成一个 `verify` Intent，无有效
+  targets 退化为一个 `explore`（`from=origin`，question=人工文本或默认）——**先 `_dispatch` 再 `_continue`**，
+  避免「Reason 立即再次 complete 导致重查 Intent 永不派发」的静默失效；再次收敛重新挂 Gate C。
+  `run()` 把 per-run `auto` 覆盖规范化到实例，Gate A/C 共用 `self._auto`。`server/service.py`
+  `submit_human_input` 放行 `review`；前端复用通用 `GateCard`（零改动）；`scripts/smoke.py` 与
+  `tests/test_server.py` e2e 补 Gate C 步骤。文档同步 `blackboard-protocol §4.2/§4.3/§7`、`agent-design`
+  HITL 节。测试：`test_engine.py` 新增 9 条（挂起/approve/edit/reject×2/非法+重复 targets/最新 verdict/
+  hint 延后落盘/per-run auto 跳过）。`make lint`/`test`（462 passed, 1 skipped）/`smoke` 全绿。
 
 - **修复 · run 卡死 `running`（死路不落终态）+ Validate 误杀重做 Intent**：run_008 暴露两处——
   （A）`prompts/validate.txt` 指示模型把 `dropped` 的 Intent 也当查重对象，而 dropped 从未执行；

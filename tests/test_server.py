@@ -1791,6 +1791,19 @@ async def test_end_to_end_create_run_to_scorecard(tmp_path: Path) -> None:
         assert approved.status_code == 200, approved.text
         await ctx.scheduler.drain()
 
+        # The run converges, then waits at Gate C for the human to confirm the scorecard.
+        review = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
+        assert review["run"]["status"] == "awaiting_human"
+        assert review["waitingFor"]["gate"] == "review"
+
+        confirmed = await _post(
+            client,
+            "SubmitHumanInput",
+            {"runId": run_id, "gate": "review", "decision": "approve"},
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        await ctx.scheduler.drain()
+
         detail = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
 
     assert detail["run"]["status"] == "completed"

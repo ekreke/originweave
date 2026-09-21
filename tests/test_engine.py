@@ -219,6 +219,36 @@ def _source_fact(label: str) -> dict[str, object]:
     }
 
 
+def _converging_replies(*, complete: str | None = None) -> tuple[str, ...]:
+    """A scripted reply sequence that reaches the structural COMPLETE condition (M2)."""
+    return (
+        _bootstrap("Core claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+        _reason({"type": "explore", "from": "f2", "question": "Source f2."}),
+        _validate(0),
+        _explore_reply(_source_fact("Primary source")),
+        _reason({"type": "verify", "from": "f2", "question": "Compare f2."}),
+        _validate(0),
+        _compare_reply(),
+        complete if complete is not None else _complete("部分偏差"),
+    )
+
+
+def _gate_c_engine(
+    store: RunStore, *extra: str, complete: str | None = None
+) -> Engine:
+    """An HITL engine (``auto=False``) scripted to converge; ``extra`` replies follow it."""
+    return Engine(
+        worker=LocalWorker(model=_FakeModel(*_converging_replies(complete=complete), *extra)),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=False,
+    )
+
+
 async def test_bootstrap_produces_a_main_claim(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     model = _FakeModel(_bootstrap("Copilot cut task time by 55%."), NO_REASON)
@@ -1544,6 +1574,160 @@ async def test_resume_on_fresh_engine_rebuilds_id_counters(tmp_path: Path) -> No
         event.payload["sessionId"] for event in store.read_events() if event.type == "SESSION"
     ]
     assert len(sessions) == len(set(sessions))
+
+
+async def test_gate_c_suspends_on_convergence(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = _gate_c_engine(store)
+    assert (await engine.run(origin=_origin(), goal=_goal())).status == "awaiting_human"
+
+    board = await engine.resume(decision="approve")  # Gate A -> converge -> Gate C
+
+    assert board.status == "awaiting_human"
+    assert board.waitingFor is not None and board.waitingFor.gate == "review"
+    events = store.read_events()
+    # Nothing is finalized until the human confirms: no COMPLETE, no report yet.
+    assert all(event.type != "COMPLETE" for event in events)
+    assert not (store.root / "report.md").exists()
+    request = [event for event in events if event.type == "REQUEST_HUMAN"][-1]
+    assert request.payload["gate"] == "review"
+    assert request.payload["verdict"] == "部分偏差"
+
+
+async def test_gate_c_approve_writes_the_scorecard(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = _gate_c_engine(store)
+    await engine.run(origin=_origin(), goal=_goal())
+    await engine.resume(decision="approve")  # Gate A -> converge -> Gate C
+
+    board = await engine.resume(decision="approve")
+
+    assert board.status == "completed"
+    assert board.verdict == "部分偏差"
+    complete = [event for event in store.read_events() if event.type == "COMPLETE"][-1]
+    assert complete.payload["verdict"] == "部分偏差"
+    assert (store.root / "report.md").is_file()
+
+
+async def test_gate_c_edit_records_and_completes(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = _gate_c_engine(store)
+    await engine.run(origin=_origin(), goal=_goal())
+    await engine.resume(decision="approve")
+
+    board = await engine.resume(decision="edit", text="signed off", targets=["f1"])
+
+    assert board.status == "completed"
+    decision = [event for event in store.read_events() if event.type == "HUMAN_INPUT"][-1]
+    assert decision.payload["gate"] == "review"
+    assert decision.payload["decision"] == "edit"
+    assert decision.payload["text"] == "signed off"
+    assert decision.payload["targets"] == ["f1"]
+
+
+async def test_gate_c_reject_spawns_verify_rechecks(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    # After the re-check dispatch, Reason immediately converges again (a realistic reply):
+    # the dispatch must happen BEFORE the next Reason, or the open re-check is stranded.
+    engine = _gate_c_engine(store, _compare_reply(), _complete("部分偏差"))
+    await engine.run(origin=_origin(), goal=_goal())
+    await engine.resume(decision="approve")
+
+    board = await engine.resume(decision="reject", text="recheck f2", targets=["f2"])
+
+    # A verify Intent for f2 was written and dispatched (a second compare pass), then
+    # Reason converged again -> a fresh Gate C.
+    recheck = [intent for intent in board.intents if intent.question == "recheck f2"]
+    assert [intent.type for intent in recheck] == ["verify"]
+    assert recheck[0].from_ == "f2"
+    assert recheck[0].status == "done"
+    assert [fact.kind for fact in board.facts].count("compare") == 2
+    assert board.status == "awaiting_human"
+    assert board.waitingFor is not None and board.waitingFor.gate == "review"
+
+
+async def test_gate_c_reject_without_targets_reexplores_origin(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = _gate_c_engine(
+        store, _explore_reply(_source_fact("Another source")), _complete("部分偏差")
+    )
+    await engine.run(origin=_origin(), goal=_goal())
+    await engine.resume(decision="approve")
+
+    board = await engine.resume(decision="reject")  # no text, no usable target
+
+    recheck = board.intents[-1]
+    assert recheck.type == "explore"
+    assert recheck.from_ == "origin"
+    assert recheck.question == "Human requested a re-check at final review."
+    assert recheck.status == "done"
+    assert board.status == "awaiting_human"
+    assert board.waitingFor is not None and board.waitingFor.gate == "review"
+
+
+async def test_gate_c_reject_ignores_invalid_and_duplicate_targets(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = _gate_c_engine(store, _compare_reply(), _complete("部分偏差"))
+    await engine.run(origin=_origin(), goal=_goal())
+    await engine.resume(decision="approve")
+
+    board = await engine.resume(
+        decision="reject", text="recheck f2", targets=["nope", "f2", "f2"]
+    )
+
+    rechecks = [intent for intent in board.intents if intent.question == "recheck f2"]
+    assert len(rechecks) == 1  # "nope" dropped, the duplicate f2 collapsed to one
+    assert rechecks[0].type == "verify"
+    assert rechecks[0].from_ == "f2"
+
+
+async def test_gate_c_approve_uses_the_latest_verdict(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = _gate_c_engine(
+        store,
+        _compare_reply(),
+        _complete("second verdict"),
+        complete=_complete("first verdict"),
+    )
+    await engine.run(origin=_origin(), goal=_goal())
+    await engine.resume(decision="approve")  # Gate A -> Gate C ("first verdict")
+
+    board = await engine.resume(decision="reject", text="recheck f2", targets=["f2"])
+    assert board.waitingFor is not None and board.waitingFor.gate == "review"
+    request = [event for event in store.read_events() if event.type == "REQUEST_HUMAN"][-1]
+    assert request.payload["verdict"] == "second verdict"
+
+    board = await engine.resume(decision="approve")
+
+    assert board.status == "completed"
+    assert board.verdict == "second verdict"
+
+
+async def test_gate_c_hint_is_kept_only_once_the_run_completes(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = _gate_c_engine(
+        store, complete=_complete_with_hint("部分偏差", "prefer the lab study")
+    )
+    await engine.run(origin=_origin(), goal=_goal())
+    await engine.resume(decision="approve")  # Gate A -> converge -> Gate C
+
+    # The hint is parked on the pending Gate C, not written yet (the run may be rejected).
+    assert not [event for event in store.read_events() if event.type == "HINT"]
+    board = await engine.resume(decision="approve")
+
+    assert board.status == "completed"
+    hints = [event for event in store.read_events() if event.type == "HINT"]
+    assert [hint.payload["hint"]["text"] for hint in hints] == ["prefer the lab study"]
+
+
+async def test_gate_c_skipped_by_per_run_auto_override(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    engine = _gate_c_engine(store)  # constructor default auto=False
+
+    board = await engine.run(origin=_origin(), goal=_goal(), auto=True)
+
+    assert board.status == "completed"
+    assert all(event.type != "REQUEST_HUMAN" for event in store.read_events())
 
 
 async def test_replay_reproduces_human_input(tmp_path: Path) -> None:

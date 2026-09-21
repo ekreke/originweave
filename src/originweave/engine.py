@@ -41,9 +41,14 @@ WORKER_ID = "worker-1"
 BOOTSTRAP_QUESTION = "Extract document A's core abstract claim(s) (Bootstrap)."
 
 # HITL gate identifiers (frozen in proto/...:303-309): Gate A confirms the core claim,
-# Gate B (verify) arbitrates a source conflict (M2). Gate C (review) lands in M3.
+# Gate B (verify) arbitrates a source conflict (M2), Gate C (review) confirms the final
+# scorecard before ``report.md`` is written (M3).
 GATE_A = "confirm-claim"
 GATE_B = "arbitrate"
+GATE_C = "review"
+
+# Human-facing label per gate id, used in HUMAN_INPUT event messages.
+_GATE_LABELS: dict[str, str] = {GATE_A: "Gate A", GATE_B: "Gate B", GATE_C: "Gate C"}
 
 # Human-readable id prefix per Fact.kind, so replayed ids read as f1/c1/s1/... .
 _PREFIX: dict[str, str] = {
@@ -92,8 +97,8 @@ _VERIFY_FACT_KINDS: frozenset[str] = frozenset({_COMPARE_KIND, _DEVIATION_KIND})
 # (blackboard-protocol.md section 2.4).
 SEMANTIC_RELATIONS: frozenset[str] = frozenset({"main-chain", "dependency", "goal-derived"})
 
-# HITL gates a worker may request through its reply. Gate A is engine-issued after
-# Bootstrap; Gate B (arbitrate) is requested by a verify pass. Gate C (review) is M3.
+# HITL gates a worker may request through its reply. Gate A and Gate C are engine-issued
+# (after Bootstrap / on convergence), so only Gate B (arbitrate) is worker-requested (M2).
 WORKER_GATES: frozenset[str] = frozenset({"arbitrate"})
 
 
@@ -687,13 +692,17 @@ class Engine:
         self._fact_seq = {}
         self._intent_seq = 0
         self._session_seq = 0
+        # A per-run override wins over the constructor default and is normalised onto the
+        # instance, so the later gates (A and C) agree on whether HITL is on.
+        if auto is not None:
+            self._auto = auto
         self._store.append_event("PROJECT", {"origin": origin.to_dict(), "goal": goal.to_dict()})
         await self._bootstrap()
         board = reduce(self._store.read_events())
         if board.status != "running":
             # Bootstrap failed / completed: never run Reason on a dead board.
             return board
-        if not (self._auto if auto is None else auto):
+        if not self._auto:
             # Gate A: confirm the core abstract claim(s) before decomposing them. It fires
             # whenever HITL is on, even if Bootstrap found no claim, so the human is never
             # silently bypassed.
@@ -717,14 +726,15 @@ class Engine:
     ) -> Board:
         """Resolve a paused HITL gate and continue the run (programmatic resume).
 
-        ``decision`` is ``approve`` / ``edit`` (both continue) or ``reject`` (the run
-        stops as human-terminated, ``STOPPED``). ``edit`` is currently **record-only**:
-        ``text`` / ``targets`` land in the ``HUMAN_INPUT`` payload, but changing a Fact
-        needs a fact-supersession event the contract does not have yet, so the board is
-        unchanged (``blackboard-protocol.md`` section 7). The board is the source of truth
-        for where we paused, and the id counters are rebuilt from it, so resuming works
-        even on a fresh ``Engine`` over the same run directory. Gate A (``confirm-claim``)
-        and Gate B (``arbitrate``, M2) are supported.
+        ``decision`` is ``approve`` / ``edit`` (both continue) or ``reject``. At Gate A/B
+        ``reject`` stops the run as human-terminated (``STOPPED``); at Gate C it instead
+        asks for a re-check (``blackboard-protocol.md`` section 7). ``edit`` is currently
+        **record-only**: ``text`` / ``targets`` land in the ``HUMAN_INPUT`` payload, but
+        changing a Fact needs a fact-supersession event the contract does not have yet, so
+        the board is unchanged. The board is the source of truth for where we paused, and
+        the id counters are rebuilt from it, so resuming works even on a fresh ``Engine``
+        over the same run directory. Gate A (``confirm-claim``), Gate B (``arbitrate``,
+        M2) and Gate C (``review``, M3) are supported.
         """
         if decision not in ("approve", "edit", "reject"):
             raise EngineError(f"unknown decision {decision!r}; expected approve|edit|reject")
@@ -733,10 +743,10 @@ class Engine:
         if board.status != "awaiting_human" or board.waitingFor is None:
             raise EngineError("no human gate is awaiting input")
         gate = board.waitingFor.gate
-        if gate not in (GATE_A, GATE_B):
+        if gate not in (GATE_A, GATE_B, GATE_C):
             raise EngineError(f"unsupported gate {gate!r}")
         self._restore_counters(board, events)
-        label = "Gate A" if gate == GATE_A else "Gate B"
+        label = _GATE_LABELS[gate]
         self._store.append_event(
             "HUMAN_INPUT",
             {
@@ -748,10 +758,69 @@ class Engine:
             },
             message=f"{label}: {decision}",
         )
+        if gate == GATE_C:
+            return await self._resume_review(
+                decision, text=text, targets=targets, events=events
+            )
         if decision == "reject":
             self._store.append_event("STOPPED", {"reason": f"{label} rejected by human"})
             return reduce(self._store.read_events())
         return await self._continue()
+
+    async def _resume_review(
+        self, decision: str, *, text: str, targets: Sequence[str], events: Sequence[Event]
+    ) -> Board:
+        """Resolve Gate C: write the scorecard, or spawn re-check Intents and continue.
+
+        ``approve`` / ``edit`` echo the Reason verdict (carried on the pending
+        ``REQUEST_HUMAN`` event) into ``COMPLETE`` and write ``report.md``. ``reject`` asks
+        for a re-check: every ``targets`` fact id on the board becomes a ``verify`` Intent
+        (the compare pass re-scores it); with no valid target the engine falls back to one
+        ``explore`` Intent off ``origin``. Either way the loop continues, so a later
+        convergence reaches Gate C again.
+        """
+        if decision != "reject":
+            payload = self._pending_review(events)
+            hint = payload.get("hint")
+            if isinstance(hint, str) and hint:
+                self._write_agent_hint(hint)
+            verdict = payload.get("verdict")
+            self._store.append_event(
+                "COMPLETE", {"verdict": verdict if isinstance(verdict, str) else ""}
+            )
+            self._write_report()
+            return reduce(self._store.read_events())
+        board = reduce(self._store.read_events())
+        question = text.strip() or "Human requested a re-check at final review."
+        known = {fact.id for fact in board.facts}
+        # De-duplicate while preserving order: the same target must not spawn two verifies.
+        recheck = list(dict.fromkeys(t for t in targets if isinstance(t, str) and t in known))
+        # One verify per targeted fact (the compare pass re-judges it); with no usable
+        # target, fall back to a single explore pass that re-scans from the document.
+        pending = (
+            [("verify", target) for target in recheck] if recheck else [("explore", "origin")]
+        )
+        for intent_type, from_ in pending:
+            intent = Intent(
+                id=self._next_intent_id(),
+                type=intent_type,
+                from_=from_,
+                question=question,
+            )
+            self._store.append_event("INTENT", {"intent": intent.to_dict()})
+        # Run the re-check before the next Reason pass: the structural stop condition still
+        # holds, so a Reason-first loop could complete again and strand the open Intent,
+        # silently skipping the re-check the human asked for.
+        await self._dispatch()
+        return await self._continue()
+
+    @staticmethod
+    def _pending_review(events: Sequence[Event]) -> Mapping[str, Any]:
+        """Payload of the latest pending Gate C ``REQUEST_HUMAN`` event ({} if none)."""
+        for event in reversed(list(events)):
+            if event.type == "REQUEST_HUMAN" and event.payload.get("gate") == GATE_C:
+                return event.payload
+        return {}
 
     async def resume_from_pause(self) -> Board:
         """Continue a run paused via ``PAUSED`` (M3b).
@@ -1104,10 +1173,6 @@ class Engine:
             return
         if result.complete is not None:
             satisfied = self._goal_satisfied(board)
-            if result.hint is not None and satisfied:
-                # Reason's convergence note (M3): only a convergence that actually ends
-                # the run leaves a hint, so intermediate "complete" calls add no noise.
-                self._write_agent_hint(result.hint)
             self._store.append_event(
                 "REASON", {"phase": "end", "triggerFacts": triggers}, message="Reason: end"
             )
@@ -1125,6 +1190,29 @@ class Engine:
                 # Keep the run going instead of completing early; a later round can still
                 # complete once the gaps are filled (blackboard-protocol section 4.3).
                 return
+            if not self._auto:
+                # Gate C: the goal is proven complete, but HITL is on, so the human
+                # confirms the final scorecard before it is written. The Reason verdict and
+                # its convergence hint ride on the REQUEST_HUMAN payload (the reducer
+                # ignores the extra keys) so a fresh Engine on resume can echo them without
+                # re-running a model; ``reject`` instead spawns re-check Intents (resume).
+                payload: dict[str, Any] = {
+                    "gate": GATE_C,
+                    "question": "Confirm the final scorecard",
+                    "verdict": result.complete,
+                }
+                if result.hint is not None:
+                    payload["hint"] = result.hint
+                self._store.append_event(
+                    "REQUEST_HUMAN",
+                    payload,
+                    message="Gate C: confirm the final scorecard",
+                )
+                return
+            if result.hint is not None:
+                # Reason's convergence note (M3): only a convergence that actually ends
+                # the run leaves a hint, so intermediate "complete" calls add no noise.
+                self._write_agent_hint(result.hint)
             self._store.append_event("COMPLETE", {"verdict": result.complete})
             self._write_report()
             return
@@ -1614,6 +1702,7 @@ __all__ = [
     "DISPATCHABLE_TYPES",
     "GATE_A",
     "GATE_B",
+    "GATE_C",
     "Engine",
     "EngineError",
     "IntentDecision",

@@ -32,7 +32,7 @@ from ..config import (
     parse_duration,
 )
 from ..config import save as save_config
-from ..engine import GATE_A, GATE_B, Engine, EngineError
+from ..engine import GATE_A, GATE_B, GATE_C, Engine, EngineError
 from ..events import Event, now_iso
 from ..persistence import Project, Run, allocate_run_id, is_run_id, summarize_run
 from ..reduce import ReduceError, reduce
@@ -426,9 +426,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
                 Code.INVALID_ARGUMENT,
                 f"gate {request.gate!r} does not match the pending gate {pending!r}",
             )
-        if pending not in (GATE_A, GATE_B):
-            # Gate C (review) lands in M3; a matching-but-unknown gate is not a client
-            # argument error, so report it as unimplemented rather than 400.
+        if pending not in (GATE_A, GATE_B, GATE_C):
+            # A matching-but-unknown gate is not a client argument error, so report it as
+            # unimplemented rather than 400.
             raise ConnectError(Code.UNIMPLEMENTED, f"gate {pending!r} is not supported yet")
         if request.decision not in ("approve", "edit", "reject"):
             raise ConnectError(Code.INVALID_ARGUMENT, f"unknown decision {request.decision!r}")

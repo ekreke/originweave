@@ -1,8 +1,8 @@
 """Smoke test for the run API: boot the ASGI app with a fake worker and drive a run.
 
-It runs entirely in-process (no network, no real provider): start a run, resolve Gate A,
-and print the resulting board summary. Exits non-zero when the run does not reach the
-expected terminal state. This is the `make smoke` target (M1c-2b 2b-5).
+It runs entirely in-process (no network, no real provider): start a run, resolve Gate A
+(and Gate C), and print the resulting board summary. Exits non-zero when the run does not
+reach the expected terminal state. This is the `make smoke` target (M1c-2b 2b-5).
 """
 
 from __future__ import annotations
@@ -212,6 +212,24 @@ async def _main() -> int:
             await ctx.scheduler.drain()
 
             detail = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
+
+            # Gate C: confirm the final scorecard before COMPLETE and report.md are written.
+            if detail["run"]["status"] == "awaiting_human":
+                review = (detail.get("waitingFor") or {}).get("gate", "")
+                print(f"run {run_id}: status=awaiting_human gate={review}")
+                confirmed = await _post(
+                    client,
+                    "SubmitHumanInput",
+                    {"runId": run_id, "gate": review, "decision": "approve"},
+                )
+                if confirmed.status_code != 200:
+                    print(
+                        f"FAIL SubmitHumanInput: {confirmed.status_code} {confirmed.text}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                await ctx.scheduler.drain()
+                detail = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
 
     status = detail["run"]["status"]
     kinds = [fact["kind"] for fact in detail["facts"]]

@@ -264,7 +264,9 @@ worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` �
 子断言全部被 `explore` 或 `verify` 处理（追过来源或判定过）、且已有 compare 判定偏差，否则 Reason 的
 `complete` 被忽略、run 继续（`running`）。**注意**：被 `RELEASE` 退回 `open` 的 Intent 只有在后续某轮因其他新 Fact 触发 Reason 时
 才会被重新派发；本轮若再无新 Fact，循环即停并写 `STOPPED{reason="stalled: dispatch produced no new facts"}`
-（完整的重试/调度归 M3）。
+（完整的重试/调度归 M3）。**非 auto 时**（HITL 开），判据满足后不直接写 `COMPLETE`，而是停在
+**Gate C**（`REQUEST_HUMAN{gate:"review", verdict}`，run → `awaiting_human`）等人工确认记分卡
+（§7）；`auto=true` 才直接 `COMPLETE` + `report.md`。
 
 ### 4.3 一道题的完整生命周期
 ```text
@@ -277,6 +279,7 @@ worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` �
 6 结论写成 Fact（带 Evidence）回写黑板；Intent → done
 7 重复 3–6（Stigmergy：新 Fact 引出新 Intent）
 8 complete  : 抽象论点全部拆解 + 回链 + 偏差判定完成 → 连到 goal，run 结束
+              （非 auto 时先停 Gate C 审阅记分卡，approve/edit 才落 COMPLETE + report.md）
 ```
 
 关键：`extract / fetch / link / compare` **不是写死的阶段**，而是 Intent `type` 按需涌现。
@@ -442,14 +445,21 @@ Board 上等下一轮 Reason。
   `arbitrate`。**M2**：由 verify 型 `Explore` pass 在 reply 的 `gate` 字段中请求（引擎写
   `REQUEST_HUMAN{gate:"arbitrate"}`，本轮已提交的 facts 不丢）；`resume` 支持 `arbitrate`。
 - **Gate C · 最终审阅**（记分卡产出前）：确认结论，或要求重查（产生新 Intent）。gate id = `review`。
+  **M3**：非 auto 时，Reason 满足**严格判据**（§4.3 第 8 步）后不直接写 `COMPLETE`，而是写
+  `REQUEST_HUMAN{gate:"review", question, verdict}`（verdict = Reason 的结论文本，随 payload 携带供
+  resume 折回）并停在 `awaiting_human`；`resume` 的 `approve`/`edit` 把该 verdict 写进 `COMPLETE` 并落
+  `report.md`，`reject` 则**生成重查 Intent** 后继续循环——`targets` 里每个板上 fact id 生成一个
+  `verify` Intent（重跑 compare 重评分），无有效 `targets` 时退化为一个 `explore`（`from=origin`），
+  再次收敛会重新触发 Gate C。
 
 **程序化挂起/恢复（M1，库层）**：非 auto 时，`Engine.run` 在 Bootstrap 产出 main-claim 后写
 `REQUEST_HUMAN{gate:"confirm-claim", question}` 并返回 `awaiting_human` 的 Board（不再往下跑）。
 调用方审阅后调 `Engine.resume(decision, text?, targets?)`：写 `HUMAN_INPUT`（`author=human`）并继续
-——`approve` / `edit` 继续 Reason → dispatch，`reject` 写 `STOPPED`（人工终止）。**`edit` 目前仅记录**
-（`text`/`targets` 进入 `HUMAN_INPUT`，黑板不变）；修改 Fact 需要契约新增「事实取代」事件，留待后续
-切片，UI 层不得直接改黑板（红线 5）。`resume` 从黑板重建确定性 id 计数器，因此在同一 run dir 上
-新建的 `Engine` 也能正确恢复（server 友好）。decision 取值冻结于 proto：`approve|edit|reject`。
+——Gate A/B 的 `reject` 写 `STOPPED`（人工终止），Gate C 的 `reject` 生成重查 Intent 并继续（见上）。
+**`edit` 目前仅记录**（`text`/`targets` 进入 `HUMAN_INPUT`，黑板不变）；修改 Fact 需要契约新增「事实
+取代」事件，留待后续切片，UI 层不得直接改黑板（红线 5）。`resume` 从黑板重建确定性 id 计数器，因此在
+同一 run dir 上新建的 `Engine` 也能正确恢复（server 友好）。decision 取值冻结于 proto：
+`approve|edit|reject`。
 
 人类输入亦以 `HUMAN_INPUT` 事件记录（`author=human`），因此**是输入而非旁路**：
 不破坏可审计与可重放原则。

@@ -99,11 +99,14 @@ dir = "projects"        # 目录式 project 注册表根（M1c-1）
   （`projects/<project_id>/project.json`）。`run_00N` 全局分配。**`run.json` 只存静态/输入元数据**
   （project/title/source_type/analysis/goal/budget 覆盖等）；status/计数由 `events.jsonl` + `reduce()`
   派生，样例等无 `run.json` 的目录也可只读服务。
-- **HITL（M1 I5）**：`[hitl].auto=false`（默认）时 server 以 `auto=False` 构造 `Engine`，run 在
-  Bootstrap 后停在 **Gate A**（`REQUEST_HUMAN{gate:"confirm-claim"}`，run → `awaiting_human`），
+- **HITL（M1 I5；Gate C 为 M3）**：`[hitl].auto=false`（默认）时 server 以 `auto=False` 构造 `Engine`，
+  run 在 Bootstrap 后停在 **Gate A**（`REQUEST_HUMAN{gate:"confirm-claim"}`，run → `awaiting_human`），
   由 `Engine.resume(decision, text?, targets?)` 写 `HUMAN_INPUT` 后继续（`approve`/`edit` 继续
-  Reason→dispatch，`reject` → `STOPPED`；`edit` 目前仅记录，Fact 修改待契约新增取代事件）；
-  `auto=true` / `CreateRunRequest.auto` 跳过 Gate。
+  Reason→dispatch，`reject` → `STOPPED`）；**Gate B**（`arbitrate`）由 verify pass 请求；**Gate C**
+  （`review`，M3）在 Reason 满足严格判据后、写 `COMPLETE`/`report.md` 前挂起，`approve`/`edit` 确认
+  记分卡、`reject` **生成重查 Intent**（`targets` 的 fact id → `verify`，否则一个 `explore` off
+  `origin`）后继续循环（Gate A/B 的 `reject` 才是 `STOPPED`；`edit` 目前仅记录，Fact 修改待契约新增
+  取代事件）；`auto=true` / `CreateRunRequest.auto` 跳过 Gate。
   `resume` 从黑板重建 id 计数器，可在新 `Engine` 实例上恢复。
 
 - **未知键会报错**（`ConfigError`），避免 `max_step` 之类的拼写错误被静默忽略。

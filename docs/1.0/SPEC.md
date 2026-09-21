@@ -265,7 +265,8 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 ### 2b-3 · HITL UI 与 Replay
 
 - [x] `awaiting_human` → Gate A（`confirm-claim`）/ Gate B（`arbitrate`）面板（approve/edit/reject）→
-      `submitHumanInput`；含修正说明输入、pending 禁用、失败行内报错；Gate C（`review`）随 M3 —
+      `submitHumanInput`；含修正说明输入、pending 禁用、失败行内报错；Gate C（`review`）复用通用
+      `GateCard`（M3 已启用，无需前端改动）—
       `frontend/src/layout/Inspector.tsx`（`GateCard`）、`frontend/src/api/hooks.ts`（`useSubmitHumanInput`）、
       `frontend/src/routes/Console.tsx`
 - [x] Replay 步进：**服务端折算**（`reduce(events[:k])`，复用唯一 reducer、零漂移），前端只做步进/
@@ -288,7 +289,7 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 ### 2b-5 · 端到端与冒烟
 
 - [x] 端到端：起 server → 建 run → 前端看到 DAG → Gate 处人工介入（测试以 fake provider 驱动）+ 冒烟 —
-      `tests/test_server.py`（`test_end_to_end_create_run_to_scorecard`：CreateRun→Gate A→verify→COMPLETE+`report.md`）、
+      `tests/test_server.py`（`test_end_to_end_create_run_to_scorecard`：CreateRun→Gate A→verify→Gate C→COMPLETE+`report.md`）、
       `scripts/smoke.py`（`make smoke`，进程内 fake worker）、`frontend/src/routes/routes.test.tsx`（NewRun→DAG→Gate 串联）
 - [x] CI / 文档同步（`Makefile` / `README.md`）— `.github/workflows/ci.yml`（`python` job 加 `make smoke`）、
       `Makefile`（`smoke` target）、`README.md`
@@ -344,7 +345,11 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
       （`engine.py`，与 Intent 同携的被忽略）；id 由 `store.next_hint_id()` 从事件日志推导，
       human/agent 共用绝不冲突；Reason 消费 hints — `prompts/reason.txt`、
       `tests/test_engine.py`、`tests/test_server.py`
-- [ ] **Gate C（最终审阅）**：记分卡产出前人工确认，可要求重查（新生 Intent）
+- [x] **Gate C（最终审阅）**：记分卡产出前人工确认，可要求重查（新生 Intent）— `engine.py`
+      `GATE_C="review"`（`_reason` 满足严格判据后写 `REQUEST_HUMAN{gate,verdict,hint}` 挂起；`resume`
+      `approve`/`edit` 折回 verdict+hint 写 `COMPLETE`/`report.md`，`reject` 按 `targets` 生成 `verify`
+      Intent（无有效 targets 退化为 `explore` off `origin`）先 `_dispatch` 再续跑）；`server/service.py`
+      `submit_human_input` 放行 `review`；前端复用通用 `GateCard`（无需改动）— `blackboard-protocol.md §7`
 - [ ] `prompt` provider `langfuse` 真实接入（`local` 已于 M1 可用）
 - [ ] `originweave capabilities list|install-obscura` 实现
 - [ ] `originweave mcp` 暴露 capability / 只读 run 视图（不承担调度）
