@@ -99,6 +99,12 @@ dir = "projects"        # 目录式 project 注册表根（M1c-1）
   （`projects/<project_id>/project.json`）。`run_00N` 全局分配。**`run.json` 只存静态/输入元数据**
   （project/title/source_type/analysis/goal/budget 覆盖等）；status/计数由 `events.jsonl` + `reduce()`
   派生，样例等无 `run.json` 的目录也可只读服务。
+- **workspace 存储（[storage].db）**：`WorkspaceStore` 把 runs/projects 的**静态元数据**收进一个
+  SQLite 库（顶层 `[storage].db`，默认 `originweave.db`），`run.json`/`project.json` 仍写（双写、
+  读优先 DB）；server 启动 `bootstrap_from_dirs` 幂等导入旧目录式注册表。**事件日志仍以
+  `events.jsonl` 为准**（live server 写它）；`SqliteEventLog` 是事件后端的迁移目标，目前仅为
+  显式导入/测试预留（仓库样例仍写 `events.jsonl`）——`open_run_store` 仅当库内已有该 run 的事件、
+  或 run dir 自带含该 run 事件的 `events.db` 时才优先 SQLite。
 - **HITL（M1 I5；Gate C 为 M3）**：`[hitl].auto=false`（默认）时 server 以 `auto=False` 构造 `Engine`，
   run 在 Bootstrap 后停在 **Gate A**（`REQUEST_HUMAN{gate:"confirm-claim"}`，run → `awaiting_human`），
   由 `Engine.resume(decision, text?, targets?)` 写 `HUMAN_INPUT` 后继续（`approve`/`edit` 继续
@@ -212,7 +218,8 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 
 ```text
 <run-dir>/
-├── events.jsonl        # append-only，每行一个 Event（board 唯一事实来源）
+├── events.jsonl        # append-only，每行一个 Event（board 唯一事实来源；live server 写它）
+├── events.db           # 可选：自包含 SQLite 事件日志（迁移/bundled；live server 不用）
 ├── run.json            # Run 静态/输入元数据（M1c-1；status/计数由 events 派生；可空）
 ├── input/              # 资料 A 快照（URL 抓取或文本）
 ├── sources/            # 来源快照（可回链的原文/存档）

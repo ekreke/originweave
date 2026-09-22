@@ -1,13 +1,20 @@
-"""Run storage: the append-only event log and run directory layout.
+"""Run storage: the event log, its backends, and the run directory layout.
 
 A run directory looks like::
 
     <run-dir>/
-    ├── events.jsonl        # append-only, one Event per line
+    ├── events.jsonl        # live backend (append-only, one Event per line)
+    ├── events.db           # optional self-contained SQLite binding (sample/exports)
     ├── input/              # document A snapshot
     ├── sources/            # source snapshots
     ├── sessions/           # per-worker-call session snapshots (raw in/out + steps)
     └── report.md           # final artefact             (populated in M2)
+
+The event log sits behind the :class:`EventLog` protocol; :class:`RunStore` is a
+facade that owns the directory layout and delegates log storage to a backend.
+:class:`JsonlEventLog` is the live server backend; :class:`SqliteEventLog` is the
+migration target and is used for bundled sample databases (and by anything that
+explicitly stores a run's events in the workspace database).
 """
 
 from __future__ import annotations
@@ -16,12 +23,15 @@ import json
 import re
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .blackboard import BlackboardError
 from .events import DEFAULT_TONE, Event, format_event_id, now_iso
+from .sqlite_backend import SqliteEventLog, sqlite_run_has_events
 
 _SESSION_SUFFIX_RE = re.compile(r"(\d+)$")
+
+BUNDLED_DB_FILENAME = "events.db"
 
 
 def _session_sort_key(path: Path) -> tuple[int, str]:
@@ -51,12 +61,92 @@ def _validate_session(path: Path, data: Mapping[str, Any]) -> None:
             raise BlackboardError(f"{path}: session step seq must be an integer")
 
 
-class RunStore:
-    """Read/write access to a single run directory."""
+class EventLog(Protocol):
+    """Storage backend for one run's append-only event log.
+
+    Implementations must preserve append order, derive ``Event.id`` sequences
+    without gaps, and scope every operation to a single run. ``has_events`` is a
+    cheap existence probe: it never parses stored payloads, so a corrupt log
+    still reads as "present" and the read path can report it as malformed.
+    """
+
+    def append(self, event: Event) -> None: ...
+
+    def iter_events(self) -> Iterator[Event]: ...
+
+    def count(self) -> int: ...
+
+    def count_type(self, event_type: str) -> int: ...
+
+    def has_events(self) -> bool: ...
+
+    def close(self) -> None: ...
+
+
+class JsonlEventLog:
+    """Legacy backend: ``events.jsonl``, one JSON object per line, append-only."""
 
     def __init__(self, root: Path) -> None:
         self._root = Path(root)
         self._count: int | None = None
+
+    @property
+    def path(self) -> Path:
+        return self._root / "events.jsonl"
+
+    def append(self, event: Event) -> None:
+        self._root.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event.to_dict(), sort_keys=True, ensure_ascii=False))
+            handle.write("\n")
+        # Keep the warm count cache correct; ``None`` means "rescan on next read".
+        if self._count is not None:
+            self._count += 1
+
+    def iter_events(self) -> Iterator[Event]:
+        """Yield events in append order, raising on malformed lines."""
+        if not self.path.is_file():
+            return
+        with self.path.open("r", encoding="utf-8") as handle:
+            for lineno, line in enumerate(handle, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise BlackboardError(f"{self.path}:{lineno}: invalid JSON: {exc}") from exc
+                if not isinstance(data, dict):
+                    raise BlackboardError(f"{self.path}:{lineno}: event must be a JSON object")
+                yield Event.from_dict(data)
+
+    def count(self) -> int:
+        if self._count is None:
+            if not self.path.is_file():
+                self._count = 0
+            else:
+                self._count = sum(1 for _ in self.iter_events())
+        return self._count
+
+    def count_type(self, event_type: str) -> int:
+        return sum(1 for event in self.iter_events() if event.type == event_type)
+
+    def has_events(self) -> bool:
+        """True when the log file exists with at least one non-blank line."""
+        if not self.path.is_file():
+            return False
+        with self.path.open("r", encoding="utf-8") as handle:
+            return any(line.strip() for line in handle)
+
+    def close(self) -> None:
+        return None
+
+
+class RunStore:
+    """Read/write access to a single run directory and its event log."""
+
+    def __init__(self, root: Path, *, log: EventLog | None = None) -> None:
+        self._root = Path(root)
+        self._log: EventLog = log if log is not None else JsonlEventLog(self._root)
 
     @property
     def root(self) -> Path:
@@ -64,6 +154,7 @@ class RunStore:
 
     @property
     def events_path(self) -> Path:
+        """Legacy JSONL path; only meaningful with the JSONL backend."""
         return self._root / "events.jsonl"
 
     @property
@@ -93,32 +184,15 @@ class RunStore:
             directory.mkdir(parents=True, exist_ok=True)
 
     def event_count(self) -> int:
-        if self._count is None:
-            if not self.events_path.is_file():
-                self._count = 0
-            else:
-                self._count = sum(1 for _ in self.iter_events())
-        return self._count
+        return self._log.count()
+
+    def has_events(self) -> bool:
+        """True when the run has at least one event (backend-agnostic existence)."""
+        return self._log.has_events()
 
     def iter_events(self) -> Iterator[Event]:
-        """Yield events in append order, raising on malformed lines."""
-        if not self.events_path.is_file():
-            return
-        with self.events_path.open("r", encoding="utf-8") as handle:
-            for lineno, line in enumerate(handle, start=1):
-                if not line.strip():
-                    continue
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise BlackboardError(
-                        f"{self.events_path}:{lineno}: invalid JSON: {exc}"
-                    ) from exc
-                if not isinstance(data, dict):
-                    raise BlackboardError(
-                        f"{self.events_path}:{lineno}: event must be a JSON object"
-                    )
-                yield Event.from_dict(data)
+        """Yield events in append order, raising on malformed stored data."""
+        return self._log.iter_events()
 
     def read_events(self) -> list[Event]:
         return list(self.iter_events())
@@ -130,7 +204,11 @@ class RunStore:
         Reason hints) must derive ids from the event log so a human hint and an agent
         hint interleaved in the same run never collide (blackboard-protocol.md §2.3).
         """
-        return f"h{sum(1 for event in self.iter_events() if event.type == 'HINT') + 1}"
+        return f"h{self._log.count_type('HINT') + 1}"
+
+    def close(self) -> None:
+        """Release backend resources (no-op for the JSONL backend)."""
+        self._log.close()
 
     def read_sessions(self) -> list[dict[str, Any]]:
         """Read the worker session snapshots under ``sessions/`` (M6 P3c).
@@ -174,11 +252,7 @@ class RunStore:
             message=message,
             tone=resolved_tone,
         )
-        self._root.mkdir(parents=True, exist_ok=True)
-        with self.events_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event.to_dict(), sort_keys=True, ensure_ascii=False))
-            handle.write("\n")
-        self._count = sequence
+        self._log.append(event)
         return event
 
     def write_input(self, name: str, content: str) -> Path:
@@ -198,7 +272,7 @@ class RunStore:
         """Write the rendered deviation scorecard as ``report.md``.
 
         Not an event: the report is a *derivation* from the board, so it can always be
-        rebuilt from ``events.jsonl`` (M2). ``replay`` never calls this.
+        rebuilt from the event log (M2). ``replay`` never calls this.
         """
         self._root.mkdir(parents=True, exist_ok=True)
         self.report_path.write_text(content, encoding="utf-8")
@@ -223,7 +297,7 @@ class RunStore:
 
         This file only holds launch/static fields (project, title, source_type,
         analysis, goal, budget overrides, ...); the board and its counts are always
-        derived from ``events.jsonl``. Raises :class:`BlackboardError` on malformed
+        derived from the event log. Raises :class:`BlackboardError` on malformed
         content, mirroring :meth:`read_events`.
         """
         if not self.run_json_path.is_file():
@@ -245,4 +319,52 @@ class RunStore:
         return self.run_json_path
 
 
-__all__ = ["RunStore"]
+def run_has_events(run_dir: Path, *, db_path: Path | None = None) -> bool:
+    """Backend-agnostic existence probe: does this run have any event?
+
+    Read-only and connection-free by design (the server calls it on every polled
+    read RPC, so it must not run DDL or keep a connection). Checks the legacy
+    ``events.jsonl`` first, then a bundled ``events.db``, then the workspace
+    database.
+    """
+    run_dir = Path(run_dir)
+    if JsonlEventLog(run_dir).has_events():
+        return True
+    bundled = run_dir / BUNDLED_DB_FILENAME
+    if bundled.is_file() and sqlite_run_has_events(bundled, run_dir.name):
+        return True
+    return db_path is not None and sqlite_run_has_events(Path(db_path), run_dir.name)
+
+
+def open_run_store(run_dir: Path, *, db_path: Path | None = None) -> RunStore:
+    """Open a run with the right event-log backend.
+
+    Probe order:
+
+    1. a bundled ``<run-dir>/events.db`` that holds this run's events
+       (self-contained sample/exports) wins;
+    2. when the workspace database already holds events for this run, that
+       database is authoritative (a run migrated into SQLite keeps reading there
+       even if a stale ``events.jsonl`` lingers);
+    3. otherwise the legacy JSONL backend is used. The live server keeps writing
+       ``events.jsonl``; the workspace database currently stores only the
+       static run/project metadata. The SQLite event backend is the migration
+       target, exercised today by bundled runs and by explicit imports.
+    """
+    run_dir = Path(run_dir)
+    bundled = run_dir / BUNDLED_DB_FILENAME
+    if bundled.is_file() and sqlite_run_has_events(bundled, run_dir.name):
+        return RunStore(run_dir, log=SqliteEventLog(bundled, run_dir.name))
+    if db_path is not None and sqlite_run_has_events(Path(db_path), run_dir.name):
+        return RunStore(run_dir, log=SqliteEventLog(Path(db_path), run_dir.name))
+    return RunStore(run_dir)
+
+
+__all__ = [
+    "BUNDLED_DB_FILENAME",
+    "EventLog",
+    "JsonlEventLog",
+    "RunStore",
+    "open_run_store",
+    "run_has_events",
+]

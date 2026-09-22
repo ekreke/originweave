@@ -34,7 +34,14 @@ from ..config import (
 from ..config import save as save_config
 from ..engine import GATE_A, GATE_B, GATE_C, Engine, EngineError
 from ..events import Event, now_iso
-from ..persistence import Project, Run, allocate_run_id, is_run_id, summarize_run
+from ..persistence import (
+    Project,
+    Run,
+    allocate_run_id,
+    is_run_id,
+    load_run_meta,
+    summarize_run,
+)
 from ..reduce import ReduceError, reduce
 from ..report import ReportError
 from ..runtime import RunContainerWorker
@@ -222,8 +229,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         run_id = request.run_id
         if not is_run_id(run_id):
             raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
-        store = RunStore(self._ctx.runs_dir / run_id)
-        if not store.events_path.is_file():
+        store = self._ctx.open_store(self._ctx.runs_dir / run_id)
+        if not store.has_events():
+            store.close()
             raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
         at_event = request.at_event if request.HasField("at_event") else None
         try:
@@ -232,6 +240,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             raise ConnectError(
                 Code.INTERNAL, f"run {run_id!r} has a malformed event log: {exc}"
             ) from exc
+        finally:
+            store.close()
 
     async def get_run_graph(self, request: Any, ctx: Any) -> Any:
         """The light graph projection polled by the console (dashboard.md §4)."""
@@ -243,6 +253,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             raise ConnectError(
                 Code.INTERNAL, f"run {request.run_id!r} has a malformed event log: {exc}"
             ) from exc
+        finally:
+            store.close()
         return pb.GetRunGraphResponse(
             graph=convert.run_graph_pb(run, board, event_count=len(events))
         )
@@ -260,6 +272,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             raise ConnectError(
                 Code.INTERNAL, f"run {request.run_id!r} has a malformed event log: {exc}"
             ) from exc
+        finally:
+            store.close()
         fact = board.fact(request.fact_id)
         if fact is None and board.origin.id == request.fact_id:
             fact = board.origin
@@ -282,6 +296,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             raise ConnectError(
                 Code.INTERNAL, f"run {request.run_id!r} has a malformed event log: {exc}"
             ) from exc
+        finally:
+            store.close()
         return pb.ListEventsResponse(events=[convert.event_pb(event) for event in folded])
 
     async def list_sessions(self, request: Any, ctx: Any) -> Any:
@@ -293,6 +309,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             raise ConnectError(
                 Code.INTERNAL, f"run {request.run_id!r} has a malformed session log: {exc}"
             ) from exc
+        finally:
+            store.close()
         if request.HasField("intent_id"):
             intent_id = str(request.intent_id)
             sessions = [s for s in sessions if s.get("intentId") == intent_id]
@@ -330,7 +348,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
 
         # All of this is synchronous: no await may slip between allocate_run_id and the
         # directory creation, so two concurrent CreateRun calls cannot take the same id.
-        run_id = allocate_run_id(self._ctx.runs_dir)
+        run_id = allocate_run_id(self._ctx.runs_dir, self._ctx.workspace)
         store = self._ctx.scheduler.store_for(run_id)
         store.init_layout()
         title = (request.title if request.HasField("title") else "").strip()[:_TITLE_LIMIT]
@@ -368,6 +386,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         if budget:
             meta["budget"] = budget
         store.write_run_meta(meta)
+        if self._ctx.workspace is not None:
+            self._ctx.workspace.upsert_run_meta(run_id, meta)
 
         origin = Fact(
             id="origin",
@@ -447,7 +467,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             self._ctx.scheduler.unregister_engine(request.run_id)
         await self._release_if_terminal(store)
         run = summarize_run(
-            store, meta=store.read_run_meta(), budget=self._ctx.config.worker.budget
+            store,
+            meta=load_run_meta(store, self._ctx.workspace),
+            budget=self._ctx.config.worker.budget,
         )
         return pb.SubmitHumanInputResponse(run=convert.run_pb(run))
 
@@ -473,7 +495,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         if not any(event.type == "PAUSED" for event in store.read_events()):
             raise ConnectError(Code.FAILED_PRECONDITION, "run did not pause")
         run = summarize_run(
-            store, meta=store.read_run_meta(), budget=self._ctx.config.worker.budget
+            store,
+            meta=load_run_meta(store, self._ctx.workspace),
+            budget=self._ctx.config.worker.budget,
         )
         return pb.PauseRunResponse(run=convert.run_pb(run))
 
@@ -495,7 +519,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         # RESUMED is appended before the first await, so one yield makes it visible.
         await asyncio.sleep(0)
         run = summarize_run(
-            store, meta=store.read_run_meta(), budget=self._ctx.config.worker.budget
+            store,
+            meta=load_run_meta(store, self._ctx.workspace),
+            budget=self._ctx.config.worker.budget,
         )
         return pb.ResumeRunResponse(run=convert.run_pb(run))
 
@@ -529,7 +555,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
     async def shutdown(self) -> None:
         """Fail and reclaim non-terminal shared Pi containers during server shutdown."""
         for run_dir in list(self._ctx.run_workers):
-            store = RunStore(run_dir)
+            store = self._ctx.open_store(run_dir)
             try:
                 await self._ctx.scheduler.cancel(run_dir.name)
                 engine = self._build_engine(store, auto=False)
@@ -601,7 +627,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
 
     def _runtime_config(self, store: RunStore) -> Config:
         """The configuration frozen at CreateRun, with a legacy-run fallback."""
-        meta = store.read_run_meta() or {}
+        meta = load_run_meta(store, self._ctx.workspace) or {}
         runtime = meta.get("runtime")
         if isinstance(runtime, dict):
             snapshot = from_dict(runtime)
@@ -630,7 +656,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         """
         if not is_run_id(run_id):
             raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
-        if not RunStore(self._ctx.runs_dir / run_id).events_path.is_file():
+        if not self._ctx.run_exists(self._ctx.runs_dir / run_id):
             raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
         return self._ctx.scheduler.store_for(run_id)
 
@@ -642,16 +668,15 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
     def _pinned_store(self) -> RunStore:
         path = self._ctx.pinned_run
         assert path is not None  # only called after a pinned_run check
-        store = RunStore(path)
-        if not store.events_path.is_file():
+        store = self._ctx.open_store(path)
+        if not store.has_events():
             raise ConnectError(Code.NOT_FOUND, f"run {path.name!r} not found")
         return store
 
-    @staticmethod
-    def _run_id_of(store: RunStore) -> str:
-        """A pinned run's id: its ``run.json`` id, else the directory name."""
+    def _run_id_of(self, store: RunStore) -> str:
+        """A pinned run's id: its static metadata id, else the directory name."""
         try:
-            meta = store.read_run_meta()
+            meta = load_run_meta(store, self._ctx.workspace)
         except BlackboardError:
             meta = None
         run_id = meta.get("id") if isinstance(meta, dict) else None
@@ -661,7 +686,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         store = self._pinned_store()
         try:
             run = summarize_run(
-                store, meta=store.read_run_meta(), budget=self._ctx.config.worker.budget
+                store,
+                meta=load_run_meta(store, self._ctx.workspace),
+                budget=self._ctx.config.worker.budget,
             )
         except (BlackboardError, ReduceError, OSError) as exc:
             raise ConnectError(
@@ -717,15 +744,17 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             # Only real run directories; a stray/corrupt run must not break the list.
             if not entry.is_dir() or not is_run_id(entry.name):
                 continue
-            store = RunStore(entry)
+            store = self._ctx.open_store(entry)
             try:
                 run = summarize_run(
                     store,
-                    meta=store.read_run_meta(),
+                    meta=load_run_meta(store, self._ctx.workspace, entry.name),
                     budget=self._ctx.config.worker.budget,
                 )
             except (BlackboardError, ReduceError, OSError):
                 continue
+            finally:
+                store.close()
             if project_id is not None and run.project_id != project_id:
                 continue
             runs.append(run)
@@ -743,10 +772,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             return store
         if not is_run_id(run_id):
             raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
-        store = RunStore(self._ctx.runs_dir / run_id)
-        if not store.events_path.is_file():
+        if not self._ctx.run_exists(self._ctx.runs_dir / run_id):
             raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
-        return store
+        return self._ctx.open_store(self._ctx.runs_dir / run_id)
 
     def _folded_board(
         self, store: RunStore, *, at_event: int | None
@@ -757,7 +785,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         board = reduce(folded)
         run = summarize_run(
             store,
-            meta=store.read_run_meta(),
+            meta=load_run_meta(store, self._ctx.workspace),
             budget=self._ctx.config.worker.budget,
             events=folded,
         )
@@ -769,7 +797,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         board = reduce(folded)
         run = summarize_run(
             store,
-            meta=store.read_run_meta(),
+            meta=load_run_meta(store, self._ctx.workspace),
             budget=self._ctx.config.worker.budget,
             events=folded,
         )
@@ -777,9 +805,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         # log so its length stays stable while stepping. `source_text` only feeds the
         # retry flow, which is offered for terminal failures, so we skip reading the
         # document on every (polled) GetRun of an active run.
-        source_text = (
-            self._read_source_text(store) if board.status in _RETRYABLE_STATUSES else ""
-        )
+        source_text = self._read_source_text(store) if board.status in _RETRYABLE_STATUSES else ""
         return convert.run_detail_pb(
             run,
             board,

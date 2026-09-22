@@ -170,6 +170,14 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 - [x] `run_00N` 分配；`summarize_run(...) -> Run`（使无 `run.json` 的样例目录可被只读服务；
       样例缺 `project_id`/`title`/`source_type`/`analysis`，按目录名/默认值回填）— `persistence.py`
 - [x] 测试：run.json 往返、id 分配、由事件派生 Run — `tests/test_persistence.py`
+- [x] **workspace 存储**：顶层 `[storage].db`（默认 `originweave.db`）把 runs/projects **静态元数据**
+      收进一个 SQLite 库（`workspace.py` `WorkspaceStore`）——`run.json`/`project.json` 仍写（双写、
+      读优先 DB），启动 `bootstrap_from_dirs` 幂等导入旧目录注册表，`allocate_run_id` 兼顾目录与 DB。
+      **事件日志仍以 `events.jsonl` 为准**；`store.py` `EventLog` 协议 + `SqliteEventLog` 是迁移目标，
+      `open_run_store` 仅当库内已有该 run 的事件、或 run dir 自带含该 run 事件的 `events.db` 时
+      才优先 SQLite（仓库样例仍写 `events.jsonl`）。
+      `sessions/`/`report.md` 等 run dir 产物不变。测试：`tests/test_workspace.py`、
+      `tests/test_store_sqlite.py`、`tests/test_server.py::test_project_usage_includes_server_runs`
 
 ### C3 · service 接线（引擎 + 只读 + HITL）
 

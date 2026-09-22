@@ -33,7 +33,8 @@ from ..persistence import ProjectRegistry
 from ..pricing import PricingTable
 from ..runtime import ContainerManager, ContainerWorker, RunContainerWorker
 from ..runtime.container import ENV_BASE_URL, ENV_MODEL, ENV_PROVIDER, ENV_TOOLS
-from ..store import RunStore
+from ..store import RunStore, open_run_store, run_has_events
+from ..workspace import WorkspaceStore
 
 _log = logging.getLogger(__name__)
 
@@ -78,15 +79,24 @@ class RunScheduler:
     """
 
     runs_dir: Path
+    # Global workspace database. ``None`` keeps the legacy JSONL backend (the
+    # pinned ``ui --run`` view and script-only mode); a writable server builds one.
+    db_path: Path | None = None
     _stores: dict[str, RunStore] = field(default_factory=dict, init=False)
     _tasks: dict[str, asyncio.Task[Board]] = field(default_factory=dict, init=False)
     _engines: dict[str, Engine] = field(default_factory=dict, init=False)
 
     def store_for(self, run_id: str) -> RunStore:
-        """Return the cached store for ``run_id`` (created on first use)."""
+        """Return the cached store for ``run_id`` (created on first use).
+
+        Uses the same probe as ``ServerContext.open_store`` so a run whose events
+        live in a legacy ``events.jsonl`` keeps that backend even once the
+        workspace database exists; the single cached ``RunStore`` per run keeps
+        event-id assignment in one place.
+        """
         store = self._stores.get(run_id)
         if store is None:
-            store = RunStore(self.runs_dir / run_id)
+            store = open_run_store(self.runs_dir / run_id, db_path=self.db_path)
             self._stores[run_id] = store
         return store
 
@@ -126,7 +136,9 @@ class RunScheduler:
         # either table. A later write RPC re-caches a fresh store for the run.
         run_id = task.get_name().removeprefix("run:")
         self._tasks.pop(run_id, None)
-        self._stores.pop(run_id, None)
+        store = self._stores.pop(run_id, None)
+        if store is not None:
+            store.close()
         self._engines.pop(run_id, None)
         # Retrieve the exception so asyncio never warns about an unretrieved one; the
         # engine reports failures on the board (FAILED), so this is a defensive log.
@@ -176,8 +188,22 @@ class ServerContext:
     # resolved run directory so a fresh Engine used by SubmitHumanInput finds the same
     # container rather than starting another one.
     run_workers: dict[Path, RunContainerWorker] = field(default_factory=dict)
+    # Global workspace database: runs/projects metadata (the live event log stays
+    # ``events.jsonl``). ``None`` only in hand-constructed test contexts; ``build``
+    # always creates one.
+    workspace: WorkspaceStore | None = None
     # ``originweave ui --run <dir>``: serve only this one run, read-only (C4).
     pinned_run: Path | None = None
+
+    def open_store(self, run_dir: Path) -> RunStore:
+        """Open a run store, probing bundled/global SQLite before legacy JSONL."""
+        db_path = self.workspace.path if self.workspace is not None else None
+        return open_run_store(run_dir, db_path=db_path)
+
+    def run_exists(self, run_dir: Path) -> bool:
+        """Read-only existence probe (no DDL, no kept connection) for a run."""
+        db_path = self.workspace.path if self.workspace is not None else None
+        return run_has_events(run_dir, db_path=db_path)
 
     def apply_settings(self, config: Config) -> None:
         """Replace the live config and rebuild providers for subsequent runs.
@@ -216,9 +242,7 @@ class ServerContext:
             key = run_dir.resolve()
             worker = self.run_workers.get(key)
             if worker is None:
-                worker = RunContainerWorker(
-                    manager=manager, run_dir=run_dir, env=env
-                )
+                worker = RunContainerWorker(manager=manager, run_dir=run_dir, env=env)
                 self.run_workers[key] = worker
             return worker
         return ContainerWorker(manager=manager, run_dir=run_dir, env=env)
@@ -289,10 +313,18 @@ class ServerContext:
         cfg = config if config is not None else config_module.load()
         base = Path.cwd() if root is None else Path(root)
         runs_dir = base / cfg.run.dir
+        projects_dir = base / cfg.project.dir
         pinned = None
         if run_dir is not None:
             candidate = Path(run_dir)
             pinned = (candidate if candidate.is_absolute() else base / candidate).resolve()
+        # The pinned single-run view is read-only: it must not create/bootstraps a
+        # workspace database (or write into a non-writable cwd). ``None`` keeps the
+        # legacy JSONL backend, which is what a standalone run directory uses.
+        workspace = None
+        if pinned is None:
+            workspace = WorkspaceStore(base / cfg.storage.db)
+            workspace.bootstrap_from_dirs(projects_dir, runs_dir)
         resolved_config_path = (
             config_path if config_path is not None else base / config_module.CONFIG_FILENAME
         )
@@ -312,14 +344,17 @@ class ServerContext:
             config=cfg,
             providers=providers if providers is not None else resolved_factory(cfg),
             runs_dir=runs_dir,
-            projects_dir=base / cfg.project.dir,
-            scheduler=RunScheduler(runs_dir=runs_dir),
+            projects_dir=projects_dir,
+            scheduler=RunScheduler(
+                runs_dir=runs_dir, db_path=workspace.path if workspace is not None else None
+            ),
             config_path=resolved_config_path,
             providers_factory=resolved_factory,
             container_manager=_container_manager_for(cfg),
+            workspace=workspace,
             pinned_run=pinned,
         )
 
     @property
     def registry(self) -> ProjectRegistry:
-        return ProjectRegistry(self.projects_dir, self.runs_dir)
+        return ProjectRegistry(self.projects_dir, self.runs_dir, workspace=self.workspace)

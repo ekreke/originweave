@@ -159,6 +159,13 @@
 
 ## 已知风险 / 缺口
 
+- **workspace 存储为半迁移态**：`[storage].db` 的 `WorkspaceStore` 目前只收 runs/projects **静态元数据**
+  （读优先 DB、目录双写）；**事件日志仍写 `events.jsonl`**，`SqliteEventLog`/`open_run_store` 的全局库
+  事件分支目前仅为显式导入/测试预留（仓库样例仍写 `events.jsonl`；`open_run_store` 仅在库内已有该 run
+  事件、或 run dir 自带含该 run 事件的 `events.db` 时优先 SQLite）。因此 `project_run_stats` 的 `events`
+  join 只对 DB 内事件有效，`ProjectRegistry._with_usage` 另需扫盘折 JSONL 事件。把 live server 的事件
+  写入也切到 SQLite（含 `replay`/`ui` 全量切后端）是后续切片。
+
 - **M3 Pi runtime 范围**：默认 `per-run` 在一次核验中复用一个 Pi 容器，减少 Bootstrap/Reason/Explore
   的启动开销；`per-call` 仍可用于严格隔离。启用默认的 `[worker].execution=container` 需 Docker +
   `make image`；缺 Docker/镜像会明确报错，不静默降级。预热多容器池仍是独立后续优化。

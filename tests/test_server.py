@@ -26,7 +26,7 @@ from originweave.persistence import Project, ProjectRegistry  # noqa: E402
 from originweave.reduce import reduce  # noqa: E402
 from originweave.server import Providers, ServerContext, create_app  # noqa: E402
 from originweave.server.service import Service  # noqa: E402
-from originweave.store import RunStore  # noqa: E402
+from originweave.store import RunStore, open_run_store  # noqa: E402
 
 SERVICE = "/originweave.v1.OriginweaveService"
 JSON_HEADERS = {"Content-Type": "application/json"}
@@ -705,6 +705,27 @@ async def test_create_project_enables_create_run(tmp_path: Path) -> None:
     assert response.json()["run"]["projectId"] == "fresh"
 
 
+async def test_project_usage_includes_server_runs(tmp_path: Path) -> None:
+    """Regression: a server run's metadata row must not hide its on-disk events.
+
+    The workspace database stores the run row while the live event log stays in
+    ``events.jsonl``; the project's derived ``run_count``/``updated_at`` must still
+    fold that run instead of reporting an empty ``updated_at``.
+    """
+    ctx = _ctx(tmp_path, _bootstrap("A claim"), NO_REASON)
+    async with _client_for(ctx) as client:
+        await _create_run(client, auto=True)
+        await ctx.scheduler.drain()
+        projects = await _post(client, "ListProjects", {})
+        project = await _post(client, "GetProject", {"projectId": "p"})
+
+    assert projects.status_code == 200
+    listed = next(p for p in projects.json()["projects"] if p["id"] == "p")
+    assert listed["runCount"] == 1
+    assert listed["updatedAt"] != ""
+    assert project.json()["project"]["updatedAt"] == listed["updatedAt"]
+
+
 async def test_list_runs_filters_by_project(tmp_path: Path) -> None:
     _write_run(tmp_path / "runs", "run_001", project_id="p")
     _write_run(tmp_path / "runs", "run_002", project_id="q")
@@ -1214,6 +1235,17 @@ async def test_without_static_dir_root_is_not_index(tmp_path: Path) -> None:
     assert response.status_code == 404
 
 
+async def test_pinned_ui_does_not_create_a_workspace_db(tmp_path: Path) -> None:
+    """The pinned ``ui --run`` view is read-only: no workspace database is written."""
+    run_dir = _write_ui_run(tmp_path, "demo")
+
+    async with _ui_client(tmp_path, static_dir=None, run_dir=run_dir) as client:
+        response = await _post(client, "GetRun", {"runId": "demo"})
+
+    assert response.status_code == 200
+    assert not (tmp_path / "originweave.db").exists()
+
+
 async def test_pinned_run_is_read_only(tmp_path: Path) -> None:
     run_dir = _write_ui_run(tmp_path, "demo")
 
@@ -1291,7 +1323,7 @@ async def test_lifespan_drains_background_runs(tmp_path: Path) -> None:
         await _create_run(client, auto=True)  # still running at exit
 
     # The lifespan shutdown awaited the background task to completion.
-    store = RunStore(tmp_path / "runs" / "run_001")
+    store = open_run_store(tmp_path / "runs" / "run_001", db_path=tmp_path / "originweave.db")
     types = [event.type for event in store.read_events()]
     assert "CONCLUDE" in types  # Bootstrap finished, not just PROJECT
 
@@ -1836,5 +1868,7 @@ async def test_pause_and_resume_run(tmp_path: Path) -> None:
         assert resumed.json()["run"]["status"] == "running"
         await ctx.scheduler.drain()
 
-    types = [event.type for event in RunStore(tmp_path / "runs" / run_id).read_events()]
+    types = [
+        event.type for event in ctx.open_store(tmp_path / "runs" / run_id).read_events()
+    ]
     assert "PAUSED" in types and "RESUMED" in types

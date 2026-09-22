@@ -67,6 +67,7 @@ def create_app(
     """
     scheduler = None
     managed_service = None
+    managed_context = None
     pricing = None
     if service is None:
         context = ServerContext.build(
@@ -75,6 +76,7 @@ def create_app(
         service = Service(context)
         scheduler = context.scheduler
         managed_service = service
+        managed_context = context
         pricing = context.pricing
 
     @asynccontextmanager
@@ -92,6 +94,9 @@ def create_app(
                 await managed_service.shutdown()
             if scheduler is not None:
                 await scheduler.drain()
+            # Close the workspace database only after every writer is done.
+            if managed_context is not None and managed_context.workspace is not None:
+                managed_context.workspace.close()
 
     app = Starlette(lifespan=lifespan)
     connect = OriginweaveServiceASGIApplication(service)

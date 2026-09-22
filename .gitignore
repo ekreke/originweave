@@ -16,6 +16,10 @@ runs/
 projects/
 *.jsonl
 !examples/**/*.jsonl
+# workspace database ([storage].db); committed sample databases live under examples/
+originweave.db
+*.db-wal
+*.db-shm
 # generated proto code (build artifact; run `buf generate proto`)
 src/originweave/v1/
 frontend/src/gen/

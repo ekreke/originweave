@@ -28,7 +28,8 @@ from .blackboard import BlackboardError
 from .config import BudgetConfig
 from .events import Event
 from .reduce import reduce
-from .store import RunStore
+from .store import RunStore, open_run_store
+from .workspace import WorkspaceStore
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _RUN_ID_RE = re.compile(r"run_(\d+)")
@@ -218,8 +219,12 @@ def is_run_id(name: str) -> bool:
     return _RUN_ID_RE.fullmatch(name) is not None
 
 
-def allocate_run_id(runs_dir: Path) -> str:
-    """Return the next global ``run_00N`` id by scanning ``runs_dir``."""
+def allocate_run_id(runs_dir: Path, workspace: WorkspaceStore | None = None) -> str:
+    """Return the next global ``run_00N`` id.
+
+    Scans ``runs_dir`` (legacy directories) and, when a workspace database is
+    given, its ``runs`` table; the id must be free in *both* stores.
+    """
     highest = 0
     if runs_dir.is_dir():
         for entry in runs_dir.iterdir():
@@ -228,7 +233,25 @@ def allocate_run_id(runs_dir: Path) -> str:
             match = _RUN_ID_RE.fullmatch(entry.name)
             if match is not None:
                 highest = max(highest, int(match.group(1)))
+    if workspace is not None:
+        highest = max(highest, workspace.max_run_seq())
     return f"run_{highest + 1:03d}"
+
+
+def load_run_meta(
+    store: RunStore, workspace: WorkspaceStore | None, run_id: str | None = None
+) -> dict[str, Any] | None:
+    """Static run metadata: the workspace database first, ``run.json`` as fallback.
+
+    Legacy runs (and the committed sample) have no workspace row, so the
+    directory file stays their source; server-created runs are authoritative in
+    the database.
+    """
+    if workspace is not None:
+        meta = workspace.get_run_meta(run_id if run_id is not None else store.root.name)
+        if meta is not None:
+            return meta
+    return store.read_run_meta()
 
 
 def _format_elapsed(events: Sequence[Event]) -> str:
@@ -319,11 +342,24 @@ def summarize_run(
 
 
 class ProjectRegistry:
-    """Directory-based project registry: ``projects/<id>/project.json``."""
+    """Project registry: the workspace database first, legacy directories as fallback.
 
-    def __init__(self, projects_dir: Path, runs_dir: Path) -> None:
+    With a :class:`~originweave.workspace.WorkspaceStore` attached, writes go to
+    both stores (the directory keeps serving tooling that reads it directly) and
+    reads prefer the database. Without one, the class behaves exactly like the
+    original directory registry.
+    """
+
+    def __init__(
+        self,
+        projects_dir: Path,
+        runs_dir: Path,
+        *,
+        workspace: WorkspaceStore | None = None,
+    ) -> None:
         self._projects_dir = Path(projects_dir)
         self._runs_dir = Path(runs_dir)
+        self._workspace = workspace
 
     def path(self, project_id: str) -> Path:
         """Return the ``project.json`` path for ``project_id`` (validates the id)."""
@@ -332,6 +368,17 @@ class ProjectRegistry:
         return self._projects_dir / project_id / "project.json"
 
     def get(self, project_id: str) -> Project | None:
+        if self._workspace is not None:
+            data = self._workspace.get_project(project_id)
+            if data is not None:
+                return self._with_usage(
+                    Project(
+                        id=data["id"],
+                        name=data["name"],
+                        description=data["description"],
+                        accent=data["accent"],
+                    )
+                )
         path = self.path(project_id)
         if not path.is_file():
             return None
@@ -344,25 +391,38 @@ class ProjectRegistry:
         return self._with_usage(Project.from_dict(data))
 
     def list(self) -> list[Project]:
-        if not self._projects_dir.is_dir():
-            return []
-        projects: list[Project] = []
-        for entry in sorted(self._projects_dir.iterdir()):
-            # Skip stray entries the registry itself could not have created.
-            if not entry.is_dir() or _ID_RE.fullmatch(entry.name) is None:
-                continue
-            if not (entry / "project.json").is_file():
-                continue
-            project = self.get(entry.name)
-            if project is not None:
-                projects.append(project)
-        return projects
+        projects: dict[str, Project] = {}
+        if self._workspace is not None:
+            for data in self._workspace.list_projects():
+                projects[data["id"]] = Project(
+                    id=data["id"],
+                    name=data["name"],
+                    description=data["description"],
+                    accent=data["accent"],
+                )
+        if self._projects_dir.is_dir():
+            for entry in sorted(self._projects_dir.iterdir()):
+                # Skip stray entries the registry itself could not have created.
+                if not entry.is_dir() or _ID_RE.fullmatch(entry.name) is None:
+                    continue
+                if entry.name in projects or not (entry / "project.json").is_file():
+                    continue
+                try:
+                    project = self.get(entry.name)
+                except BlackboardError:
+                    # A single corrupt run must not break the whole registry listing.
+                    continue
+                if project is not None:
+                    projects[entry.name] = project
+        ordered = sorted(projects.values(), key=lambda project: project.id)
+        return [self._with_usage(project) for project in ordered]
 
     def write(self, project: Project) -> Path:
         """Persist the static project fields (counts are never written).
 
         Written to a sibling temp file and replaced, so a crash mid-write cannot leave a
         corrupt ``project.json`` (a malformed file breaks ``list()``/the whole overview).
+        With a workspace attached, the database row is updated as well.
         """
         path = self.path(project.id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -378,6 +438,13 @@ class ProjectRegistry:
             encoding="utf-8",
         )
         os.replace(tmp_path, path)
+        if self._workspace is not None:
+            self._workspace.upsert_project(
+                project.id,
+                name=project.name,
+                description=project.description,
+                accent=project.accent,
+            )
         return path
 
     def ensure(self, project_id: str, *, name: str | None = None) -> Project:
@@ -389,15 +456,34 @@ class ProjectRegistry:
         self.write(project)
         return self._with_usage(project)
 
+    def _open_store(self, run_dir: Path) -> RunStore:
+        """A store reading this run's events from whichever backend holds them."""
+        db_path = self._workspace.path if self._workspace is not None else None
+        return open_run_store(run_dir, db_path=db_path)
+
     def _with_usage(self, project: Project) -> Project:
         count = 0
         latest = ""
+        db_run_ids: set[str] = set()
+        if self._workspace is not None:
+            count, latest = self._workspace.project_run_stats(project.id)
+            db_run_ids = self._workspace.run_ids()
         if self._runs_dir.is_dir():
             for entry in self._runs_dir.iterdir():
                 if not entry.is_dir():
                     continue
-                store = RunStore(entry)
+                in_db = entry.name in db_run_ids
+                # A database row whose events also live in the database is already
+                # folded by ``project_run_stats``. A bootstrapped legacy run has a
+                # row but its events only on disk, so it still needs reading here
+                # (without double-counting the run).
+                if in_db and not (entry / "events.jsonl").is_file():
+                    continue
+                store: RunStore | None = None
                 try:
+                    # Opening may raise for a corrupt/foreign ``events.db``; that must
+                    # not break the whole registry listing (the adjacent contract).
+                    store = self._open_store(entry)
                     meta = store.read_run_meta()
                     if not meta or meta.get("project_id") != project.id:
                         continue
@@ -405,7 +491,11 @@ class ProjectRegistry:
                 except (BlackboardError, OSError):
                     # A single corrupt run must not break the whole registry listing.
                     continue
-                count += 1
+                finally:
+                    if store is not None:
+                        store.close()
+                if not in_db:
+                    count += 1
                 updated = events[-1].at if events else _str(meta.get("created_at"))
                 latest = max(latest, updated)
         project.run_count = count
@@ -422,5 +512,6 @@ __all__ = [
     "Steps",
     "allocate_run_id",
     "is_run_id",
+    "load_run_meta",
     "summarize_run",
 ]

@@ -27,7 +27,7 @@ from .capabilities import (
 from .capabilities.model import BASE_URL_ENV_VAR as OPENAI_BASE_URL_ENV
 from .capabilities.model import ENV_VAR as OPENAI_ENV_VAR
 from .reduce import ReduceError, reduce, render_canonical, render_summary
-from .store import RunStore
+from .store import open_run_store, run_has_events
 
 FALLBACK_VERSION = "0.0.0"
 
@@ -142,8 +142,8 @@ def _cmd_ui(args: argparse.Namespace) -> int:
 
     root = Path.cwd()
     run_dir = Path(args.run) if args.run else None
-    if run_dir is not None and not (run_dir / "events.jsonl").is_file():
-        print(f"no event log at {run_dir / 'events.jsonl'}", file=sys.stderr)
+    if run_dir is not None and not run_has_events(run_dir, db_path=root / cfg.storage.db):
+        print(f"no event log for {run_dir}", file=sys.stderr)
         return 1
     static_dir = root / "frontend" / "dist"
     if not static_dir.is_dir():
@@ -165,9 +165,14 @@ def _cmd_ui(args: argparse.Namespace) -> int:
 
 
 def _cmd_replay(args: argparse.Namespace) -> int:
-    store = RunStore(Path(args.run_dir))
-    if not store.events_path.is_file():
-        print(f"no event log at {store.events_path}", file=sys.stderr)
+    run_dir = Path(args.run_dir)
+    try:
+        cfg = config.load()
+    except config.ConfigError:
+        cfg = config.Config()
+    store = open_run_store(run_dir, db_path=Path.cwd() / cfg.storage.db)
+    if not store.has_events():
+        print(f"no event log for {run_dir}", file=sys.stderr)
         return 1
     try:
         board = reduce(store.read_events())

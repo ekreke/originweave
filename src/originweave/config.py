@@ -50,7 +50,9 @@ _DURATION_UNITS: dict[str, float] = {
 }
 _DURATION_RE = re.compile(r"([1-9][0-9]*)(ms|s|m|h|d)")
 
-_TOP_LEVEL_KEYS: frozenset[str] = frozenset({"hitl", "capability", "worker", "run", "project"})
+_TOP_LEVEL_KEYS: frozenset[str] = frozenset(
+    {"hitl", "capability", "worker", "run", "project", "storage"}
+)
 _TABLE_KEYS: dict[str, frozenset[str]] = {
     "hitl": frozenset({"auto"}),
     "capability": frozenset({"search", "prompt", "model"}),
@@ -74,6 +76,7 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
     "worker.budget": frozenset({"max_steps", "max_wall", "max_cost"}),
     "run": frozenset({"dir"}),
     "project": frozenset({"dir"}),
+    "storage": frozenset({"db"}),
 }
 
 
@@ -168,12 +171,20 @@ class ProjectConfig:
 
 
 @dataclass(frozen=True)
+class StorageConfig:
+    # Global SQLite database: runs/projects static metadata (the live event log
+    # stays ``events.jsonl``; migrated/imported runs may also store events here).
+    db: str = "originweave.db"
+
+
+@dataclass(frozen=True)
 class Config:
     hitl: HitlConfig = field(default_factory=HitlConfig)
     capability: CapabilityConfig = field(default_factory=CapabilityConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)
     run: RunConfig = field(default_factory=RunConfig)
     project: ProjectConfig = field(default_factory=ProjectConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
 
     def to_dict(self) -> dict[str, Any]:
         """Render the config as a plain dict suitable for TOML serialisation."""
@@ -209,6 +220,7 @@ class Config:
             },
             "run": {"dir": self.run.dir},
             "project": {"dir": self.project.dir},
+            "storage": {"db": self.storage.db},
         }
 
     def validate(self) -> None:
@@ -298,6 +310,8 @@ class Config:
             raise ConfigError("run.dir must be a non-empty string")
         if not self.project.dir:
             raise ConfigError("project.dir must be a non-empty string")
+        if not self.storage.db:
+            raise ConfigError("storage.db must be a non-empty string")
 
 
 def _as_mapping(value: Any, where: str) -> Mapping[str, Any]:
@@ -368,6 +382,7 @@ def from_dict(data: Mapping[str, Any]) -> Config:
     worker_budget = _as_mapping(worker.get("budget"), "worker.budget")
     run = _as_mapping(data.get("run"), "run")
     project = _as_mapping(data.get("project"), "project")
+    storage = _as_mapping(data.get("storage"), "storage")
 
     _check_keys(hitl, "hitl", _TABLE_KEYS["hitl"])
     _check_keys(capability, "capability", _TABLE_KEYS["capability"])
@@ -378,6 +393,7 @@ def from_dict(data: Mapping[str, Any]) -> Config:
     _check_keys(worker_budget, "worker.budget", _TABLE_KEYS["worker.budget"])
     _check_keys(run, "run", _TABLE_KEYS["run"])
     _check_keys(project, "project", _TABLE_KEYS["project"])
+    _check_keys(storage, "storage", _TABLE_KEYS["storage"])
 
     return Config(
         hitl=HitlConfig(auto=_as_bool(hitl.get("auto"), "hitl.auto", defaults.hitl.auto)),
@@ -485,6 +501,7 @@ def from_dict(data: Mapping[str, Any]) -> Config:
         ),
         run=RunConfig(dir=_as_str(run.get("dir"), "run.dir", defaults.run.dir)),
         project=ProjectConfig(dir=_as_str(project.get("dir"), "project.dir", defaults.project.dir)),
+        storage=StorageConfig(db=_as_str(storage.get("db"), "storage.db", defaults.storage.db)),
     )
 
 

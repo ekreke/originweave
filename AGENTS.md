@@ -116,6 +116,12 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   `[capability.model]`。顶层 `[budget]` 已退役，旧配置会报错。**M1c-1** 顶层 `[project]`：
   `dir`(目录式 project 注册表根，默认 `"projects"`)；`[run].dir`(run 根，默认 `"runs"`)。
   `run.json` 只存该 run 的**静态/输入元数据**，结果（status/计数）一律由 `events.jsonl` 派生。
+  **workspace 存储**：顶层 `[storage].db`（默认 `"originweave.db"`，已 gitignore）——`WorkspaceStore`
+  把 runs/projects **静态元数据**收进一个 SQLite 库（`run.json` 仍写，双写、读优先 DB）；server 启动
+  `bootstrap_from_dirs` 幂等导入旧目录式注册表、`allocate_run_id` 兼顾目录与 DB。**事件日志仍以
+  `events.jsonl` 为准**（live server 写它）；`SqliteEventLog`/`open_run_store` 是迁移目标，目前仅为
+  显式导入/测试预留（仓库样例仍写 `events.jsonl`）；`open_run_store` 仅当库内已有该 run 事件、或
+  run dir 自带含该 run 事件的 `events.db` 时才优先 SQLite。
 - **HITL 开关**：`[hitl].auto` 或 `CreateRunRequest.auto` 只控制 Gate（默认人工介入）。
 - **凭据只从环境变量读**，不写入配置，且**多为可选**：`EXA_API_KEY` / `PARALLEL_API_KEY`
   （search 免费端点默认免 key）、`OPENAI_API_KEY`（+ 可选 `OPENAI_BASE_URL`）、
