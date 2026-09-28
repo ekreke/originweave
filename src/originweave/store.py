@@ -174,6 +174,10 @@ class RunStore:
         return self._root / "report.md"
 
     @property
+    def entity_graph_path(self) -> Path:
+        return self._root / "entity-graph.json"
+
+    @property
     def run_json_path(self) -> Path:
         return self._root / "run.json"
 
@@ -277,6 +281,16 @@ class RunStore:
         self._root.mkdir(parents=True, exist_ok=True)
         self.report_path.write_text(content, encoding="utf-8")
         return self.report_path
+
+    def write_entity_graph(self, content: str) -> Path:
+        """Write the derived entity-relation graph as ``entity-graph.json`` (M5).
+
+        Not an event: like ``report.md`` it is a *derivation* from the board, so it
+        can always be rebuilt from the event log. ``replay`` never calls this.
+        """
+        self._root.mkdir(parents=True, exist_ok=True)
+        self.entity_graph_path.write_text(content, encoding="utf-8")
+        return self.entity_graph_path
 
     def write_session(self, session_id: str, session: Mapping[str, Any]) -> Path:
         """Write the raw session snapshot for one worker call (M6).

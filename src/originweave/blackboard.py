@@ -7,6 +7,7 @@ type knows how to serialise to and from JSON-able dicts.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -105,6 +106,17 @@ RELATION_TYPES: frozenset[str] = frozenset(  # RelationType
 
 class BlackboardError(ValueError):
     """Raised when blackboard data is malformed."""
+
+
+def canonical_name(name: str) -> str:
+    """Return the merge key for entity names (M5): NFKC + casefold + whitespace fold.
+
+    Two entities whose names share a canonical key are the same entity: the engine
+    merges them by re-emitting the survivor with the other name accumulated in
+    ``aliases``. Deterministic by construction, so replay merges identically.
+    """
+    normalized = unicodedata.normalize("NFKC", name).strip()
+    return " ".join(normalized.casefold().split())
 
 
 def _require_str(data: Mapping[str, Any], key: str, where: str) -> str:

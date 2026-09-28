@@ -24,8 +24,9 @@ originweave 的版本与里程碑索引。**当前唯一活跃版本：`1.0`**�
 | M2 | 偏差记分卡：`Intent(verify)`/`compare(facts × sources × goal)` → deviation 分类与 report、Gate B | 已完成 | M1c-1 |
 | M3 | agent runtime：Docker container-per-worker（每个 Worker 调用一个容器）、容器化 Worker 后端、MCP、`langfuse`、预算、异步 Hint、Gate C（`search`/`model` 已提前至 M1） | 未开始 | M2 |
 | M4 | 端到端、Deployment 与文档回归：`make demo` 闭环、server Docker、`overview/`+`proto/` 契约无漂移 | 未开始 | M3 |
-| M5 | 实体/组织关系图：从 A 抽取实体并判别关系，产出独立的关系图（本体 + 证据/推断标注） | 未开始 | M4 |
+| M5 | 实体/组织关系图：从 A 抽取实体并判别关系，产出独立的关系图（本体 + 证据/推断标注） | 进行中 | M4 |
 | M6 | Pi Worker 与可配置工具：执行体抽为可插拔 `Worker`（默认 `pi`，经 `pi-py-sdk`）；节点级隔离会话（原始输入/输出 + 步骤链）；项目级 `[worker]`（provider / 并发 / 工具 / `[worker].budget`，LLM 复用 `[capability.model]`）；TS 搜索扩展回调 server | 进行中 | M1c-1（P3+；P1/P2 不依赖） |
+| M7 | 成果报告：所有终止态（COMPLETE/STOPPED/FAILED）落 `report.md`，`paused` 不写；纯派生、`replay` 不重写 | 未开始 | M2 |
 
 ## 下一版本（待规划）
 

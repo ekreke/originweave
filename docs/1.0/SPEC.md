@@ -398,14 +398,21 @@ Hint 注入、Gate C 行为均可观测。
 - [x] 领域模型：`Entity` / `Relation` / `EntityGraph`（`src/originweave/blackboard.py`），字段与 `product-overview.md` 第 4 节一致 — `blackboard.py`（`Entity`/`Relation`/`EntityGraph` + `Board.entities/relations`）
 - [x] 关系本体：预定义正向类型 + `other`（反向标签由渲染层派生，不建反向型）— `blackboard.py` `RELATION_TYPES`/`RelationType`（渲染端反向标签归 M5d）
 - [x] 事件 `ENTITY` / `RELATION` writer + reducer 分支（纯 fold；事件追加式，`ENTITY` 按 id upsert）— `events.py`（`ENTITY`/`RELATION`）+ `reduce.py`（`ENTITY` 按 id upsert、`RELATION` 追加）
-- [ ] Intent 类型 `extract`（实体抽取）/ `relate`（关系判别），复用 OODA 与 Dispatcher
-- [ ] 实体消歧/合并：按规范化名称归并同名实体，`aliases` 累积（保证重放确定性）
+- [x] Intent 类型 `extract`（实体抽取）/ `relate`（关系判别），复用 OODA 与 Dispatcher — **M5b**：`engine.py`
+      （`DISPATCHABLE_TYPES`/`GRAPH_INTENT_TYPES`、`parse_result(allow_entities/allow_relations)`、
+      `_check_graph_pass`；`Engine(analysis)` 校验 `provenance|relation|both`）+ `prompts/{extract,relate}.txt`
+- [x] 实体消歧/合并：按规范化名称归并同名实体，`aliases` 累积（保证重放确定性）— **M5b**：`blackboard.py`
+      `canonical_name`（NFKC+casefold+折叠空白）+ `engine.py` `_commit_extract`/`_merge_into`/`_find_entity`
+      （实体 id `n*`，首见名/状态胜出、`type` 从 `other` 升级、`confidence` 取 max、evidence 合并重编号）
 - [ ] server `CreateRun(analysis=relation|both)` 触发关系图抽取（测试注入 fake provider）
-- [ ] run dir 产物 `entity-graph.json`（可由事件重建，非事实来源）
+- [x] run dir 产物 `entity-graph.json`（可由事件重建，非事实来源）— **M5b**：`store.py` `write_entity_graph`
+      + `engine.py` `_flush_entity_graph`（每次图 pass 提交后增量重写，`sort_keys` 确定性）
 - [ ] 无来源推断标注：`Relation.status=inferred` + 置信度，渲染为虚线
 - [ ] server：`RunDetail.entity_graph` 与 `CreateRunRequest.analysis`（proto）
 - [ ] dashboard：`RELATIONS`（关系图，复用图组件）与 `ENTITIES`（实体表）页签
-- [ ] 单测：给定 fixture 输入产出确定性 `EntityGraph`（实体 / 关系 / 证据或 `inferred` 断言）
+- [x] 单测：给定 fixture 输入产出确定性 `EntityGraph`（实体 / 关系 / 证据或 `inferred` 断言）— **M5b**：
+      `tests/test_engine_m5.py`（fake provider 注入；归并/别名、`n*`/`r*` 序、inferred 校验、`both` 判据、
+      确定性两次运行一致、`entity-graph.json` 与板一致；样例 fixture 归 M5e）
 - [ ] 关系样例 fixture（含多个组织，新增于 `examples/`）
 
 验收：`CreateRun(analysis=relation)` 产出一张实体-关系图，每条关系或带
@@ -473,3 +480,26 @@ Worker 调用 = 一个**隔离会话**，历史以会话为单位保留**原始�
 输入/输出与步骤链），`WORKER_STEP` 事件可按 worker 复原执行链路；worker 的 LLM 由 `[capability.model]`
 提供，预算由 `[worker].budget` 约束；运行时缺失时给出可操作的报错而非静默失败；`parse_*`/`reduce`/`replay`
 行为不变；TS 扩展检索经 server `Search`，切换 `[capability.search]` provider 不需改 Pi；架构红线未被突破。
+
+---
+
+## M7 · 成果报告（所有终止态）
+
+目标：run 走到**任一终止态**（`COMPLETE` / `STOPPED` / `FAILED`）后，run dir 必产出
+`report.md`（结构沿用 M2 偏差记分卡：verdict / summary / findings / sources）；`paused` /
+`awaiting_human` 等中间态不生成。`report.md` 仍是**派生**物、非事件，`replay` 只读复现且不重写。
+
+- [ ] 终止态落盘：`_fail` / `_stop` / `_stop_for_budget` / Gate A `reject`（→`STOPPED`）与
+      `COMPLETE` 路径统一调用 `engine._write_report()`（`engine.py`）；`paused` 不写
+- [ ] 异常终止可读性：`derive_report` 接受可选 termination（`STOPPED{reason}` / `FAILED{reason}`），
+      无 verdict 时以终止原因填充 verdict/summary；`Report` 结构不变（`report.py`）
+- [ ] 纯 fold/确定性：同 board + 同 termination 必得同 `report.md`；`replay` 不重写
+- [ ] 单测：`COMPLETE`、`STOPPED`（budget、dead-end、stalled、max rounds、Gate A reject）、
+      `FAILED` 各写 `report.md`；`paused` 不写；`replay` 只读 — `tests/test_report.py`、
+      `tests/test_engine.py`、`tests/test_engine_m2.py`、`tests/test_budget.py`
+- [ ] 文档同步：`blackboard-protocol.md` §5/§8、`product-overview.md` 第 4 节、`store.py` 布局注释
+
+> 依赖：复用 M2 的 `Report`/`derive_report` 结构；与 M5/M6 无耦合，可独立推进。
+
+验收：任一 run 达终止态后 run dir 必有 `report.md`，其 verdict 能表达终止原因（或 `COMPLETE` 的 verdict）；
+`paused` 无 `report.md`；`originweave replay` 不改写它。

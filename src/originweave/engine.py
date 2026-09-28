@@ -21,7 +21,19 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from .blackboard import BlackboardError, Board, Edge, Evidence, Fact, Hint, Intent
+from .blackboard import (
+    BlackboardError,
+    Board,
+    Edge,
+    Entity,
+    EntityGraph,
+    Evidence,
+    Fact,
+    Hint,
+    Intent,
+    Relation,
+    canonical_name,
+)
 from .capabilities.base import CapabilityError, PromptProvider, PromptTemplate, SearchProvider
 from .capabilities.model import Usage
 from .capabilities.worker import TaskKind, Worker, WorkerReply
@@ -61,8 +73,18 @@ _PREFIX: dict[str, str] = {
 }
 
 # Intent types the dispatcher can execute. A "verify" Intent runs the compare pass
-# (M2), which scores deviations rather than chasing sources.
-DISPATCHABLE_TYPES: tuple[str, ...] = ("explore", "decompose", "verify")
+# (M2), which scores deviations rather than chasing sources; "extract"/"relate" drive
+# the entity-relation graph (M5, only when the run's ``analysis`` includes relation).
+DISPATCHABLE_TYPES: tuple[str, ...] = ("explore", "decompose", "verify", "extract", "relate")
+
+# Intent types of the entity-relation analysis (M5). They are rejected in replies of a
+# provenance-only run, and their completions commit ``ENTITY``/``RELATION`` events.
+GRAPH_INTENT_TYPES: frozenset[str] = frozenset({"extract", "relate"})
+
+# Whole-run analysis modes (proto ``CreateRunRequest.analysis``): provenance only,
+# entity-relation graph only, or both. ``both`` completes only when both the provenance
+# and the relation stop condition hold (TODO M5 decision).
+ANALYSES: frozenset[str] = frozenset({"provenance", "relation", "both"})
 
 # What an "explore" Intent may produce (blackboard-protocol.md section 2.2): it chases
 # citations/sources. "decompose" yields sub-claims, checked separately via Fact.role.
@@ -85,6 +107,7 @@ def _elapsed_seconds(start: str, end: str) -> float:
         return max(0.0, (last - first).total_seconds())
     except (ValueError, TypeError):
         return 0.0
+
 
 # What a "verify" Intent must produce (M2): exactly one compare node plus 0..N deviations.
 _COMPARE_KIND = "compare"
@@ -116,10 +139,11 @@ class WorkerResult:
 
     Bootstrap writes ``facts``; Reason writes ``intents`` (and may set ``complete``,
     plus an experiential ``hint`` when the run converges, M3); Explore writes the
-    facts behind one Intent. A reply may also carry semantic ``edges`` (section 2.4)
-    and, for a verify pass, a ``gate`` request (Gate B). ``fact_keys`` maps a
-    worker-local ``key`` to the index of the fact it names, so edges can reference
-    facts from the same reply before real ids are assigned.
+    facts behind one Intent; an ``extract``/``relate`` pass (M5) writes the
+    ``entities``/``relations`` it found. A reply may also carry semantic ``edges``
+    (section 2.4) and, for a verify pass, a ``gate`` request (Gate B). ``fact_keys``
+    maps a worker-local ``key`` to the index of the fact it names, so edges can
+    reference facts from the same reply before real ids are assigned.
     """
 
     facts: list[Fact] = field(default_factory=list)
@@ -129,6 +153,8 @@ class WorkerResult:
     gate: dict[str, str] | None = None
     hint: str | None = None
     fact_keys: dict[str, int] = field(default_factory=dict)
+    entities: list[Entity] = field(default_factory=list)
+    relations: list[Relation] = field(default_factory=list)
 
 
 def _parse_fact(item: Any, ev_seq: int) -> tuple[Fact, int, str | None]:
@@ -199,8 +225,86 @@ def _parse_intent(item: Any) -> Intent:
         raise EngineError(f"invalid intent: {exc}") from exc
 
 
+def _parse_entity(item: Any, ev_seq: int) -> tuple[Entity, int]:
+    """Parse one entity from an ``extract`` reply (M5).
+
+    The worker does not know entity ids (the engine merges by canonical name and
+    assigns ``n*`` ids), so the id is a placeholder. Evidence ids are assigned here
+    (``ev<n>`` within the reply), mirroring ``_parse_fact``.
+    """
+    if not isinstance(item, dict):
+        raise EngineError("each entity must be a JSON object")
+    raw_evidence = item.get("evidence", [])
+    if not isinstance(raw_evidence, list):
+        raise EngineError("entity.evidence must be a list")
+    evidence: list[Evidence] = []
+    for entry in raw_evidence:
+        if not isinstance(entry, dict):
+            raise EngineError("each evidence entry must be a JSON object")
+        ev_seq += 1
+        try:
+            evidence.append(Evidence.from_dict({**entry, "id": f"ev{ev_seq}"}))
+        except BlackboardError as exc:
+            raise EngineError(f"invalid evidence: {exc}") from exc
+    body = {k: v for k, v in item.items() if k != "evidence"}
+    try:
+        entity = Entity.from_dict({**body, "id": "?"})
+    except BlackboardError as exc:
+        raise EngineError(f"invalid entity: {exc}") from exc
+    entity.evidence = evidence
+    return entity, ev_seq
+
+
+def _parse_relation(item: Any, ev_seq: int) -> tuple[Relation, int]:
+    """Parse one relation from a ``relate`` reply (M5).
+
+    ``source``/``target`` must be entity ids the worker saw on the board; existence is
+    checked at commit time (the parse step has no board). An ``inferred`` relation
+    (no-source judgement) must carry a confidence in (0, 1] (protocol section 2.6).
+    """
+    if not isinstance(item, dict):
+        raise EngineError("each relation must be a JSON object")
+    raw_evidence = item.get("evidence", [])
+    if not isinstance(raw_evidence, list):
+        raise EngineError("relation.evidence must be a list")
+    evidence: list[Evidence] = []
+    for entry in raw_evidence:
+        if not isinstance(entry, dict):
+            raise EngineError("each evidence entry must be a JSON object")
+        ev_seq += 1
+        try:
+            evidence.append(Evidence.from_dict({**entry, "id": f"ev{ev_seq}"}))
+        except BlackboardError as exc:
+            raise EngineError(f"invalid evidence: {exc}") from exc
+    body = {k: v for k, v in item.items() if k != "evidence"}
+    try:
+        relation = Relation.from_dict({**body, "id": "?"})
+    except BlackboardError as exc:
+        raise EngineError(f"invalid relation: {exc}") from exc
+    relation.evidence = evidence
+    if relation.inferred and not 0.0 < relation.confidence <= 1.0:
+        raise EngineError(
+            f"relation {relation.source!r}->{relation.target!r} is inferred and must "
+            "carry a confidence in (0, 1]"
+        )
+    if relation.status == "inferred" and not relation.inferred:
+        # The frozen invariant is bidirectional (protocol section 2.6): a relation is
+        # rendered dashed exactly when it is inferred.
+        raise EngineError(
+            f"relation {relation.source!r}->{relation.target!r} has status 'inferred' "
+            "but inferred is false"
+        )
+    return relation, ev_seq
+
+
 def parse_result(
-    text: str, *, allow_edges: bool = False, allow_gate: bool = False, allow_hint: bool = False
+    text: str,
+    *,
+    allow_edges: bool = False,
+    allow_gate: bool = False,
+    allow_hint: bool = False,
+    allow_entities: bool = False,
+    allow_relations: bool = False,
 ) -> WorkerResult:
     """Parse a worker's strict-JSON reply into a :class:`WorkerResult`.
 
@@ -208,8 +312,10 @@ def parse_result(
     ``intents`` and ``complete``; enum values are validated against the blackboard
     domains. An Explore reply may additionally carry semantic ``edges`` (section 2.4)
     and a ``gate`` request (Gate B); a Reason reply may carry an experiential
-    ``hint`` (M3, written only when the run converges). ``allow_edges``/``allow_gate``/
-    ``allow_hint`` bound which tasks may. Malformed replies raise :class:`EngineError`.
+    ``hint`` (M3, written only when the run converges); an ``extract``/``relate``
+    pass (M5) may carry ``entities``/``relations``.
+    ``allow_edges``/``allow_gate``/``allow_hint``/``allow_entities``/``allow_relations``
+    bound which tasks may. Malformed replies raise :class:`EngineError`.
     """
     try:
         data = json.loads(text)
@@ -220,12 +326,18 @@ def parse_result(
     raw_facts = data.get("facts", [])
     raw_intents = data.get("intents", [])
     raw_edges = data.get("edges", [])
+    raw_entities = data.get("entities", [])
+    raw_relations = data.get("relations", [])
     if not isinstance(raw_facts, list):
         raise EngineError("'facts' must be a list")
     if not isinstance(raw_intents, list):
         raise EngineError("'intents' must be a list")
     if not isinstance(raw_edges, list):
         raise EngineError("'edges' must be a list")
+    if not isinstance(raw_entities, list):
+        raise EngineError("'entities' must be a list")
+    if not isinstance(raw_relations, list):
+        raise EngineError("'relations' must be a list")
 
     facts: list[Fact] = []
     fact_keys: dict[str, int] = {}
@@ -238,6 +350,14 @@ def parse_result(
             fact_keys[key] = index
         facts.append(fact)
     intents = [_parse_intent(item) for item in raw_intents]
+    entities: list[Entity] = []
+    for item in raw_entities:
+        entity, ev_seq = _parse_entity(item, ev_seq)
+        entities.append(entity)
+    relations: list[Relation] = []
+    for item in raw_relations:
+        relation, ev_seq = _parse_relation(item, ev_seq)
+        relations.append(relation)
 
     raw_complete = data.get("complete")
     complete: str | None = None
@@ -250,6 +370,11 @@ def parse_result(
     if raw_edges and not allow_edges:
         raise EngineError("this task must not carry 'edges'")
     edges = [_parse_edge(item) for item in raw_edges]
+
+    if raw_entities and not allow_entities:
+        raise EngineError("this task must not carry 'entities'")
+    if raw_relations and not allow_relations:
+        raise EngineError("this task must not carry 'relations'")
 
     raw_gate = data.get("gate")
     gate: dict[str, str] | None = None
@@ -287,6 +412,8 @@ def parse_result(
         gate=gate,
         hint=hint,
         fact_keys=fact_keys,
+        entities=entities,
+        relations=relations,
     )
 
 
@@ -434,15 +561,20 @@ class _ExploreOutcome:
     Nothing here is written to the blackboard until :meth:`Engine._dispatch` folds
     every outcome back in Intent id order; that ordering is what keeps a concurrent
     round's Board deterministic. ``reply`` is ``None`` when the failure happened before
-    (or without) a worker reply (e.g. a search provider error).
+    (or without) a worker reply (e.g. a search provider error). An ``extract``/
+    ``relate`` pass (M5) carries ``entities``/``relations`` instead of ``facts``
+    (``intent_type`` tells the commit path which shape to fold).
     """
 
     intent_id: str
     worker: str
+    intent_type: str = "explore"
     facts: list[Fact] = field(default_factory=list)
     edges: list[dict[str, Any]] = field(default_factory=list)
     gate: dict[str, str] | None = None
     fact_keys: dict[str, int] = field(default_factory=dict)
+    entities: list[Entity] = field(default_factory=list)
+    relations: list[Relation] = field(default_factory=list)
     reply: WorkerReply | None = None
     session_id: str = ""
     started: str = ""
@@ -483,6 +615,7 @@ class Engine:
         max_rounds: int = 10,
         budget: BudgetConfig | None = None,
         pricing: PricingTable | None = None,
+        analysis: str = "provenance",
     ) -> None:
         if max_concurrency <= 0:
             raise ValueError(f"max_concurrency must be > 0, got {max_concurrency}")
@@ -499,6 +632,8 @@ class Engine:
             )
         if max_rounds <= 0:
             raise ValueError(f"max_rounds must be > 0, got {max_rounds}")
+        if analysis not in ANALYSES:
+            raise ValueError(f"analysis must be one of {sorted(ANALYSES)}; got {analysis!r}")
         self._worker = worker
         # The engine picks the search provider (agent-design.md red line 4): Explore
         # passes call it and hand the results to the worker as context.
@@ -525,9 +660,14 @@ class Engine:
         self._cost_used = 0.0
         # Pause request (M3b): an RPC sets it; the loop honours it at a round boundary.
         self._pause_requested = asyncio.Event()
+        # Entity-relation analysis mode (M5, proto ``analysis``): provenance runs reject
+        # extract/relate Intents; relation/both add the relation stop condition.
+        self._analysis = analysis
         self._fact_seq: dict[str, int] = {}
         self._intent_seq = 0
         self._session_seq = 0
+        self._entity_seq = 0
+        self._relation_seq = 0
 
     @property
     def _worker_model(self) -> str:
@@ -574,8 +714,7 @@ class Engine:
         if price is None:
             return usage.total_tokens, 0.0
         cost = (
-            usage.prompt_tokens * price.input_per_1m
-            + usage.completion_tokens * price.output_per_1m
+            usage.prompt_tokens * price.input_per_1m + usage.completion_tokens * price.output_per_1m
         ) / 1_000_000
         return usage.total_tokens, cost
 
@@ -692,6 +831,8 @@ class Engine:
         self._fact_seq = {}
         self._intent_seq = 0
         self._session_seq = 0
+        self._entity_seq = 0
+        self._relation_seq = 0
         # A per-run override wins over the constructor default and is normalised onto the
         # instance, so the later gates (A and C) agree on whether HITL is on.
         if auto is not None:
@@ -759,9 +900,7 @@ class Engine:
             message=f"{label}: {decision}",
         )
         if gate == GATE_C:
-            return await self._resume_review(
-                decision, text=text, targets=targets, events=events
-            )
+            return await self._resume_review(decision, text=text, targets=targets, events=events)
         if decision == "reject":
             self._store.append_event("STOPPED", {"reason": f"{label} rejected by human"})
             return reduce(self._store.read_events())
@@ -797,9 +936,7 @@ class Engine:
         recheck = list(dict.fromkeys(t for t in targets if isinstance(t, str) and t in known))
         # One verify per targeted fact (the compare pass re-judges it); with no usable
         # target, fall back to a single explore pass that re-scans from the document.
-        pending = (
-            [("verify", target) for target in recheck] if recheck else [("explore", "origin")]
-        )
+        pending = [("verify", target) for target in recheck] if recheck else [("explore", "origin")]
         for intent_type, from_ in pending:
             intent = Intent(
                 id=self._next_intent_id(),
@@ -908,6 +1045,11 @@ class Engine:
             fact_seq[prefix] = fact_seq.get(prefix, 0) + 1
         self._fact_seq = fact_seq
         self._intent_seq = len(board.intents)
+        # Entity/relation ids (M5) are contiguous (``n<N>``/``r<N>`` assigned per new
+        # object; ENTITY only ever upserts a previously assigned id), so counting the
+        # unique objects on the board reconstructs the next value.
+        self._entity_seq = len(board.entities)
+        self._relation_seq = len(board.relations)
         self._session_seq = max(
             (
                 _session_suffix(str(event.payload.get("sessionId", "")))
@@ -978,10 +1120,15 @@ class Engine:
             board = reduce(self._store.read_events())
             if board.status != "running":
                 return board
-            if len(board.facts) == len(before.facts):
-                # No new facts -> nothing to reason about next round; stop. Facts are
-                # append-only. (M5's extract/relate rounds will need entities/relations
-                # in this progress check too.)
+            if (
+                len(board.facts) == len(before.facts)
+                and len(board.entities) == len(before.entities)
+                and len(board.relations) == len(before.relations)
+            ):
+                # No new facts and no new entities/relations (M5) -> nothing to reason
+                # about next round; stop. Facts/relations are append-only and entities
+                # only grow (upsert), so length comparison is exact. (An entity that only
+                # gained an alias is not a new object and does not count as progress.)
                 return self._stop("stalled: dispatch produced no new facts")
             rounds += 1
             if rounds >= self._max_rounds:
@@ -993,7 +1140,10 @@ class Engine:
         A run may complete only when the goal is *provenance-complete*: every main-claim
         was decomposed into sub-claims, every sub-claim has been chased (an ``explore``
         pass) or judged (a ``verify`` pass), and at least one compare pass scored
-        deviations. This keeps Reason from declaring completion while gaps remain.
+        deviations. This keeps Reason from declaring completion while gaps remain. When
+        the run's ``analysis`` includes relation (M5), the relation stop condition must
+        hold too: every known entity has been covered by a dispatched ``relate`` Intent
+        (TODO M5 decision; a ``both`` run needs both conditions).
         """
         decomposed: set[str] = set()
         handled: set[str] = set()
@@ -1007,14 +1157,36 @@ class Engine:
                 # nothing still counts as an attempt, so an unsourceable sub-claim does
                 # not block completion forever.
                 handled.add(intent.from_)
-        if not any(fact.kind == _COMPARE_KIND for fact in board.facts):
+        if not self._relations_satisfied(board):
             return False
-        for fact in board.facts:
-            if fact.role == "main-claim" and fact.id not in decomposed:
+        if self._analysis != "relation":
+            # A provenance or both run still needs the full provenance chain; a
+            # relation-only run skips the scorecard entirely.
+            if not any(fact.kind == _COMPARE_KIND for fact in board.facts):
                 return False
-            if fact.role == "sub-claim" and fact.id not in handled:
-                return False
+            for fact in board.facts:
+                if fact.role == "main-claim" and fact.id not in decomposed:
+                    return False
+                if fact.role == "sub-claim" and fact.id not in handled:
+                    return False
         return True
+
+    def _relations_satisfied(self, board: Board) -> bool:
+        """Whether every known entity has been covered by a dispatched ``relate`` Intent.
+
+        "Dispatched" is a claimed or done Intent (TODO M5 decision): an ``open`` one has
+        not run yet, and a ``dropped`` one was rejected by Validate, so neither counts.
+        With no entities on the board the condition is trivially true (an analysis run
+        over a document without entities can complete).
+        """
+        if self._analysis == "provenance":
+            return True
+        related = {
+            intent.from_
+            for intent in board.intents
+            if intent.type == "relate" and intent.status in ("claimed", "done")
+        }
+        return all(entity.id in related for entity in board.entities)
 
     def _write_agent_hint(self, text: str) -> None:
         """Write Reason's convergence note as an agent-authored hint (M3).
@@ -1153,10 +1325,21 @@ class Engine:
                 raise EngineError("Reason must not produce facts; that is Explore's job")
             if result.complete is not None and result.intents:
                 raise EngineError("Reason reply must not carry both intents and complete")
-            # An Intent may only hang off a finding or the origin anchor.
+            # An Intent may only hang off a finding or the origin anchor; a ``relate``
+            # Intent (M5) hangs off a known entity instead. Graph Intents are rejected
+            # outright in a provenance-only run.
             known = {"origin"} | {fact.id for fact in board.facts}
+            entity_ids = {entity.id for entity in board.entities}
             for candidate in result.intents:
-                if candidate.from_ not in known:
+                if candidate.type in GRAPH_INTENT_TYPES and self._analysis == "provenance":
+                    raise EngineError(
+                        f"intent type {candidate.type!r} requires analysis=relation|both"
+                    )
+                if candidate.type == "relate" and candidate.from_ not in entity_ids:
+                    raise EngineError(
+                        f"relate intent.from {candidate.from_!r} is not a known entity id"
+                    )
+                if candidate.from_ not in known and candidate.type != "relate":
                     raise EngineError(f"intent.from {candidate.from_!r} is not a known fact id")
         except EngineError as exc:
             # An unusable reply ends the run; keep the session for the audit. The reply
@@ -1268,13 +1451,14 @@ class Engine:
 
         The round works on a snapshot of the board as Reason left it (a later Reason
         round handles the facts it produces, I6). ``explore``/``decompose`` chase
-        sources; ``verify`` runs the compare pass and scores deviations (M2). Every
-        pending Intent is claimed up front (id order), then the passes run concurrently,
+        sources; ``verify`` runs the compare pass and scores deviations (M2);
+        ``extract``/``relate`` drive the entity-relation graph (M5). Every pending
+        Intent is claimed up front (id order), then the passes run concurrently,
         bounded by ``max_concurrency``. Outcomes are committed back in id order, so the
-        Board (fact ids and semantic edges) is deterministic even though completion
-        order is not; the round stops committing at the first hard failure. A verify
-        pass may request **Gate B** through its reply; the round then commits every fact
-        first and pauses afterwards, so the gate loses nothing.
+        Board (fact ids, entity ids and semantic edges) is deterministic even though
+        completion order is not; the round stops committing at the first hard failure.
+        A verify pass may request **Gate B** through its reply; the round then commits
+        every fact first and pauses afterwards, so the gate loses nothing.
         """
         board = reduce(self._store.read_events())
         pending = [
@@ -1288,16 +1472,22 @@ class Engine:
             # Fetched once for the whole round; a missing template is a provider failure,
             # written before any Intent is claimed. Each kind is fetched only when needed.
             templates: dict[str, PromptTemplate] = {}
-            if any(intent.type != "verify" for intent in pending):
+            if any(intent.type in ("explore", "decompose") for intent in pending):
                 templates["explore"] = await self._prompt.get("explore")
             if any(intent.type == "verify" for intent in pending):
                 templates["verify"] = await self._prompt.get("compare")
+            if any(intent.type == "extract" for intent in pending):
+                templates["extract"] = await self._prompt.get("extract")
+            if any(intent.type == "relate" for intent in pending):
+                templates["relate"] = await self._prompt.get("relate")
         except (CapabilityError, FileNotFoundError) as exc:
             self._store.append_event("FAILED", {"reason": str(exc)})
             return
 
         def template_for(intent: Intent) -> PromptTemplate:
-            return templates["verify"] if intent.type == "verify" else templates["explore"]
+            if intent.type in ("explore", "decompose"):
+                return templates["explore"]
+            return templates[intent.type]
 
         # Claim each Intent up front, in id order, with a deterministic worker label;
         # a later provider/worker failure is then auditable as "claimed, then ...".
@@ -1320,6 +1510,9 @@ class Engine:
         # Worker replies carry no ids; assign them at commit time, in id order, so the
         # resulting fact ids never depend on which pass happened to finish first.
         gate: dict[str, str] | None = None
+        # The graph so far, advanced as extract/relate outcomes commit in id order, so a
+        # later pass can reference an entity an earlier one in the same round produced.
+        graph_entities = list(board.entities)
         for outcome in outcomes:
             if outcome.error is not None:
                 if (
@@ -1344,6 +1537,41 @@ class Engine:
                     worker=outcome.worker,
                 )
                 return
+            if outcome.intent_type in GRAPH_INTENT_TYPES:
+                # An extract/relate pass produces no facts; it re-emits/merges entities or
+                # writes judged relations, then concludes like any other Intent.
+                try:
+                    graph_entities = self._commit_graph_pass(outcome, graph_entities)
+                except EngineError as exc:
+                    self._fail(
+                        exc,
+                        reply=outcome.reply,
+                        session_id=outcome.session_id,
+                        task="Explore",
+                        intent_id=outcome.intent_id,
+                        started=outcome.started,
+                        ended=outcome.ended,
+                        worker=outcome.worker,
+                    )
+                    return
+                # Refresh the derived ``entity-graph.json`` right after this pass commits,
+                # so a later failure in the same round cannot leave it stale (M5).
+                self._flush_entity_graph()
+                self._store.append_event(
+                    "CONCLUDE",
+                    {"intentId": outcome.intent_id, "facts": [], "edges": []},
+                )
+                assert outcome.reply is not None  # a success outcome always carries a reply
+                self._record_session(
+                    outcome.reply,
+                    session_id=outcome.session_id,
+                    task="Explore",
+                    intent_id=outcome.intent_id,
+                    started=outcome.started,
+                    ended=outcome.ended,
+                    worker=outcome.worker,
+                )
+                continue
             for fact in outcome.facts:
                 fact.id = self._next_fact_id(fact.kind)
             key_to_id = {key: outcome.facts[index].id for key, index in outcome.fact_keys.items()}
@@ -1398,6 +1626,160 @@ class Engine:
                 message="Gate B: arbitrate a source conflict",
             )
 
+    def _commit_graph_pass(self, outcome: _ExploreOutcome, entities: list[Entity]) -> list[Entity]:
+        """Commit one ``extract``/``relate`` outcome; return the advanced graph.
+
+        ``extract`` merges its entities by canonical name (re-emitting a survivor with
+        accumulated aliases, or allocating a fresh ``n*`` id); ``relate`` validates its
+        references against the known entities and writes fresh ``r*`` relations. A
+        reference to an unknown entity is a malformed reply (:class:`EngineError`),
+        handled by the caller like any other bad reply.
+        """
+        if outcome.intent_type == "extract":
+            return self._commit_extract(outcome.entities, entities)
+        return self._commit_relate(outcome.relations, entities)
+
+    def _commit_extract(self, reply_entities: list[Entity], entities: list[Entity]) -> list[Entity]:
+        """Merge the entities of one extract reply into ``entities`` (M5).
+
+        An entity whose name (or an accumulated alias) canonicalizes to one already on
+        the board merges into it: the survivor keeps its id, its name (first-seen wins,
+        so replay never flips) and status; ``aliases`` accumulate, ``type`` upgrades from
+        ``other`` when the reply is more specific, ``confidence`` takes the max and
+        evidence is unioned. A new name gets a fresh ``n<N>`` id. Every touched entity is
+        re-emitted as an ``ENTITY`` event (the reducer upserts by id).
+        """
+        merged = list(entities)
+        for reply_entity in reply_entities:
+            key = canonical_name(reply_entity.name)
+            target = self._find_entity(merged, key)
+            if target is None:
+                entity = Entity(
+                    id=self._next_entity_id(),
+                    name=reply_entity.name,
+                    type=reply_entity.type,
+                    aliases=self._distinct_aliases(reply_entity.name, reply_entity.aliases),
+                    status=reply_entity.status,
+                    confidence=reply_entity.confidence,
+                    note=reply_entity.note,
+                    position=dict(reply_entity.position),
+                )
+                entity.evidence = self._renumber_evidence(reply_entity.evidence, entity.id)
+                self._store.append_event("ENTITY", {"entity": entity.to_dict()})
+                merged.append(entity)
+                continue
+            index = merged.index(target)
+            self._merge_into(target, reply_entity)
+            self._store.append_event("ENTITY", {"entity": target.to_dict()})
+            merged[index] = target
+        return merged
+
+    @staticmethod
+    def _find_entity(entities: list[Entity], key: str) -> Entity | None:
+        """The entity whose name or any alias canonicalizes to ``key`` (first match)."""
+        for entity in entities:
+            names = [entity.name, *entity.aliases]
+            if any(canonical_name(name) == key for name in names):
+                return entity
+        return None
+
+    @staticmethod
+    def _distinct_aliases(name: str, aliases: Sequence[str]) -> list[str]:
+        """Strip and dedupe ``aliases`` against ``name`` by canonical key (M5).
+
+        A case/width/whitespace variant of the name is not a distinct alias, so it is
+        dropped; the survivors are stored in first-seen order (deterministic).
+        """
+        known = {canonical_name(name)}
+        distinct: list[str] = []
+        for alias in aliases:
+            stripped = alias.strip()
+            if stripped and canonical_name(stripped) not in known:
+                distinct.append(stripped)
+                known.add(canonical_name(stripped))
+        return distinct
+
+    def _merge_into(self, target: Entity, reply: Entity) -> None:
+        """Fold a reply entity into an existing survivor in place (M5 merge).
+
+        First-seen fields win (``name``/``status``/``note``/``position``) so replay is
+        stable. The survivor gains every genuinely distinct alias from the reply
+        (deduped by canonical name against the survivor's name and aliases). ``type``
+        upgrades from ``other`` when the reply is more specific, ``confidence`` takes the
+        max and evidence is unioned (re-numbered under the survivor's id). The reply's
+        own name is the merge key, so it is already represented and never restated.
+        """
+        known = {canonical_name(name) for name in [target.name, *target.aliases]}
+        for alias in reply.aliases:
+            stripped = alias.strip()
+            if stripped and canonical_name(stripped) not in known:
+                target.aliases.append(stripped)
+                known.add(canonical_name(stripped))
+        if target.type == "other" and reply.type != "other":
+            target.type = reply.type
+        target.confidence = max(target.confidence, reply.confidence)
+        target.evidence = self._renumber_evidence([*target.evidence, *reply.evidence], target.id)
+
+    def _commit_relate(
+        self, reply_relations: list[Relation], entities: list[Entity]
+    ) -> list[Entity]:
+        """Write the relations of one relate reply as fresh ``r*`` events (M5).
+
+        Each ``source``/``target`` must name a known entity (entities committed earlier
+        in the same round are visible). An ``inferred`` relation is normalized to
+        ``status=inferred`` (protocol section 2.6). References are validated here because
+        parsing has no board. Entities are returned unchanged.
+        """
+        known = {entity.id for entity in entities}
+        for reply in reply_relations:
+            if reply.source not in known:
+                raise EngineError(f"relation.source {reply.source!r} is not a known entity id")
+            if reply.target not in known:
+                raise EngineError(f"relation.target {reply.target!r} is not a known entity id")
+            if reply.source == reply.target:
+                raise EngineError(f"relation cannot be a self-loop on {reply.source!r}")
+            relation_id = self._next_relation_id()
+            relation = Relation(
+                id=relation_id,
+                source=reply.source,
+                target=reply.target,
+                type=reply.type,
+                label=reply.label,
+                status="inferred" if reply.inferred else reply.status,
+                confidence=reply.confidence,
+                inferred=reply.inferred,
+                note=reply.note,
+                evidence=self._renumber_evidence(reply.evidence, relation_id),
+            )
+            self._store.append_event("RELATION", {"relation": relation.to_dict()})
+        return entities
+
+    @staticmethod
+    def _renumber_evidence(evidence: Sequence[Evidence], owner: str) -> list[Evidence]:
+        """Give each evidence entry a deterministic id scoped to ``owner`` (M5).
+
+        Reply evidence ids are per-reply placeholders; once evidence lands on an entity
+        or relation, the id is derived from the owning object so merges never collide.
+        """
+        return [
+            Evidence(
+                id=f"{owner}-ev{index}",
+                quote=entry.quote,
+                sourceTitle=entry.sourceTitle,
+                url=entry.url,
+                locator=entry.locator,
+            )
+            for index, entry in enumerate(evidence, start=1)
+        ]
+
+    def _flush_entity_graph(self) -> None:
+        """Rewrite ``entity-graph.json`` from the board (a derived artifact, M5)."""
+        board = reduce(self._store.read_events())
+        graph = EntityGraph(entities=board.entities, relations=board.relations)
+        self._store.write_entity_graph(
+            json.dumps(graph.to_dict(), sort_keys=True, ensure_ascii=False, indent=2) + "\n"
+        )
+
     async def _guarded_run_explore(
         self,
         intent: Intent,
@@ -1423,6 +1805,7 @@ class Engine:
         return _ExploreOutcome(
             intent_id=intent.id,
             worker=worker,
+            intent_type=intent.type,
             error=_ExploreTimeout(
                 f"intent {intent.id} exceeded heartbeat_timeout ({self._heartbeat_timeout:g}s)"
             ),
@@ -1443,6 +1826,8 @@ class Engine:
         and passes the results to the worker via ``extra`` -- unless the worker owns
         retrieval (it has the ``search`` tool, e.g. Pi with ``[worker].tools=["search"]``),
         in which case the agent searches itself and no ``extra["search"]`` is injected.
+        An ``extract``/``relate`` Intent (M5) does no retrieval: it reads document A and
+        the board (which carries the known entities) and returns entities/relations.
         The worker never touches providers otherwise. Every blackboard write happens
         later, in :meth:`_dispatch`. The heartbeat lease covers the whole pass (search
         included), so a hung search cannot hold a claimed Intent without a heartbeat or
@@ -1493,19 +1878,30 @@ class Engine:
                 with contextlib.suppress(asyncio.CancelledError):
                     await heartbeat
             try:
-                result = parse_result(reply.text, allow_edges=True, allow_gate=True)
+                if intent.type in GRAPH_INTENT_TYPES:
+                    # extract/relate carry entities/relations instead of facts/edges; which
+                    # of the two a given pass may yield is enforced by ``_check_graph_pass``.
+                    result = parse_result(
+                        reply.text, allow_entities=True, allow_relations=True
+                    )
+                else:
+                    result = parse_result(reply.text, allow_edges=True, allow_gate=True)
                 if result.intents:
                     raise EngineError("Explore must not produce intents; direction is Reason's job")
                 if result.complete is not None:
                     raise EngineError("Explore must not judge completion; that is Reason's job")
                 if result.gate is not None and intent.type != "verify":
                     raise EngineError("only a verify pass may request a human gate")
-                self._check_explored_facts(intent, result.facts)
+                if intent.type in GRAPH_INTENT_TYPES:
+                    self._check_graph_pass(intent, result)
+                else:
+                    self._check_explored_facts(intent, result.facts)
             except EngineError as exc:
                 # An unusable reply ends the run; keep the session for the audit.
                 return _ExploreOutcome(
                     intent_id=intent.id,
                     worker=worker,
+                    intent_type=intent.type,
                     reply=reply,
                     session_id=session_id,
                     started=started,
@@ -1515,10 +1911,13 @@ class Engine:
             return _ExploreOutcome(
                 intent_id=intent.id,
                 worker=worker,
+                intent_type=intent.type,
                 facts=result.facts,
                 edges=result.edges,
                 gate=result.gate,
                 fact_keys=result.fact_keys,
+                entities=result.entities,
+                relations=result.relations,
                 reply=reply,
                 session_id=session_id,
                 started=started,
@@ -1537,6 +1936,20 @@ class Engine:
             self._store.append_event(
                 "HEARTBEAT", {"intentId": intent_id}, message=f"{intent_id} heartbeat"
             )
+
+    def _check_graph_pass(self, intent: Intent, result: WorkerResult) -> None:
+        """Check an ``extract``/``relate`` reply yields only what its Intent may (M5).
+
+        An ``extract`` pass produces entities only; a ``relate`` pass relations only.
+        Both must stay out of the fact graph: a stray fact would pollute the provenance
+        DAG the Stigmergy loop and stop condition run on.
+        """
+        if result.facts:
+            raise EngineError(f"{intent.type} intent {intent.id} must not produce facts")
+        if intent.type == "extract" and result.relations:
+            raise EngineError(f"extract intent {intent.id} must not produce relations")
+        if intent.type == "relate" and result.entities:
+            raise EngineError(f"relate intent {intent.id} must not produce entities")
 
     def _check_explored_facts(self, intent: Intent, facts: list[Fact]) -> None:
         """Check a batch of produced facts against what the Intent type may yield."""
@@ -1690,6 +2103,14 @@ class Engine:
         self._intent_seq += 1
         return f"i{self._intent_seq}"
 
+    def _next_entity_id(self) -> str:
+        self._entity_seq += 1
+        return f"n{self._entity_seq}"
+
+    def _next_relation_id(self) -> str:
+        self._relation_seq += 1
+        return f"r{self._relation_seq}"
+
     def _next_fact_id(self, kind: str) -> str:
         """Return the next deterministic id for ``kind`` (e.g. ``f1``, ``c2``)."""
         prefix = _PREFIX.get(kind, "f")
@@ -1698,6 +2119,7 @@ class Engine:
 
 
 __all__ = [
+    "ANALYSES",
     "BOOTSTRAP_QUESTION",
     "DISPATCHABLE_TYPES",
     "GATE_A",

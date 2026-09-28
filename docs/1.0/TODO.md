@@ -10,12 +10,14 @@
   **下一步**：**M3** 进行中（**M3a / M3b / M3c 已完成**——**M3c** 异步 Hint + Gate C 均已落地；
   下一步 **M3d** langfuse + capabilities + mcp → **M3e** 集成测试）；其后 **M5**。
 - **M5 · 实体/组织关系图（进行中）**（进度真相见 `SPEC.md` M5）。已拆为 **M5a–M5e**：
-  **M5a（已完成）** 领域/事件/reducer；**下一步 M5b** 引擎 `extract`/`relate`（`Engine(analysis)`、
-  `prompts/{reason,extract,relate}.txt`、reply `entities`/`relations`、规范化归并 upsert、进度/COMPLETE
-  判据、`entity-graph.json` 增量落盘）；**M5c** server（`analysis` 放行、`RunDetail.entity_graph`）；
-  **M5d** 前端 RELATIONS/ENTITIES 页签；**M5e** 关系样例 + 文档。决策：`relation`/`both` 保留
-  Bootstrap+Gate A；实体 id `n*`/关系 `r*`；归并键 `NFKC+casefold+折叠空白`；「已 relate」= 对实体
-  派发过 `relate` Intent；`both` = 溯源判据 且 relation 判据 且 Reason 判定。
+  **M5a（已完成）** 领域/事件/reducer；**M5b（已完成）** 引擎 `extract`/`relate`（`Engine(analysis)`、
+  `prompts/{extract,relate}.txt` + `reason.txt` 增补、reply `entities`/`relations`、`canonical_name`
+  规范化归并 upsert、`n*`/`r*` id、进度/COMPLETE 判据、`entity-graph.json` 增量落盘）；**下一步 M5c**
+  server（`analysis` 放行、`RunDetail.entity_graph`、proto 接线；注意 `Engine(analysis)` 需在 server
+  `_build_engine` 传入，否则 relation run resume 会退回 provenance）；**M5d** 前端 RELATIONS/ENTITIES
+  页签（含 inferred 虚线渲染）；**M5e** 关系样例 + 文档。决策：`relation`/`both` 保留 Bootstrap+Gate A；
+  实体 id `n*`/关系 `r*`；归并键 `NFKC+casefold+折叠空白`；「已 relate」= 对实体派发过 `relate`
+  Intent；`both` = 溯源判据 且 relation 判据 且 Reason 判定。
 - **M6 · Pi Worker、可配置工具与会话**（用户新增；进度真相见 `SPEC.md` M6）。计划 P0–P6：
   - **P0 契约/文档（已完成）**、**P1 Worker 抽象 + 会话 + 事件（已完成）**：`capabilities/worker.py`、
     `Engine(worker=...)`、`[worker]` 配置、`SESSION`/`WORKER_STEP` 事件、run dir `sessions/`。

@@ -104,7 +104,8 @@ def board_payload(board: Board) -> dict[str, Any]:
 
     ``decisions`` carries the human Gate rulings (Gate A/B) so a resumed worker can see
     the arbitration it must honour; ``waitingFor`` is omitted because a worker only runs
-    when no gate is pending.
+    when no gate is pending. ``entities``/``relations`` (M5) are part of the observed
+    graph: a ``relate`` pass needs the known entity ids to reference them.
     """
     return {
         "origin": board.origin.to_dict(),
@@ -113,6 +114,8 @@ def board_payload(board: Board) -> dict[str, Any]:
         "intents": [intent.to_dict() for intent in board.intents],
         "hints": [hint.to_dict() for hint in board.hints],
         "decisions": [decision.to_dict() for decision in board.decisions],
+        "entities": [entity.to_dict() for entity in board.entities],
+        "relations": [relation.to_dict() for relation in board.relations],
     }
 
 

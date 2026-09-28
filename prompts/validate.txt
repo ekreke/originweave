@@ -13,6 +13,10 @@ Rules:
   that revisits the same direction is NOT a duplicate of it: it may be a legitimate redo
   (for example, once new evidence has arrived). Use dropped Intents as context only.
 - Also consider the other candidates in this batch.
+- Entity-graph Intents ("extract" and "relate") are distinct per target: two "relate"
+  candidates with different "from" entity ids are different directions (do not drop one
+  as a duplicate of the other). A "relate" candidate duplicates an existing "relate"
+  Intent only when they share the same "from" entity id.
 - Classify EVERY candidate exactly once: list it either in "keep" or in "drop".
 - For each dropped candidate, set "duplicateOf" to the id of the existing Intent it
   duplicates (as shown on the board); if it duplicates another candidate in this
