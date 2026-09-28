@@ -51,12 +51,15 @@ boundary 灰、compare 青、deviation 红）；`Intent` 为**状态色迷你卡
     边按 `relation` 区分（`main-chain` 实线、`dependency` 虚线、
     `decomposes` 点线、`spawns`/`resolves` —— 见 `blackboard-protocol.md`）。
     **节点标签是短预览**（折叠空白、超长截断 + 省略号、CSS 3 行封顶），**完整文本在 INSPECTOR**
-    （点击节点后经 `GetFactDetail` 按需加载，长文可滚动）。前端用 **dagre 自上而下分层布局**
-    （`@dagrejs/dagre`，origin→claim→citation 逐层、Intent 就近其来源；纯函数、确定性；未带坐标的
+    （点击节点后经 `GetFactDetail` 按需加载，长文可滚动）。前端用 **dagre 自左而右（LR）分层布局**
+    （`@dagrejs/dagre`，origin 最左、claim→citation 依次向右、Intent 就近其来源，层间距收紧成紧凑列；
+    纯函数、确定性；未带坐标的
     节点两两不重叠，显式坐标原样保留）；历史 proto `Fact.position` 非零时**逐节点优先**、dagre 只补
     缺口（live run 无坐标即全 dagre），符合 "`position` 渲染侧可重算" 的约定。节点可聚焦，
     Enter/Space 与点击同效（选中送 INSPECTOR）。画布提供缩放控件 / MiniMap / **图例**（kind 色点 +
     relation 线型）；选中节点与其入射边高亮、其余边变暗，无选中时 `main-chain` 微高亮。
+    **节点可拖动**：拖动坐标是前端**会话内局部状态**（不回写 server，`Fact.position` 不变），
+    轮询刷新 / Replay 步进不丢；切换 run 重置，画布另提供「重置布局」按钮恢复自动排列。
   - **FACTS** — 事实表：`ID | Kind | Statement | Conf. | Evidence`。
   - **INTENTS** — Intent 表：`ID | Type | Question | Status | From`，含 `dropped`（死胡同）。
   - **RELATIONS** — 实体-关系图（`analysis` 含 relation 时）。复用 PROVENANCE DAG 的图

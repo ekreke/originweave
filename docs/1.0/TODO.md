@@ -237,6 +237,15 @@
 
 ## 已完成（近期）
 
+- **前端图布局 · 从左到右紧密排列 + 节点可拖动（M1c-2b UI 增强）**：`graph/layout.ts` dagre
+  `rankdir: 'TB' → 'LR'`（origin 最左、claim→citation 向右；`NODESEP 36→16`、`RANKSEP 84→48`
+  收紧成紧凑列），`graph/nodes.tsx` Handle 改 `Left/Right`；边仍 `smoothstep`、节点尺寸不变。
+  节点改为可拖动：新增 `graph/drag.ts`（`applyPositionOverrides`/`collectPositionChanges` 纯函数），
+  `GraphCanvas` 用 session-local `overrides` state 覆盖 dagre 坐标（**不回写 server**，`Fact.position`
+  不变；轮询/Replay 不丢），Panel 增「重置布局」按钮（清 override + `fitView`），切 run 由 `GraphTab`
+  的 `key={runId}` 重挂载重置。测试：`graph/drag.test.ts` + `GraphCanvas.test.tsx`（draggable/重置）+
+  `layout.test.ts` 方向断言改 `x`；`dashboard.md §2` 同步。前端 typecheck/lint/format/test(143)/build 全绿。
+
 - **M3c · Gate C（最终审阅）**：`engine.py` 增 `GATE_C="review"`（连同 `_GATE_LABELS`）。非 auto 时，
   `_reason` 在 `_goal_satisfied` 满足后**不直接写 `COMPLETE`**，而是写
   `REQUEST_HUMAN{gate:"review", question, verdict, hint?}` 并停在 `awaiting_human`（verdict/hint 随 payload

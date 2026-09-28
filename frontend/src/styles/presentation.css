@@ -884,6 +884,29 @@
   outline: none;
 }
 
+/* Layout reset control (dashboard.md §2): dragged positions are session-local, so
+   this restores the automatic left-to-right dagre layout. */
+.graph-canvas .graph-reset {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  padding: 3px 8px;
+  color: rgb(var(--c-ink));
+  background: rgb(var(--c-panel));
+  border: 1px solid rgb(var(--c-hairline));
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.graph-canvas .graph-reset:hover {
+  border-color: rgb(var(--c-accent));
+  color: rgb(var(--c-accent));
+}
+
+.graph-canvas .graph-reset:focus-visible {
+  border-color: rgb(var(--c-accent));
+  outline: none;
+}
+
 /* Dense graph workspace: keep navigation on the edges and the evidence field quiet. */
 .graph-canvas .react-flow__background {
   opacity: 0.48;

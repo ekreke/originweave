@@ -28,8 +28,8 @@ export function FactNode({ data, selected }: NodeProps<FactNodeType>) {
         <span className="node-kind">{data.summary.kind}</span>
       </div>
       <span className="node-label">{data.preview}</span>
-      <Handle type="target" position={Position.Top} />
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="target" position={Position.Left} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }
@@ -53,8 +53,8 @@ export function IntentNode({ data, selected }: NodeProps<IntentNodeType>) {
         <span className="node-kind">{data.intent.type}</span>
       </div>
       <span className="node-label">{data.preview}</span>
-      <Handle type="target" position={Position.Top} />
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="target" position={Position.Left} />
+      <Handle type="source" position={Position.Right} />
     </div>
   )
 }

@@ -6,10 +6,12 @@ import { runGraphToFlow } from '@/graph/mapping'
 
 export function GraphTab({
   graph,
+  runId,
   onSelect,
   selectedId,
 }: {
   graph?: RunGraph
+  runId?: string
   onSelect?: (id: string | null) => void
   selectedId?: string | null
 }) {
@@ -19,6 +21,7 @@ export function GraphTab({
   const model = useMemo(() => (graph ? runGraphToFlow(graph) : undefined), [graph])
   return (
     <GraphCanvas
+      key={runId}
       nodes={model?.nodes}
       edges={model?.edges}
       onSelect={onSelect}

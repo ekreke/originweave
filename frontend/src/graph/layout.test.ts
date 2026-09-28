@@ -44,7 +44,7 @@ describe('layoutRunGraph', () => {
     expect(new Set(keys).size).toBe(keys.length)
   })
 
-  it('ranks the dagre chain top-down (origin above claims above citations)', () => {
+  it('ranks the dagre chain left-to-right (origin left of claims left of citations)', () => {
     const points = layoutRunGraph(
       graph([
         { source: 'origin', target: 'f1' },
@@ -54,8 +54,8 @@ describe('layoutRunGraph', () => {
     const origin = points.get('origin')!
     const f1 = points.get('f1')!
     const c1 = points.get('c1')!
-    expect(f1.y).toBeGreaterThan(origin.y)
-    expect(c1.y).toBeGreaterThan(f1.y)
+    expect(f1.x).toBeGreaterThan(origin.x)
+    expect(c1.x).toBeGreaterThan(f1.x)
   })
 
   it('lays out intents together with facts', () => {

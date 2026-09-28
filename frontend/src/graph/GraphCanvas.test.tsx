@@ -104,4 +104,16 @@ describe('GraphCanvas', () => {
     expect(label.endsWith('…')).toBe(true)
     expect(label).not.toBe(longGoal)
   })
+
+  it('enables node dragging and offers a session-local layout reset', () => {
+    const { nodes, edges } = runGraphToFlow(sampleRunGraph())
+    render(<GraphCanvas nodes={nodes} edges={edges} />)
+
+    const wrapper = screen.getByTestId('fact-node-f1').closest('.react-flow__node')
+    expect(wrapper).toHaveClass('draggable')
+
+    const reset = screen.getByRole('button', { name: '重置布局' })
+    fireEvent.click(reset)
+    expect(screen.getByTestId('fact-node-f1')).toBeInTheDocument()
+  })
 })

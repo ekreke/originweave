@@ -1,5 +1,5 @@
 import { Code, ConnectError } from '@connectrpc/connect'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import {
@@ -175,7 +175,8 @@ export function Console() {
 
   const selectionId = selected.run === runId ? selected.id : null
   const selection = resolveSelection(graph, selectionId)
-  const select = (id: string | null) => setSelected({ run: runId, id })
+  // Stable identity so the graph's node memo survives Console re-renders (polls).
+  const select = useCallback((id: string | null) => setSelected({ run: runId, id }), [runId])
 
   // Full Fact (note + verbatim evidence) only for the selected node.
   const factDetailQuery = useFactDetail(
@@ -268,7 +269,7 @@ export function Console() {
   function renderTab() {
     switch (tab) {
       case 'GRAPH':
-        return <GraphTab graph={graph} onSelect={select} selectedId={selectionId} />
+        return <GraphTab graph={graph} runId={runId} onSelect={select} selectedId={selectionId} />
       case 'FACTS':
         return <FactsTab facts={graph?.facts} onSelect={select} selectedId={selectionId} />
       case 'INTENTS':

@@ -3,18 +3,22 @@ import { Graph, layout as dagreLayout } from '@dagrejs/dagre'
 import type { RunGraph } from '@/gen/originweave/v1/originweave_pb'
 
 // Deterministic layered layout for the provenance DAG (dashboard.md §2). Dagre
-// ranks the board top-down (origin -> claims -> citations, intents near their
-// source); server-provided `Fact.position` still wins per node, dagre only fills
-// the gaps (live runs carry no positions). A pure function of the input, so two
-// renders -- or a replay step -- place nodes identically.
+// ranks the board left-to-right (origin on the left, claims then citations to the
+// right, downstream nodes further right); server-provided `Fact.position` still
+// wins per node, dagre only fills the gaps (live runs carry no positions). A pure
+// function of the input, so two renders -- or a replay step -- place nodes
+// identically.
 
 export const FACT_NODE_W = 190
 export const FACT_NODE_H = 68
 export const INTENT_NODE_W = 172
 export const INTENT_NODE_H = 48
 
-const NODESEP = 36
-const RANKSEP = 84
+// Tight spacing so the left-to-right layers read as compact columns (dashboard.md
+// §2): `nodesep` is the within-layer (vertical) gap, `ranksep` the between-layer
+// (horizontal) gap.
+const NODESEP = 16
+const RANKSEP = 48
 
 export interface LayoutPoint {
   x: number
@@ -68,7 +72,7 @@ export function layoutRunGraph(detail: RunGraph): Map<string, LayoutPoint> {
   // Multigraph: several relations may connect the same pair (e.g. a goal-derived
   // edge on top of the main-chain), and dagre handles parallel edges fine.
   const g = new Graph({ multigraph: true })
-  g.setGraph({ rankdir: 'TB', nodesep: NODESEP, ranksep: RANKSEP, marginx: 24, marginy: 24 })
+  g.setGraph({ rankdir: 'LR', nodesep: NODESEP, ranksep: RANKSEP, marginx: 24, marginy: 24 })
   g.setDefaultEdgeLabel(() => ({}))
   // Pinned nodes join the graph too: dagre needs every edge endpoint, we simply
   // skip reading their computed coordinates below.
