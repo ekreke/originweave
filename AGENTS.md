@@ -31,10 +31,13 @@
     并发 + 心跳超时释放（I4）、HITL Gate A（I5，`Engine.resume`）、多轮收敛（I6）；`Engine` 是
     黑板**唯一写入者**。M2 偏差记分卡：verify 型经 `compare` pass、`deviation` Fact、严格
     `COMPLETE`、run dir `report.md`、Gate B（`arbitrate`）。任务指令模板在 `prompts/*.txt`。
-  - server（M1c-1）：Connect ASGI app（`server/`，**18 个 RPC 全部实现**，含 `CreateRun`/
-    `SubmitHumanInput`/`PauseRun`/`ResumeRun`/`GetSettings`/`Search`）、持久化（`run.json` 只存
-    静态元数据，结果由 `events.jsonl` 派生）、`RunScheduler`、`originweave ui`（端口 8765，
-    `--run <dir>` 单 run 只读、写 RPC 拒）。
+  - server（M1c-1）：Connect ASGI app（`server/`，**20 个 RPC 全部实现**，含 `CreateRun`/
+    `SubmitHumanInput`/`PauseRun`/`ResumeRun`/`GetSettings`/`Search`/`SuggestGoal`/`UpdateRun`）、
+    持久化（`run.json` 只存静态元数据，结果由 `events.jsonl` 派生）、`RunScheduler`、
+    `originweave ui`（端口 8765，`--run <dir>` 单 run 只读、写 RPC 拒）。
+  - M8 输入辅助：`SuggestGoal`（资料 A → 一次 `[capability.model]` 调出 goal + 标题，只读、pinned
+    可用；`Providers.model`）与 `UpdateRun`（只改 `run.json`/workspace 标题元数据，不写事件）；
+    前端 NewRun 无标题输入、一键「提取 goal」，Console 标题行内编辑。
   - M3a+M3b：container-per-worker（`runtime/`、`Dockerfile.runtime`、`make image`）；预算触顶
     `STOPPED{reason:"budget exceeded"}`（`pricing.py` 计价、usage 链路）；`PAUSED`/`RESUMED` +
     `PauseRun`/`ResumeRun`（`engine.request_pause`/`resume_from_pause`，轮次边界挂起）。

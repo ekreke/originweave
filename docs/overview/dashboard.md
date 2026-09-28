@@ -120,6 +120,8 @@ boundary 灰、compare 青、deviation 红）；`Intent` 为**状态色迷你卡
 | `GetSettings` | `GetSettingsRequest{}` | `GetSettingsResponse{settings}` | 读项目设置（`[worker]` + `[capability.model]`；**M6 P3**） |
 | `UpdateSettings` | `UpdateSettingsRequest{settings}` | `UpdateSettingsResponse{settings}` | 校验后写回项目 `originweave.toml` 并应用（未知 provider/tool 报错；**M6 P3**） |
 | `Search` | `SearchRequest{query, num_results?}` | `SearchResponse{text}` | 经 `[capability.search]` 执行检索；供 Pi 的 TS 搜索扩展回调（**M6 P3，消费于 P4**） |
+| `SuggestGoal` | `SuggestGoalRequest{source_text}` | `SuggestGoalResponse{goal, title}` | 资料 A → **一次** `[capability.model]` 调用抽 goal（判定标准）+ 标题；**只读**（pinned 可用，无 run 状态）；空 `source_text` → `INVALID_ARGUMENT`，能力失败/坏 JSON → `UNAVAILABLE`（**M8**） |
+| `UpdateRun` | `UpdateRunRequest{run_id, title?}` | `UpdateRunResponse{run}` | 改 run **静态元数据**（当前仅标题，写 `run.json`+workspace，不写事件）；空标题 → `INVALID_ARGUMENT`，未知 run → `NOT_FOUND`，pinned → `FAILED_PRECONDITION`（**M8**） |
 
 `ListProjectRuns` / `ListRuns` 返回的 run 列表按创建时间**倒序**（`created_at` 降序，`run_id` 降序作平局裁决），最新 run 排最前。
 
@@ -170,6 +172,8 @@ goal, max_steps?, max_wall?, max_cost?, auto?, source_text?
 未给定时回落 `[hitl].auto`）。
 `source_text` 提供资料 A 正文，用于 `source_type="text"`（**目前仅支持 text；url 暂不支持**）。
 `analysis` 目前仅 `provenance`（`relation`/`both` 归 M5）。
+`title` 可省略：省略时由 server 自动生成（前端在 `SuggestGoal` 的建议标题、或资料 A 首行之间
+回落）；创建后可用 `UpdateRun` 就地修改（**M8**，改的是静态元数据，不动 `origin` Fact）。
 `CreateRun` 把资料 A 落盘为 `input/document.md`（+ `input/source.json`），并起一个后台 asyncio
 任务跑 `Engine.run`；返回前**等到 `PROJECT` 事件落盘**，故返回的 `Run` 由事件派生、状态为
 `running`（计数由此后的 `GetRun` 反映），任何紧随其后的 `GetRun` 都能立即读到该 run。

@@ -382,6 +382,10 @@ service OriginweaveService {
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
   rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
   rpc Search(SearchRequest) returns (SearchResponse);
+  // Input helper (M8): suggest a goal + title from document A, before CreateRun.
+  rpc SuggestGoal(SuggestGoalRequest) returns (SuggestGoalResponse);
+  // Edit a run's static metadata (M8): currently only the display title.
+  rpc UpdateRun(UpdateRunRequest) returns (UpdateRunResponse);
 }
 
 message ListProjectsRequest {}
@@ -514,4 +518,23 @@ message SearchRequest {
 
 message SearchResponse {
   string text = 1;
+}
+
+message SuggestGoalRequest {
+  // Document A text, the same value CreateRun would receive as source_text.
+  string source_text = 1;
+}
+
+message SuggestGoalResponse {
+  string goal = 1;  // a one-line verification goal (判定标准 / 停止条件)
+  string title = 2; // a short display title for the run
+}
+
+message UpdateRunRequest {
+  string run_id = 1;
+  optional string title = 2; // new display title; empty is rejected
+}
+
+message UpdateRunResponse {
+  Run run = 1;
 }

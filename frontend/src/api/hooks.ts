@@ -230,6 +230,39 @@ export function useCreateRun() {
   })
 }
 
+export interface GoalSuggestion {
+  goal: string
+  title: string
+}
+
+// Ask the server to propose a goal + title from document A (M8). One model call over
+// [capability.model]; nothing is persisted, so "regenerate" is just another call.
+export function useSuggestGoal() {
+  return useMutation({
+    mutationFn: async (sourceText: string): Promise<GoalSuggestion> => {
+      const response = await client.suggestGoal({ sourceText })
+      return { goal: response.goal, title: response.title }
+    },
+  })
+}
+
+// Edit a run's static display title (M8). The title is metadata, not an event, so the
+// board and `replay` are untouched; refresh the lists and the run header.
+export function useUpdateRun(runId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (title: string) => {
+      if (!runId) throw new Error('cannot update a run without a run id')
+      return (await client.updateRun({ runId, title })).run
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+      void queryClient.invalidateQueries({ queryKey: ['run', runId] })
+      void queryClient.invalidateQueries({ queryKey: ['run-graph', runId] })
+    },
+  })
+}
+
 export interface GateSubmission {
   gate: string
   decision: string

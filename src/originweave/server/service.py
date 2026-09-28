@@ -20,7 +20,7 @@ from originweave.v1 import originweave_pb2 as pb
 from originweave.v1.originweave_connect import OriginweaveService
 
 from ..blackboard import BlackboardError, Fact, Hint
-from ..capabilities import CapabilityError
+from ..capabilities import CapabilityError, ChatMessage, build_model
 from ..config import (
     BudgetConfig,
     CapabilityConfig,
@@ -51,6 +51,8 @@ from .context import ServerContext
 
 # Longest auto-derived title taken from document A's first non-empty line.
 _TITLE_LIMIT = 120
+# Longest suggested goal accepted from the model (SuggestGoal, M8).
+_GOAL_LIMIT = 500
 # A project id that would collide with the frontend route ``/projects/new`` (M4a).
 _RESERVED_PROJECT_IDS: frozenset[str] = frozenset({"new"})
 # Upper bound on SearchRequest.num_results, so a client cannot ask a provider for an
@@ -68,6 +70,33 @@ def _first_line(text: str) -> str:
         if stripped:
             return stripped[:_TITLE_LIMIT]
     return ""
+
+
+def _parse_suggestion(text: str) -> tuple[str, str]:
+    """Parse the ``SuggestGoal`` model reply into ``(goal, title)``.
+
+    The reply must be a JSON object ``{"goal": ..., "title": ...}``; an optional
+    markdown fence is tolerated. A malformed reply is a provider problem, surfaced as
+    ``UNAVAILABLE``. ``title`` may be empty (the run falls back to document A's first
+    line); ``goal`` must be present.
+    """
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        body = cleaned.split("\n", 1)[1] if "\n" in cleaned else ""
+        cleaned = (body[:-3] if body.rstrip().endswith("```") else body).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise ConnectError(Code.UNAVAILABLE, f"model reply is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ConnectError(Code.UNAVAILABLE, "model reply must be a JSON object")
+    goal = data.get("goal")
+    if not isinstance(goal, str) or not goal.strip():
+        raise ConnectError(Code.UNAVAILABLE, "model reply is missing 'goal'")
+    title = data.get("title")
+    return goal.strip()[:_GOAL_LIMIT], (title if isinstance(title, str) else "").strip()[
+        :_TITLE_LIMIT
+    ]
 
 
 def _budget_override(request: Any) -> dict[str, Any]:
@@ -596,6 +625,72 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
         except CapabilityError as exc:
             raise ConnectError(Code.UNAVAILABLE, str(exc)) from exc
         return pb.SearchResponse(text=text)
+
+    async def suggest_goal(self, request: Any, ctx: Any) -> Any:
+        """Suggest a goal + title from document A, before CreateRun (M8).
+
+        One stateless model completion over the configured prompt/model providers, so
+        it is read-only (allowed in the pinned view) and needs no run. The provider
+        choice stays in Python (red lines 4/5); the model is ``[capability.model]``.
+        """
+        source_text = request.source_text.strip()
+        if not source_text:
+            raise ConnectError(Code.INVALID_ARGUMENT, "source_text is required")
+        model = self._ctx.providers.model
+        if model is None:
+            model = build_model(self._ctx.config)
+        try:
+            template = await self._ctx.providers.prompt.get("suggest_goal")
+            reply = await model.complete(
+                [
+                    ChatMessage(role="system", content=template.text),
+                    ChatMessage(role="user", content=source_text),
+                ]
+            )
+        except CapabilityError as exc:
+            raise ConnectError(Code.UNAVAILABLE, str(exc)) from exc
+        goal, title = _parse_suggestion(str(reply))
+        return pb.SuggestGoalResponse(goal=goal, title=title)
+
+    async def update_run(self, request: Any, ctx: Any) -> Any:
+        """Edit a run's static display metadata (M8); currently only the title.
+
+        The title lives in ``run.json`` + the workspace database, not in the event log
+        (it is descriptive metadata, not a blackboard fact), so this writes no event and
+        leaves ``replay`` unchanged. The ``origin`` Fact written at CreateRun keeps its
+        original label (TODO: syncing it would need a fact-replacement event).
+        """
+        self._reject_if_pinned()
+        run_id = request.run_id
+        if not is_run_id(run_id):
+            raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
+        if not request.HasField("title") or not request.title.strip():
+            raise ConnectError(Code.INVALID_ARGUMENT, "title is required and must not be empty")
+        title = request.title.strip()[:_TITLE_LIMIT]
+        store = self._ctx.open_store(self._ctx.runs_dir / run_id)
+        try:
+            if not store.has_events():
+                raise ConnectError(Code.NOT_FOUND, f"run {run_id!r} not found")
+            try:
+                meta = dict(load_run_meta(store, self._ctx.workspace) or {})
+            except BlackboardError as exc:
+                raise ConnectError(Code.INTERNAL, f"run {run_id!r} is unreadable: {exc}") from exc
+            meta["id"] = meta.get("id") or run_id
+            meta["title"] = title
+            # Summarize before persisting: a malformed event log must fail without leaving
+            # a half-applied title behind.
+            try:
+                run = summarize_run(store, meta=meta, budget=self._ctx.config.worker.budget)
+            except (BlackboardError, ReduceError) as exc:
+                raise ConnectError(
+                    Code.INTERNAL, f"run {run_id!r} has a malformed event log: {exc}"
+                ) from exc
+            store.write_run_meta(meta)
+            if self._ctx.workspace is not None:
+                self._ctx.workspace.upsert_run_meta(run_id, meta)
+        finally:
+            store.close()
+        return pb.UpdateRunResponse(run=convert.run_pb(run))
 
     def _build_engine(self, store: RunStore, *, auto: bool) -> Engine:
         """Build an engine over ``store`` using its immutable runtime snapshot."""

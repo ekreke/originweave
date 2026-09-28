@@ -27,7 +27,7 @@ originweave 的四条硬性原则：
 
 | | 内容 |
 |---|---|
-| 输入 | 资料 A：网页 URL（`sourceType: url`）或纯文本（`sourceType: text`）；以及 `goal`（停止条件/判定标准；`CreateRun` 必填）。**当前仅支持纯文本**（`CreateRun.source_text`；`url` 暂不支持） |
+| 输入 | 资料 A：网页 URL（`sourceType: url`）或纯文本（`sourceType: text`）；以及 `goal`（停止条件/判定标准；`CreateRun` 必填，可由 `SuggestGoal` 从资料 A 自动抽取后人工确认/编辑，M8）。**当前仅支持纯文本**（`CreateRun.source_text`；`url` 暂不支持） |
 | 产物 | ① 溯源 DAG（Fact/Intent 节点 + 边 + 证据）② 偏差记分卡（deviation 列表）③ report（verdict + summary + findings + sources）④ append-only 事件时间线 ⑤ 实体-关系图（可选，`CreateRun.analysis=relation\|both`） |
 
 ## 4. 领域模型（冻结契约）
@@ -247,7 +247,8 @@ originweave mcp [--run <dir>]
 
 实现状态：`init`（生成 `originweave.toml`，已存在需 `--force`）、`capabilities list`
 （M0b）、`replay`（M0c，只读重放）与 `ui`（M1c-1 C4，只读 API + 静态托管）已实现；`mcp` /
-`capabilities install-obscura` 仍为占位，逐个 milestone 落地（`src/originweave/cli.py`）。
+`capabilities install-obscura` 仍为占位（`mcp` 移二期），逐个 milestone 落地
+（`src/originweave/cli.py`）。
 
 ## 6. 非目标（Non-goals）
 

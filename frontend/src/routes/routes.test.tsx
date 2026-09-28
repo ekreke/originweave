@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   submitHumanInput: vi.fn(),
   createRun: vi.fn(),
   createProject: vi.fn(),
+  suggestGoal: vi.fn(),
+  updateRun: vi.fn(),
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
 }))
@@ -58,6 +60,8 @@ beforeEach(() => {
   mocks.submitHumanInput.mockReset().mockResolvedValue({ run: { id: 'run_009' } })
   mocks.createRun.mockReset().mockResolvedValue({ run: { id: 'run_009' } })
   mocks.createProject.mockReset().mockResolvedValue({ project: { id: 'newp', name: 'New' } })
+  mocks.suggestGoal.mockReset().mockResolvedValue({ goal: 'g', title: 'T' })
+  mocks.updateRun.mockReset().mockResolvedValue({ run: { id: 'run_009', title: 'T' } })
   mocks.getSettings.mockReset().mockResolvedValue({ settings: settings() })
   mocks.updateSettings.mockReset().mockResolvedValue({ settings: settings() })
 })
@@ -374,12 +378,75 @@ describe('new run', () => {
   it('prefills the form from the source run when retrying (?from=)', async () => {
     renderAt('/projects/copilot-productivity/runs/new?from=run_009')
 
-    await waitFor(() =>
-      expect(screen.getByLabelText('run title')).toHaveValue('重试：Copilot 生产力核验'),
-    )
+    await waitFor(() => expect(screen.getByText(/重试：Copilot 生产力核验/)).toBeInTheDocument())
     expect(screen.getByLabelText('source text')).toHaveValue('Document A text.')
     expect(screen.getByLabelText('goal')).toHaveValue('判定 55% 是否忠实于一手研究')
     expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_009' })
+  })
+
+  it('extracts a goal and title from document A', async () => {
+    mocks.suggestGoal.mockResolvedValue({ goal: 'AI 生成的 goal', title: 'AI 标题' })
+    renderAt('/projects/copilot-productivity/runs/new')
+
+    fireEvent.change(screen.getByLabelText('source text'), { target: { value: 'doc A' } })
+    fireEvent.click(screen.getByRole('button', { name: '从资料 A 提取 goal 与标题' }))
+
+    await waitFor(() => expect(screen.getByLabelText('goal')).toHaveValue('AI 生成的 goal'))
+    expect(mocks.suggestGoal).toHaveBeenCalledWith({ sourceText: 'doc A' })
+    expect(screen.getByText(/AI 标题/)).toBeInTheDocument()
+  })
+
+  it('submits the extracted title with CreateRun', async () => {
+    mocks.suggestGoal.mockResolvedValue({ goal: 'g', title: 'AI 标题' })
+    renderAt('/projects/copilot-productivity/runs/new')
+
+    fireEvent.change(screen.getByLabelText('source text'), { target: { value: 'doc A' } })
+    fireEvent.click(screen.getByRole('button', { name: '从资料 A 提取 goal 与标题' }))
+    await waitFor(() => expect(screen.getByLabelText('goal')).toHaveValue('g'))
+    fireEvent.click(screen.getByRole('button', { name: '创建并进入审阅台' }))
+
+    await waitFor(() =>
+      expect(mocks.createRun).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'AI 标题', sourceText: 'doc A', goal: 'g' }),
+      ),
+    )
+  })
+
+  it('shows an inline error when goal extraction fails', async () => {
+    mocks.suggestGoal.mockRejectedValue(new Error('rate limited'))
+    renderAt('/projects/copilot-productivity/runs/new')
+
+    fireEvent.change(screen.getByLabelText('source text'), { target: { value: 'doc A' } })
+    fireEvent.click(screen.getByRole('button', { name: '从资料 A 提取 goal 与标题' }))
+
+    expect(await screen.findByText('提取失败：rate limited')).toBeInTheDocument()
+  })
+})
+
+describe('run title', () => {
+  it('edits the title in place', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('确认核心论点？')
+
+    fireEvent.click(screen.getByLabelText('edit title'))
+    fireEvent.change(screen.getByLabelText('run title'), { target: { value: '新标题' } })
+    fireEvent.click(screen.getByLabelText('save title'))
+
+    await waitFor(() =>
+      expect(mocks.updateRun).toHaveBeenCalledWith({ runId: 'run_009', title: '新标题' }),
+    )
+  })
+
+  it('rejects an empty title without calling the server', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByText('确认核心论点？')
+
+    fireEvent.click(screen.getByLabelText('edit title'))
+    fireEvent.change(screen.getByLabelText('run title'), { target: { value: '   ' } })
+    fireEvent.click(screen.getByLabelText('save title'))
+
+    expect(await screen.findByText('标题不能为空')).toBeInTheDocument()
+    expect(mocks.updateRun).not.toHaveBeenCalled()
   })
 })
 

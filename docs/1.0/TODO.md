@@ -129,10 +129,13 @@
   `heartbeat_timeout`（默认 `"5m"`，须 `> interval`）/ `heartbeat_on_timeout`
   （`release` 默认 | `fail`）；引擎代发 `HEARTBEAT`，超时按策略写 `RELEASE` 或 `FAILED`（I4 定）
 - [ ] 关系样例 fixture 来源（新增含多个组织的样例 vs 复用 `copilot_productivity`）
-- [ ] 实体消歧粒度：同名/别名归一的规范化规则（大小写、全称/简称、去空白）
+- [x] 实体消歧粒度 → **规范化 key = NFKC + casefold + 折叠空白**（`blackboard.canonical_name`，M5b 落地；
+  同名/大小写/多余空白归一，`aliases` 累积；全称/简称等价仍靠模型产出同名）
 - [ ] CLI `capabilities install-obscura` 命名：旧 `obscura_kitesurf` 占位样例已被从零构建的
       `copilot_productivity` 替换，该命令名（`product-overview.md` §5 冻结契约）语义脱节；
       是否改名留待 M3 决定
+- [ ] **M8** 标题编辑仅改 `Run.title`（`run.json`/workspace 元数据），CreateRun 时写入 PROJECT 事件的
+      `origin` Fact label 不随动；如需同步要新增「事实取代」事件（本期不做）
 - [x] **M6 P4** server URL 传递 → **env `ORIGINWEAVE_SERVER_URL`，默认 `http://127.0.0.1:8765`**
       （`PiWorker` 注入 Pi 子进程；容器化改 env，不落配置）
 - [x] **M6 P4** 扩展文件位置与测试宿主 → **包内资源 `src/originweave/pi_extensions/search.ts`**

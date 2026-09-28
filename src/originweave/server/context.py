@@ -19,9 +19,11 @@ from .. import config as config_module
 from ..blackboard import Board
 from ..capabilities import (
     CapabilityError,
+    ModelProvider,
     PromptProvider,
     SearchProvider,
     Worker,
+    build_model,
     build_prompt,
     build_search,
     build_worker,
@@ -48,19 +50,26 @@ def _container_manager_for(cfg: Config) -> ContainerManager | None:
 
 @dataclass
 class Providers:
-    """The capabilities one run's engine needs (red line 4: interchangeable)."""
+    """The capabilities one run's engine needs (red line 4: interchangeable).
+
+    ``model`` backs the server-side input helper ``SuggestGoal`` (M8); it is a single
+    stateless completion, not a Worker task, so it stays a Python provider (red line 4).
+    ``None`` falls back to ``build_model(config)`` in the service.
+    """
 
     worker: Worker
     search: SearchProvider
     prompt: PromptProvider
+    model: ModelProvider | None = None
 
 
 def build_providers(cfg: Config) -> Providers:
-    """Resolve the configured worker/search/prompt providers."""
+    """Resolve the configured worker/search/prompt/model providers."""
     return Providers(
         worker=build_worker(cfg),
         search=build_search(cfg),
         prompt=build_prompt(cfg),
+        model=build_model(cfg),
     )
 
 

@@ -1872,3 +1872,171 @@ async def test_pause_and_resume_run(tmp_path: Path) -> None:
         event.type for event in ctx.open_store(tmp_path / "runs" / run_id).read_events()
     ]
     assert "PAUSED" in types and "RESUMED" in types
+
+
+# ------------------------------------------------------ M8: SuggestGoal / UpdateRun
+
+
+class _RecordingModel:
+    """Captures a single completion's messages and returns a scripted reply."""
+
+    name = "recording"
+
+    def __init__(self, reply: str = "", *, error: Exception | None = None) -> None:
+        self._reply = reply
+        self._error = error
+        self.calls: list[Sequence[ChatMessage]] = []
+
+    async def complete(self, messages: Sequence[ChatMessage]) -> str:
+        self.calls.append(messages)
+        if self._error is not None:
+            raise self._error
+        return self._reply
+
+
+def _ctx_with_model(root: Path, model: _RecordingModel) -> ServerContext:
+    ProjectRegistry(root / "projects", root / "runs").write(Project(id="p", name="P"))
+    providers = Providers(
+        worker=LocalWorker(model=_FakeModel()),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        model=model,
+    )
+    config = Config(worker=WorkerConfig(execution="in-process", container_scope="per-call"))
+    return ServerContext.build(config=config, providers=providers, root=root)
+
+
+async def test_suggest_goal_returns_goal_and_title(tmp_path: Path) -> None:
+    model = _RecordingModel(json.dumps({"goal": "判定 X 是否成立", "title": "X 核验"}))
+    ctx = _ctx_with_model(tmp_path, model)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "SuggestGoal", {"sourceText": "Copilot 提升 55% 生产力。"})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"goal": "判定 X 是否成立", "title": "X 核验"}
+    # The document is the user message verbatim; the prompt template is the system one.
+    assert len(model.calls) == 1
+    assert model.calls[0][0].role == "system"
+    assert model.calls[0][1].content == "Copilot 提升 55% 生产力。"
+
+
+async def test_suggest_goal_tolerates_markdown_fence(tmp_path: Path) -> None:
+    model = _RecordingModel('```json\n{"goal": "g", "title": "t"}\n```')
+    ctx = _ctx_with_model(tmp_path, model)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "SuggestGoal", {"sourceText": "doc"})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"goal": "g", "title": "t"}
+
+
+@pytest.mark.parametrize("body", [{"sourceText": ""}, {"sourceText": "   "}, {}])
+async def test_suggest_goal_rejects_empty_source(tmp_path: Path, body: dict[str, object]) -> None:
+    model = _RecordingModel(json.dumps({"goal": "g", "title": "t"}))
+    ctx = _ctx_with_model(tmp_path, model)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "SuggestGoal", body)
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_argument"
+    assert model.calls == []  # the model is never called for empty input
+
+
+async def test_suggest_goal_provider_error_is_unavailable(tmp_path: Path) -> None:
+    model = _RecordingModel(error=ProviderError("rate limited"))
+    ctx = _ctx_with_model(tmp_path, model)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "SuggestGoal", {"sourceText": "doc"})
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "unavailable"
+
+
+async def test_suggest_goal_rejects_malformed_reply(tmp_path: Path) -> None:
+    model = _RecordingModel("not json")
+    ctx = _ctx_with_model(tmp_path, model)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "SuggestGoal", {"sourceText": "doc"})
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "unavailable"
+
+
+async def test_update_run_changes_title(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    async with _client_for(ctx) as client:
+        run = await _create_run(client, auto=True)
+        run_id = str(run["id"])
+        await ctx.scheduler.drain()
+        updated = await _post(client, "UpdateRun", {"runId": run_id, "title": "新标题"})
+        detail = await _post(client, "GetRun", {"runId": run_id})
+        listed = await _post(client, "ListRuns", {})
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["run"]["title"] == "新标题"
+    assert detail.json()["runDetail"]["run"]["title"] == "新标题"
+    assert [row["title"] for row in listed.json()["runs"]] == ["新标题"]
+
+
+@pytest.mark.parametrize("body", [{"runId": "run_001"}, {"runId": "run_001", "title": "  "}])
+async def test_update_run_rejects_empty_title(tmp_path: Path, body: dict[str, object]) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+    ctx = _ctx(tmp_path)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "UpdateRun", body)
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_argument"
+
+
+async def test_update_run_unknown_run_is_not_found(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "UpdateRun", {"runId": "run_999", "title": "T"})
+
+    assert response.status_code == 404
+
+
+async def test_update_run_is_rejected_in_pinned_view(tmp_path: Path) -> None:
+    run_dir = _write_ui_run(tmp_path, "demo")
+    async with _ui_client(tmp_path, static_dir=None, run_dir=run_dir) as client:
+        response = await _post(client, "UpdateRun", {"runId": "demo", "title": "T"})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "failed_precondition"
+
+
+async def test_suggest_goal_is_allowed_in_pinned_view(tmp_path: Path) -> None:
+    """SuggestGoal is read-only, so the pinned single-run view allows it (M8)."""
+    ProjectRegistry(tmp_path / "projects", tmp_path / "runs").write(Project(id="p", name="P"))
+    model = _RecordingModel(json.dumps({"goal": "g", "title": "t"}))
+    providers = Providers(
+        worker=LocalWorker(model=_FakeModel()),
+        search=_FakeSearch(),
+        prompt=_FakePrompt(),
+        model=model,
+    )
+    config = Config(worker=WorkerConfig(execution="in-process", container_scope="per-call"))
+    run_dir = _write_ui_run(tmp_path, "demo")
+    ctx = ServerContext.build(config=config, providers=providers, root=tmp_path, run_dir=run_dir)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "SuggestGoal", {"sourceText": "doc"})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"goal": "g", "title": "t"}
+
+
+async def test_update_run_leaves_the_event_log_untouched(tmp_path: Path) -> None:
+    """The title is metadata, not a blackboard fact: no event is appended (M8)."""
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+    before = RunStore(tmp_path / "runs" / "run_001").read_events()
+    ctx = _ctx(tmp_path)
+    async with _client_for(ctx) as client:
+        response = await _post(client, "UpdateRun", {"runId": "run_001", "title": "新标题"})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["run"]["title"] == "新标题"
+    after = RunStore(tmp_path / "runs" / "run_001").read_events()
+    assert [(event.id, event.type) for event in after] == [
+        (event.id, event.type) for event in before
+    ]

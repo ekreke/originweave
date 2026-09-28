@@ -12,6 +12,7 @@ import {
   useRunGraph,
   useRunSessions,
   useSubmitHumanInput,
+  useUpdateRun,
 } from '@/api/hooks'
 import type { FactSummary, Intent, RunGraph } from '@/gen/originweave/v1/originweave_pb'
 import { Inspector, type InspectorSelection } from '@/layout/Inspector'
@@ -47,6 +48,86 @@ function NotFound() {
     <section className="col" aria-label="run console">
       <div className="empty">找不到该 run。它可能已被删除或从未创建。</div>
     </section>
+  )
+}
+
+// The run title, edited in place (M8). The title is static metadata (not an event), so
+// saving only refreshes the lists and this header -- the board and `replay` don't move.
+// Editing is hidden while replaying a historical step (writing a live run mid-replay
+// would be confusing) and rejected by the server in the pinned read-only view.
+function RunTitle({
+  runId,
+  title,
+  editable,
+}: {
+  runId: string | undefined
+  title: string
+  editable: boolean
+}) {
+  const updateRun = useUpdateRun(runId)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(title)
+  const [error, setError] = useState('')
+
+  const start = () => {
+    setDraft(title)
+    setError('')
+    setEditing(true)
+  }
+
+  const save = async () => {
+    const next = draft.trim()
+    if (!next) {
+      setError('标题不能为空')
+      return
+    }
+    try {
+      await updateRun.mutateAsync(next)
+      setEditing(false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="title-wrap">
+        <h2 className="center-title">{title}</h2>
+        {editable ? (
+          <button className="btn title-edit" type="button" aria-label="edit title" onClick={start}>
+            ✎
+          </button>
+        ) : null}
+      </div>
+    )
+  }
+  return (
+    <div className="title-edit-form">
+      <input
+        className="btn"
+        aria-label="run title"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <button
+        className="btn"
+        type="button"
+        aria-label="save title"
+        disabled={updateRun.isPending}
+        onClick={save}
+      >
+        {updateRun.isPending ? '保存中…' : '保存'}
+      </button>
+      <button
+        className="btn"
+        type="button"
+        aria-label="cancel title"
+        onClick={() => setEditing(false)}
+      >
+        取消
+      </button>
+      {error ? <span className="form-error">{error}</span> : null}
+    </div>
   )
 }
 
@@ -231,7 +312,7 @@ export function Console() {
             <span className="mono crumb-run">{runId ?? '—'}</span>
           </nav>
           <div className="center-title-row">
-            <h2 className="center-title">{title}</h2>
+            <RunTitle key={runId} runId={runId} title={title} editable={replayStep === null} />
             <div className="head-tools">
               {runStatus ? (
                 <span className={`status-badge status-${runStatus}`}>{runStatus}</span>

@@ -16,18 +16,25 @@ originweave 的版本与里程碑索引。**当前唯一活跃版本：`1.0`**�
 | M0b | 配置与 capability 层骨架：`init` 生成默认配置（含 `auto`）、provider 注册表（离线/cache/录制已于 Phase R 撤销） | 已完成 | M0a |
 | M0c | 黑板事件日志与事件溯源：run 目录布局、黑板协议事件、`replay` 只读重放 | 已完成 | M0b |
 | M0d | 构建 `copilot_productivity` 样例：资料 A、来源快照、事件日志 | 已完成 | M0c |
-| M1 | 黑板与 Agent 循环（库层）：OODA 任务指令（Bootstrap/Reason/Explore/Validate）、真实 `model`(OpenAI 兼容) + `search`(exa/parallel)、抽象论点拆解与来源回链、多 Worker 并发 + Stigmergy、Gate A（`verify` 型自 M2 起经 compare pass 派发） | 进行中 | M0d |
+| M1 | 黑板与 Agent 循环（库层）：OODA 任务指令（Bootstrap/Reason/Explore/Validate）、真实 `model`(OpenAI 兼容) + `search`(exa/parallel)、抽象论点拆解与来源回链、多 Worker 并发 + Stigmergy、Gate A（`verify` 型自 M2 起经 compare pass 派发） | 已完成 | M0d |
 | M1b | 前端脚手架：React + Vite + TS + Connect、Swiss/Blueprint 布局与页签空态（无 mock；可与 M1 并行） | 已完成 | M0d |
 | M1c-1 | server 骨架：Connect Python server（Starlette + uvicorn）、`Run`/`Project` 持久化、接线 M1 引擎、`originweave ui`（C1–C4） | 已完成 | M1 |
 | M1c-2a | 前端展示层（props 驱动，无 server 依赖）：图映射、页签/INSPECTOR 展示组件、fixture 测试 | 已完成 | M1b |
-| M1c-2b | 前端接线与 UI（2b-1–2b-5）：React Query 数据层、DAG/React Flow 渲染、HITL Gate UI + Replay、端到端 | 进行中 | M1c-1 + M1c-2a |
+| M1c-2b | 前端接线与 UI（2b-1–2b-5）：React Query 数据层、DAG/React Flow 渲染、HITL Gate UI + Replay、端到端 | 已完成 | M1c-1 + M1c-2a |
 | M2 | 偏差记分卡：`Intent(verify)`/`compare(facts × sources × goal)` → deviation 分类与 report、Gate B | 已完成 | M1c-1 |
-| M3 | agent runtime：Docker container-per-worker（每个 Worker 调用一个容器）、容器化 Worker 后端、MCP、`langfuse`、预算、异步 Hint、Gate C（`search`/`model` 已提前至 M1） | 未开始 | M2 |
-| M4 | 端到端、Deployment 与文档回归：`make demo` 闭环、server Docker、`overview/`+`proto/` 契约无漂移 | 未开始 | M3 |
-| M5 | 实体/组织关系图：从 A 抽取实体并判别关系，产出独立的关系图（本体 + 证据/推断标注） | 进行中 | M4 |
+| M3 | agent runtime：Docker container-per-worker（每个 Worker 调用一个容器）、容器化 Worker 后端、MCP、`langfuse`、预算、异步 Hint、Gate C（`search`/`model` 已提前至 M1） | 进行中（M3a/M3b 已落地；容器池 / `langfuse` / MCP 移二期） | M2 |
+| M4 | 端到端、Deployment 与文档回归：`make demo` 闭环、server Docker、`overview/`+`proto/` 契约无漂移 | 进行中 | M3 |
+| M5 | 实体/组织关系图：从 A 抽取实体并判别关系，产出独立的关系图（本体 + 证据/推断标注） | 进行中（M5b 已落地；server 接线 / 前端页签 / 样例 fixture 待做） | M4 |
 | M6 | Pi Worker 与可配置工具：执行体抽为可插拔 `Worker`（默认 `pi`，经 `pi-py-sdk`）；节点级隔离会话（原始输入/输出 + 步骤链）；项目级 `[worker]`（provider / 并发 / 工具 / `[worker].budget`，LLM 复用 `[capability.model]`）；TS 搜索扩展回调 server | 进行中 | M1c-1（P3+；P1/P2 不依赖） |
 | M7 | 成果报告：所有终止态（COMPLETE/STOPPED/FAILED）落 `report.md`，`paused` 不写；纯派生、`replay` 不重写 | 未开始 | M2 |
+| M8 | 输入辅助：资料 A 一键抽 goal + 标题（`SuggestGoal`），表单不再手输标题；run 详情页可就地改标题（`UpdateRun`，仅静态元数据） | 已完成 | M1c-1 + M1c-2b |
 
-## 下一版本（待规划）
+## 二期（1.0 移出，待规划）
 
-- 暂无。1.0 完成后在此登记 1.1 / 2.0 的切入方向。
+以下 1.0 条目经评估移出当前范围，作为下一版本（1.1 / 2.0）backlog：
+
+- **容器池预热**：`[worker].max_concurrency` 预热 N 个容器并跨调用复用（现为 `container_scope=per-call|per-run`；见 `docs/1.0/SPEC.md` M3）。
+- **`langfuse` prompt provider**：真实接入（现为凭据校验 stub；`capabilities/prompt.py`；本地 `local` 已可用）。
+- **`originweave mcp`**：把 capability 与只读 run 视图以 MCP 暴露（不承担调度）。
+
+1.0 完成后在此登记 1.1 / 2.0 的切入方向。

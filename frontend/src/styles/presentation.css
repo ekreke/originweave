@@ -593,6 +593,35 @@
   text-overflow: ellipsis;
 }
 
+.title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.title-wrap .center-title {
+  min-width: 0;
+}
+
+.title-edit {
+  flex: none;
+  padding: 0 6px;
+}
+
+.title-edit-form {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.title-edit-form input {
+  flex: 1;
+  min-width: 0;
+}
+
 .head-tools {
   display: flex;
   flex: none;

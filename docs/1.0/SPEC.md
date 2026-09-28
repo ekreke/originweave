@@ -159,7 +159,7 @@ Gate A 可挂起并可恢复。**`replay`（事件日志）字节确定；live r
 - [x] 依赖/工具链：`protobuf` / `connect-python`（含 `protoc-gen-connect-python`）/ `starlette` / `uvicorn`；
       `make proto` 跑通 `buf generate proto` → `src/originweave/v1`（import `originweave.v1.*`；生成物不入库，ruff/mypy 已 exclude）
 - [x] CI `python` job 先生成 proto（buf-setup + 插件 PATH）再 lint/typecheck/test
-- [x] `server/app.py`：构造 `OriginweaveService` 的 Connect ASGI app（初始 8 RPC；现 12 RPC，均已实现，见 `dashboard.md §4.1`）— `server/app.py`/`server/service.py`
+- [x] `server/app.py`：构造 `OriginweaveService` 的 Connect ASGI app（初始 8 RPC；现 20 RPC，均已实现，见 `dashboard.md §4.1`）— `server/app.py`/`server/service.py`
 - [x] 测试：ASGI 客户端 smoke（`ListProjects` 空列表等）— `tests/test_server.py`
 
 ### C2 · 持久化（run.json + projects 注册表）
@@ -339,6 +339,7 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
       并发上限见 `[worker].max_concurrency`；镜像内置 Node + `pi` + TS 扩展 — **M3a**：`Dockerfile.runtime`、
       `make image`、`runtime/container.py`（`ContainerWorker`）、`runtime/runner.py`
 - [ ] 容器池（后续优化）：`[worker].max_concurrency` 预热 N 个容器、调用时复用（先 per-call 起/销毁）
+      **→ 二期（backlog）**：现有 `container_scope=per-call|per-run` 已落地，跨 run 预热池推迟
 - [x] server 侧容器生命周期管理（创建/监控/回收）与 Dispatcher 接入（协议唯一写入者）— **M3a**：
       `ContainerWorker` 每次起/销毁容器（`docker run/rm`）+ `GET /health` 就绪轮询；Engine 仍为唯一写入者
 - [x] 预算执行：`max_steps` / `max_wall` / `max_cost` 触顶即停并落盘中间态 — **M3b**：`engine.py`
@@ -358,10 +359,14 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
       `approve`/`edit` 折回 verdict+hint 写 `COMPLETE`/`report.md`，`reject` 按 `targets` 生成 `verify`
       Intent（无有效 targets 退化为 `explore` off `origin`）先 `_dispatch` 再续跑）；`server/service.py`
       `submit_human_input` 放行 `review`；前端复用通用 `GateCard`（无需改动）— `blackboard-protocol.md §7`
-- [ ] `prompt` provider `langfuse` 真实接入（`local` 已于 M1 可用）
-- [ ] `originweave capabilities list|install-obscura` 实现
-- [ ] `originweave mcp` 暴露 capability / 只读 run 视图（不承担调度）
-- [ ] 集成测试：`replay` 路径 + 至少一条真实 provider 冒烟（受凭据约束时可跳过）
+- [ ] `prompt` provider `langfuse` 真实接入（`local` 已于 M1 可用）**→ 二期（backlog）**：
+      现为凭据校验 stub（`capabilities/prompt.py`）
+- [ ] `originweave capabilities list|install-obscura` 实现（`list` 已可用，`install-obscura` 仍为占位；
+      命名待定，见 `TODO.md`）
+- [ ] `originweave mcp` 暴露 capability / 只读 run 视图（不承担调度）**→ 二期（backlog）**
+- [x] 集成测试：`replay` 路径 + 至少一条真实 provider 冒烟（受凭据约束时可跳过）—
+      `tests/test_replay_cli.py`（replay + 断网断言）、`tests/test_engine.py::test_live_bootstrap_smoke`
+      （`OPENAI_API_KEY` gated）、`tests/test_runtime.py::test_real_container_serves_health`（Docker gated）
 
 > **Phase R 调整**：原「`search`/`prompt`/`model` provider 真实接入」条目中的
 > `search` 与 `model` **已提前至 M1**；M3 起不再有离线/录制回放。
@@ -408,7 +413,10 @@ Hint 注入、Gate C 行为均可观测。
 - [x] run dir 产物 `entity-graph.json`（可由事件重建，非事实来源）— **M5b**：`store.py` `write_entity_graph`
       + `engine.py` `_flush_entity_graph`（每次图 pass 提交后增量重写，`sort_keys` 确定性）
 - [ ] 无来源推断标注：`Relation.status=inferred` + 置信度，渲染为虚线
+      （引擎侧已归一 `status=inferred` 并校验置信度；前端虚线渲染待 M5d）
 - [ ] server：`RunDetail.entity_graph` 与 `CreateRunRequest.analysis`（proto）
+      （proto 字段已定义：`EntityGraph entity_graph = 8`、`optional string analysis = 4`；
+      server `CreateRun` 放行 `relation|both` 与 `convert` 映射待 M5c）
 - [ ] dashboard：`RELATIONS`（关系图，复用图组件）与 `ENTITIES`（实体表）页签
 - [x] 单测：给定 fixture 输入产出确定性 `EntityGraph`（实体 / 关系 / 证据或 `inferred` 断言）— **M5b**：
       `tests/test_engine_m5.py`（fake provider 注入；归并/别名、`n*`/`r*` 序、inferred 校验、`both` 判据、
@@ -503,3 +511,34 @@ Worker 调用 = 一个**隔离会话**，历史以会话为单位保留**原始�
 
 验收：任一 run 达终止态后 run dir 必有 `report.md`，其 verdict 能表达终止原因（或 `COMPLETE` 的 verdict）；
 `paused` 无 `report.md`；`originweave replay` 不改写它。
+
+---
+
+## M8 · 输入辅助：goal/标题自动提取与标题编辑
+
+目标：降低新建核验的上手门槛——粘贴资料 A 后一键由模型**一次**抽出 **goal（判定标准/停止条件）**
+与**标题**；表单不再手输标题。goal 可编辑、可重新生成，再据此走既有 `CreateRun`。
+run 详情页（Console）支持**就地编辑标题**（仅静态元数据，不写黑板事件）。
+
+- [x] proto：`SuggestGoal(SuggestGoalRequest{source_text} → SuggestGoalResponse{goal,title})`（只读）与
+      `UpdateRun(UpdateRunRequest{run_id, optional title} → UpdateRunResponse{run})`（写）—
+      `proto/originweave/v1/originweave.proto`
+- [x] prompt：`prompts/suggest_goal.txt`（资料 A → 一句 goal + 短标题；基于文中核心论点、不自造事实）
+- [x] server：`SuggestGoal` 经 `[capability.model]` **单次调用**（无 run 状态、pinned 放行；`Providers` 增
+      `model`，`build_providers` 加 `build_model`；错误映射 `UNAVAILABLE`/`INVALID_ARGUMENT`）—
+      `server/service.py`、`server/context.py`
+- [x] server：`UpdateRun` 只改静态元数据（`run.json` + workspace DB，`_reject_if_pinned`；空 title →
+      `INVALID_ARGUMENT`；不改事件日志）— `server/service.py`
+- [x] 前端：NewRun 移除标题输入；加「提取 goal」按钮（**显式触发**；pending/错误态；回填可编辑 goal +
+      标题只读预览；空 source_text 禁用）— `routes/NewRun.tsx`、`api/hooks.ts`（`useSuggestGoal`）
+- [x] 前端：Console 标题行内编辑（保存调 `UpdateRun`，成功后失效 runs/graph 查询；replay 中隐藏）—
+      `routes/Console.tsx`、`api/hooks.ts`（`useUpdateRun`）
+- [x] 测试：server（SuggestGoal 空/成功/能力失败/坏 JSON；UpdateRun 空标题、pinned 拒、未知 run 404/500）+
+      前端（按钮回填、提交带标题、提取失败、标题编辑）— `tests/test_server.py`、
+      `frontend/src/routes/routes.test.tsx`
+- [x] 文档：`dashboard.md` §4.1 RPC 表（2 条）与 §4.3、`product-overview.md` §4/§5、`AGENTS.md` RPC 计数
+
+> 依赖：M1c-1（server）+ M1c-2b（前端）；与 M5/M7 无耦合。
+
+验收：粘贴资料 A → 点「提取 goal」→ goal/标题回填且可改、可重生成 → `CreateRun` 依 goal 起 run；
+Console 可改标题且 run 列表同步；pinned 只读模式下 `UpdateRun` 被拒、`SuggestGoal` 可用。

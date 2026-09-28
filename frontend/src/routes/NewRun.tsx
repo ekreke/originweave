@@ -1,41 +1,49 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
-import { useCreateRun, useRun } from '@/api/hooks'
+import { useCreateRun, useRun, useSuggestGoal } from '@/api/hooks'
 
 // New-run form (CreateRun). Only the "text" source is supported (url lands later) and
-// analysis is fixed to "provenance" (relation/both land in M5). Budget overrides are
-// optional; unset fields fall back to [worker].budget on the server. A run started in
+// analysis is fixed to "provenance" (relation/both land in M5). The title is generated
+// by the server (from the suggestion, else document A's first line), so the form has no
+// title field; it can be edited later in the console. Budget overrides are optional;
+// unset fields fall back to [worker].budget on the server. A run started in
 // `originweave ui --run` (read-only) is rejected by the server and surfaced inline.
 //
 // With `?from=<runId>` (the run list's "retry") the form is prefilled from that run's
-// inputs — GetRun returns its source_text plus the static title/goal.
+// inputs — GetRun returns its source_text plus the static goal/title.
 export function NewRun() {
   const { projectId } = useParams()
   const [searchParams] = useSearchParams()
   const fromId = searchParams.get('from')
   const navigate = useNavigate()
   const createRun = useCreateRun()
+  const suggestGoal = useSuggestGoal()
   const source = useRun(fromId ?? undefined)
   const sourceDetail = source.data
 
   // Mirror the source run's inputs until the user edits a field; `edited ?? loaded`
-  // keeps render pure (no effect, no cascading render). The title is prefixed once,
-  // even if the source title was itself a retry.
+  // keeps render pure (no effect, no cascading render). The retry title is prefixed
+  // once, even if the source title was itself a retry.
   const sourceTitle = sourceDetail?.run?.title ?? fromId ?? ''
+  const retryTitle = sourceTitle
+    ? sourceTitle.startsWith('重试：')
+      ? sourceTitle
+      : `重试：${sourceTitle}`
+    : ''
   const loaded = {
-    title: sourceTitle
-      ? sourceTitle.startsWith('重试：')
-        ? sourceTitle
-        : `重试：${sourceTitle}`
-      : '',
     sourceText: sourceDetail?.sourceText ?? '',
     goal: sourceDetail?.run?.goal ?? '',
   }
-  const [edited, setEdited] = useState<{ title?: string; sourceText?: string; goal?: string }>({})
-  const title = edited.title ?? loaded.title
+  const [edited, setEdited] = useState<{ sourceText?: string; goal?: string }>({})
   const sourceText = edited.sourceText ?? loaded.sourceText
   const goal = edited.goal ?? loaded.goal
+  // Title is not user-editable here: it comes from the extracted suggestion when there
+  // is one, else the retry prefix (a fresh run lets the server derive it). The extracted
+  // title is an override, so the retry prefix stays reactive to the async prefill.
+  const [extractedTitle, setExtractedTitle] = useState('')
+  const suggestedTitle = extractedTitle || retryTitle
+  const [suggestError, setSuggestError] = useState('')
 
   const [auto, setAuto] = useState(false)
   const [showBudget, setShowBudget] = useState(false)
@@ -45,6 +53,18 @@ export function NewRun() {
   const [error, setError] = useState('')
 
   const valid = Boolean(projectId && sourceText.trim() && goal.trim())
+
+  const extractGoal = async () => {
+    if (!sourceText.trim() || suggestGoal.isPending) return
+    setSuggestError('')
+    try {
+      const suggestion = await suggestGoal.mutateAsync(sourceText)
+      setEdited((previous) => ({ ...previous, goal: suggestion.goal }))
+      setExtractedTitle(suggestion.title)
+    } catch (cause) {
+      setSuggestError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -66,7 +86,7 @@ export function NewRun() {
         // Keep the document text verbatim (paragraphs matter); trim only to test emptiness.
         sourceText,
         goal: goal.trim(),
-        ...(title.trim() ? { title: title.trim() } : {}),
+        ...(suggestedTitle.trim() ? { title: suggestedTitle.trim() } : {}),
         auto,
         ...(steps !== undefined ? { maxSteps: Math.trunc(steps) } : {}),
         ...(maxWall.trim() ? { maxWall: maxWall.trim() } : {}),
@@ -96,16 +116,6 @@ export function NewRun() {
         ) : null}
         <form className="new-run" onSubmit={submit}>
           <label>
-            <div className="cnt">标题（可选）</div>
-            <input
-              className="btn"
-              aria-label="run title"
-              placeholder="run 标题"
-              value={title}
-              onChange={(event) => setEdited({ ...edited, title: event.target.value })}
-            />
-          </label>
-          <label>
             <div className="cnt">资料 A 正文（source_text）</div>
             <textarea
               className="btn"
@@ -121,11 +131,31 @@ export function NewRun() {
             <input
               className="btn"
               aria-label="goal"
-              placeholder="判定标准"
+              placeholder="判定标准，或从资料 A 提取"
               value={goal}
               onChange={(event) => setEdited({ ...edited, goal: event.target.value })}
             />
           </label>
+          <div>
+            <button
+              className="btn"
+              type="button"
+              onClick={extractGoal}
+              disabled={!sourceText.trim() || suggestGoal.isPending}
+            >
+              {suggestGoal.isPending
+                ? '提取中…'
+                : goal.trim()
+                  ? '重新生成 goal 与标题'
+                  : '从资料 A 提取 goal 与标题'}
+            </button>
+          </div>
+          {suggestedTitle.trim() ? (
+            <div className="cnt">标题（自动生成，创建后可在审阅台修改）：{suggestedTitle}</div>
+          ) : (
+            <div className="cnt">标题将自动生成（创建后可在审阅台修改）</div>
+          )}
+          {suggestError ? <p className="form-error">提取失败：{suggestError}</p> : null}
           <div className="cnt">sourceType: text（url 暂不支持） · analysis: provenance</div>
           <label className="inline">
             <input
