@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { GraphCanvas } from '@/graph/GraphCanvas'
 import { classifyEdges, runGraphToFlow } from '@/graph/mapping'
-import { factSummary, sampleRunGraph } from '@/test/fixtures'
+import { factSummary, intent, sampleRunGraph } from '@/test/fixtures'
 import { create } from '@bufbuild/protobuf'
 import { RunGraphSchema } from '@/gen/originweave/v1/originweave_pb'
 
@@ -115,5 +115,16 @@ describe('GraphCanvas', () => {
     const reset = screen.getByRole('button', { name: '重置布局' })
     fireEvent.click(reset)
     expect(screen.getByTestId('fact-node-f1')).toBeInTheDocument()
+  })
+
+  it('marks an open (queued) intent for the waiting pulse', () => {
+    const detail = create(RunGraphSchema, {
+      origin: factSummary({ id: 'origin', kind: 'origin' }),
+      intents: [intent({ id: 'i1', status: 'open' })],
+    })
+    const { nodes, edges } = runGraphToFlow(detail)
+    render(<GraphCanvas nodes={nodes} edges={edges} />)
+
+    expect(screen.getByTestId('intent-node-i1')).toHaveClass('intent-open')
   })
 })

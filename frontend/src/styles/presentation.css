@@ -50,6 +50,47 @@
   text-decoration: line-through;
 }
 
+/* In-flight phase indicator (dashboard.md §2). The console polls the light
+   GetRunGraph projection, so this is how a running run shows "推理中…" between
+   graph changes (reasoning / validating / dispatching / executing). */
+.activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: rgb(var(--c-accent));
+  white-space: nowrap;
+}
+
+.activity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(var(--c-accent));
+  animation: activity-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes activity-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.75);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-dot,
+  .intent-open,
+  .intent-claimed {
+    animation: none;
+  }
+}
+
 /* ---------------------------------------------------------------- tables */
 
 .data-table {
@@ -224,6 +265,22 @@
 
 .intent-node .node-id {
   color: rgb(var(--c-k-intent));
+}
+
+/* A queued Intent is not executing yet: a faint pulse marks it as the next thing up
+   (dashboard.md §2). The stronger accent pulse is reserved for `claimed` below. */
+.intent-open {
+  animation: intent-await 2s ease-in-out infinite;
+}
+
+@keyframes intent-await {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 
 .intent-claimed {

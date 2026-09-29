@@ -17,6 +17,7 @@ import {
 import type { FactSummary, Intent, RunGraph } from '@/gen/originweave/v1/originweave_pb'
 import { Inspector, type InspectorSelection } from '@/layout/Inspector'
 import { RunList } from '@/layout/RunList'
+import { activityLabel } from '@/routes/consoleModel'
 import { EventsTab } from '@/tabs/EventsTab'
 import { FactsTab } from '@/tabs/FactsTab'
 import { GraphTab } from '@/tabs/GraphTab'
@@ -281,6 +282,9 @@ export function Console() {
 
   const runStatus = graphRun?.status
   const statusLabel = runStatus ?? (graphQuery.isLoading ? '…' : '—')
+  // In-flight phase while running (server-derived, not an event): shows "推理中…"
+  // between graph changes. Non-running runs carry no activity.
+  const activity = graphRun && graphRun.status === 'running' ? activityLabel(graphRun.activity) : ''
   const budgetSummary = graphRun
     ? `steps ${graphRun.steps?.current ?? 0}/${graphRun.steps?.total ?? 0}` +
       ` · tok ${String(graphRun.budget?.tokens ?? 0n)}` +
@@ -320,6 +324,12 @@ export function Console() {
               ) : (
                 <span className="cnt mono">{statusLabel}</span>
               )}
+              {activity ? (
+                <span className="activity" role="status">
+                  <i className="activity-dot" aria-hidden />
+                  {activity}
+                </span>
+              ) : null}
               {budgetSummary ? <span className="budget mono">{budgetSummary}</span> : null}
               <div className="replay" role="group" aria-label="replay">
                 <button

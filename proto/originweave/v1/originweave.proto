@@ -89,6 +89,10 @@ message Run {
   // Terminal reason for status=stopped|failed (the last STOPPED/FAILED event's
   // `reason`); empty while queued/running/awaiting_human/paused/completed.
   string status_reason = 18;
+  // Current in-flight phase while status=running (derived from the event log, never an
+  // event): bootstrapping | reasoning | validating | dispatching | executing; empty
+  // otherwise. Lets the console show "reasoning…" without polling the event log.
+  string activity = 19;
 }
 
 // ---------------------------------------------------------------- board elements

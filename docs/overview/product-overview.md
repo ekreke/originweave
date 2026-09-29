@@ -49,6 +49,8 @@ Run {
   analysis,                # provenance | relation | both（默认 provenance）
   status,                  # queued | running | awaiting_human | paused | stopped | completed | failed
   statusReason,            # status=stopped|failed 时的终止原因；其余态为空
+  activity,                # running 时的进行中阶段（由事件派生，非事件）：
+                           #   bootstrapping | reasoning | validating | dispatching | executing；其余态为空
   goal,                    # 停止条件 / 判定标准
   facts, deviations,       # 计数
   entities, relations,     # 实体-关系图计数（analysis != provenance 时）

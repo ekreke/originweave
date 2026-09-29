@@ -14,6 +14,7 @@ from originweave.persistence import (
     Run,
     Steps,
     allocate_run_id,
+    derive_activity,
     summarize_run,
 )
 from originweave.store import RunStore
@@ -244,6 +245,76 @@ def test_run_dict_round_trip() -> None:
     )
 
     assert Run.from_dict(run.to_dict()) == run
+
+
+def _running_store(root: Path) -> RunStore:
+    store = RunStore(root)
+    store.init_layout()
+    store.append_event("PROJECT", {"origin": _ORIGIN, "goal": _GOAL})
+    return store
+
+
+def test_derive_activity_tracks_the_in_flight_phase(tmp_path: Path) -> None:
+    store = _running_store(tmp_path / "run_001")
+
+    assert derive_activity(store.read_events(), status="running") == "bootstrapping"
+
+    store.append_event("REASON", {"phase": "start", "triggerFacts": []})
+    assert derive_activity(store.read_events(), status="running") == "reasoning"
+    store.append_event("REASON", {"phase": "end", "triggerFacts": []})
+    assert derive_activity(store.read_events(), status="running") == "reasoning"
+
+    store.append_event("VALIDATE", {"phase": "start", "candidates": 1})
+    assert derive_activity(store.read_events(), status="running") == "validating"
+
+    store.append_event(
+        "INTENT", {"intent": {"id": "i1", "type": "explore", "from": "origin", "question": "q"}}
+    )
+    assert derive_activity(store.read_events(), status="running") == "dispatching"
+
+    store.append_event("EXECUTE", {"intentId": "i1", "worker": "w", "model": "m"})
+    assert derive_activity(store.read_events(), status="running") == "executing"
+
+    # Noise events (heartbeats, sessions, entity/relation writes) do not shift the phase.
+    store.append_event("HEARTBEAT", {"intentId": "i1"})
+    store.append_event("SESSION", {"sessionId": "s1", "task": "Explore"})
+    store.append_event("WORKER_STEP", {"sessionId": "s1", "seq": 1, "kind": "message"})
+    store.append_event("ENTITY", {"entity": {"id": "n1", "name": "x"}})
+    assert derive_activity(store.read_events(), status="running") == "executing"
+
+    store.append_event("CONCLUDE", {"intentId": "i1", "facts": []})
+    assert derive_activity(store.read_events(), status="running") == "dispatching"
+
+    # The engine's real Reason path writes INTENT(s) then immediately REASON end, so the
+    # tail is `end` -> still "reasoning" for that (short) window.
+    store.append_event("REASON", {"phase": "start", "triggerFacts": []})
+    store.append_event(
+        "INTENT", {"intent": {"id": "i2", "type": "explore", "from": "origin", "question": "q"}}
+    )
+    store.append_event("REASON", {"phase": "end", "triggerFacts": []})
+    assert derive_activity(store.read_events(), status="running") == "reasoning"
+
+    # A human decision resumes the loop, which is then about to dispatch.
+    store.append_event("HUMAN_INPUT", {"gate": "confirm-claim", "decision": "approve"})
+    assert derive_activity(store.read_events(), status="running") == "dispatching"
+
+
+def test_derive_activity_is_empty_unless_running(tmp_path: Path) -> None:
+    store = _running_store(tmp_path / "run_001")
+
+    assert derive_activity(store.read_events(), status="awaiting_human") == ""
+    assert derive_activity(store.read_events(), status="completed") == ""
+    assert derive_activity([], status="running") == ""
+
+
+def test_summarize_run_reports_the_in_flight_activity(tmp_path: Path) -> None:
+    store = _running_store(tmp_path / "run_001")
+    store.append_event("REASON", {"phase": "start", "triggerFacts": []})
+
+    run = summarize_run(store)
+
+    assert run.status == "running"
+    assert run.activity == "reasoning"
 
 
 def test_project_registry_derives_run_count_and_updated_at(tmp_path: Path) -> None:

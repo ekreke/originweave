@@ -221,6 +221,7 @@ def run_pb(run: Run) -> Any:
         analysis=run.analysis,
         status=run.status,
         status_reason=run.status_reason,
+        activity=run.activity,
         goal=run.goal,
         facts=run.facts,
         deviations=run.deviations,

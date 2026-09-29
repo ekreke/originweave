@@ -42,13 +42,15 @@ boundary 灰、compare 青、deviation 红）；`Intent` 为**状态色迷你卡
 ```
 
 - 顶栏：面包屑（`Researches / <project> / <run>`）+ 状态徽标（`AWAITING_HUMAN · Gate A`）
-  + 用量（`steps` 已用/上限 · `tok`/`cost` 为**累计实际消耗**，来自各 Worker 的 usage——
-  Pi 从 `cost.total` 上报；无价表时 `cost` 为 0 · `intents` open/done）+ 操作
+  + **进行中阶段**（`running` 时显示带脉冲的「推理中… / 校验中… / 派发中… / 执行中… / 初始化中…」，
+  取自 `Run.activity`）+ 用量（`steps` 已用/上限 · `tok`/`cost` 为**累计实际消耗**，来自各 Worker
+  的 usage——Pi 从 `cost.total` 上报；无价表时 `cost` 为 0 · `intents` open/done）+ 操作
   （Replay 步进 / Human / Continue）。
 - 中栏（图为主体）页签：
   - **PROVENANCE DAG** — 图视图（默认页签）。节点按 `kind` 着色
     （origin/goal/fact/citation/source/boundary/compare/deviation/**intent**）；
-    Intent 以问号徽标呈现，`open/claimed/dropped` 分别用灰/蓝/划除；
+    Intent 以问号徽标呈现，`open/claimed/dropped` 分别用灰/蓝/划除
+    （`open` 带**弱脉冲**表示「待执行/排队中」，`claimed` 带强调色脉冲表示「执行中」）；
     边按 `relation` 区分（`main-chain` 实线、`dependency` 虚线、
     `decomposes` 点线、`spawns`/`resolves` —— 见 `blackboard-protocol.md`）。
     **节点标签是短预览**（折叠空白、超长截断 + 省略号、CSS 3 行封顶），**完整文本在 INSPECTOR**
@@ -153,7 +155,7 @@ boundary 灰、compare 青、deviation 红）；`Intent` 为**状态色迷你卡
 
 ```text
 RunGraph {
-  run,                                  # 复用 Run（状态 / 计数 / 预算）
+  run,                                  # 复用 Run（状态 / 计数 / 预算 / activity 进行中阶段）
   origin, goal, facts[],                # FactSummary：id/label/subtitle/kind/role/
                                         #   status/confidence/position/evidence_count
                                         #   —— 无 note 与 evidence[]（引文留在 GetFactDetail）
@@ -165,6 +167,12 @@ RunGraph {
 
 `at_event` 语义与 `GetRun` 相同（`reduce(events[:k])`），但 `event_count` 恒为全量长度，
 步进时游标稳定。四个读 RPC 均支持 pinned 单 run 只读模式。
+
+> `Run.activity`（`running` 时非空）是**服务端从事件尾派生的只读标量**，不是事件、也不下发
+> `events[]`：取日志中最后一个带阶段的 `REASON`/`VALIDATE`/`EXECUTE`/`CONCLUDE`/`PROJECT`
+> （跳过 `SESSION`/`WORKER_STEP`/`HINT` 等噪声），值域 `bootstrapping|reasoning|validating|
+> dispatching|executing`。控制台据此在顶栏显示「推理中…」等，填充「Intent 已出、下一节点未到」
+> 的空档，并随 `at_event` 折算保持一致（replay 确定）。
 
 ### 4.3 CreateRunRequest
 

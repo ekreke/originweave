@@ -132,7 +132,7 @@ export function event(overrides: Partial<Event> = {}): Event {
   })
 }
 
-export function run(overrides: Partial<Run> = {}): Run {
+export function run(overrides: Partial<Omit<Run, '$typeName' | '$unknown'>> = {}): Run {
   return create(RunSchema, {
     id: 'run_001',
     projectId: 'copilot-productivity',

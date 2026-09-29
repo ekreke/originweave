@@ -65,6 +65,46 @@ def _terminal_reason(events: Sequence[Event]) -> str:
     return reason
 
 
+# Phases surfaced to the console while a run is in flight (Run.activity; dashboard.md
+# §2). Derived from the tail of the log -- never an event itself -- so a poll of the
+# light GetRunGraph projection can say "reasoning…" without shipping the whole log.
+_ACTIVITY_BY_EVENT: dict[str, str] = {
+    "PROJECT": "bootstrapping",
+    "REASON": "reasoning",
+    "VALIDATE": "validating",
+    "INTENT": "dispatching",
+    "CONCLUDE": "dispatching",
+    "RELEASE": "dispatching",
+    # A human decision resumes the loop; the engine is about to dispatch again.
+    "HUMAN_INPUT": "dispatching",
+    "EXECUTE": "executing",
+    "HEARTBEAT": "executing",
+}
+# Noise events carry no phase of their own: keep reporting the phase they belong to
+# (a worker step / entity happens *during* Explore, a hint can arrive any time).
+_ACTIVITY_TRANSPARENT: frozenset[str] = frozenset(
+    {"SESSION", "WORKER_STEP", "HINT", "RESUMED", "ENTITY", "RELATION"}
+)
+
+
+def derive_activity(events: Sequence[Event], *, status: str) -> str:
+    """The current in-flight phase for a running run (``Run.activity``), else ``""``.
+
+    Scans the log backwards for the last phase-bearing event, skipping noise events
+    (sessions/steps/hints/entities) so an in-flight Reason/Validate/Explore keeps
+    reporting the phase that is actually running. Returns ``""`` once the run is no
+    longer ``running`` (queued/awaiting_human/paused/completed/stopped/failed) -- the
+    console shows the status badge instead.
+    """
+    if status != "running":
+        return ""
+    for event in reversed(events):
+        if event.type in _ACTIVITY_TRANSPARENT:
+            continue
+        return _ACTIVITY_BY_EVENT.get(event.type, "")
+    return ""
+
+
 @dataclass
 class IntentCounts:
     open: int = 0
@@ -120,6 +160,7 @@ class Run:
     analysis: str = "provenance"
     status: str = "queued"
     status_reason: str = ""
+    activity: str = ""
     goal: str = ""
     facts: int = 0
     deviations: int = 0
@@ -141,6 +182,7 @@ class Run:
             "analysis": self.analysis,
             "status": self.status,
             "status_reason": self.status_reason,
+            "activity": self.activity,
             "goal": self.goal,
             "facts": self.facts,
             "deviations": self.deviations,
@@ -167,6 +209,7 @@ class Run:
             analysis=_str(data.get("analysis")) or "provenance",
             status=_str(data.get("status")) or "queued",
             status_reason=_str(data.get("status_reason")),
+            activity=_str(data.get("activity")),
             goal=_str(data.get("goal")),
             facts=_int(data.get("facts")),
             deviations=_int(data.get("deviations")),
@@ -299,6 +342,7 @@ def summarize_run(
     meta = dict(meta) if meta is not None else {}
     events = list(events) if events is not None else store.read_events()
     board = reduce(events) if events else None
+    status = board.status if board is not None else "queued"
 
     intents = IntentCounts()
     if board is not None:
@@ -322,7 +366,8 @@ def summarize_run(
         title=_str(meta.get("title")) or store.root.name,
         source_type=_str(meta.get("source_type")) or "text",
         analysis=_str(meta.get("analysis")) or "provenance",
-        status=board.status if board is not None else "queued",
+        status=status,
+        activity=derive_activity(events, status=status),
         status_reason=(
             _terminal_reason(events)
             if board is not None and board.status in {"failed", "stopped"}
@@ -511,6 +556,7 @@ __all__ = [
     "Run",
     "Steps",
     "allocate_run_id",
+    "derive_activity",
     "is_run_id",
     "load_run_meta",
     "summarize_run",

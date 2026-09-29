@@ -433,6 +433,29 @@ async def test_get_run_graph_returns_light_projection(tmp_path: Path) -> None:
     assert "sourceText" not in graph
 
 
+async def test_get_run_graph_reports_the_in_flight_activity(tmp_path: Path) -> None:
+    # No COMPLETE -> the run is still running; the last phase-bearing event (CONCLUDE)
+    # means it is between dispatch rounds.
+    _write_run(tmp_path / "runs", "run_001", project_id="p", complete=False)
+
+    async with _client(tmp_path) as client:
+        graph = (await _post(client, "GetRunGraph", {"runId": "run_001"})).json()["graph"]
+
+    assert graph["run"]["status"] == "running"
+    assert graph["run"]["activity"] == "dispatching"
+
+
+async def test_get_run_graph_activity_is_empty_once_not_running(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")  # COMPLETE
+
+    async with _client(tmp_path) as client:
+        graph = (await _post(client, "GetRunGraph", {"runId": "run_001"})).json()["graph"]
+
+    assert graph["run"]["status"] == "completed"
+    # protojson omits the empty default, so an inactive run has no `activity` key.
+    assert graph["run"].get("activity", "") == ""
+
+
 async def test_get_run_graph_at_event_folds_and_keeps_full_count(tmp_path: Path) -> None:
     _write_run(tmp_path / "runs", "run_001", project_id="p")
     events = RunStore(tmp_path / "runs" / "run_001").read_events()
@@ -443,18 +466,20 @@ async def test_get_run_graph_at_event_folds_and_keeps_full_count(tmp_path: Path)
             for k in range(1, 6)
         ]
 
+    # The in-flight activity tracks the folded prefix too (PROJECT/INTENT/EXECUTE/
+    # CONCLUDE/COMPLETE).
+    expected_activity = ["bootstrapping", "dispatching", "executing", "dispatching", ""]
     for k, response in enumerate(responses, start=1):
         assert response.status_code == 200, response.text
         graph = response.json()["graph"]
         board = reduce(events[:k])
         assert [fact["id"] for fact in graph.get("facts", [])] == [f.id for f in board.facts]
         assert graph["run"]["status"] == board.status
+        assert graph["run"].get("activity", "") == expected_activity[k - 1]
         # The cursor bound is the full-log length, stable while stepping.
         assert graph["eventCount"] == len(events)
     assert responses[0].json()["graph"].get("facts", []) == []
     assert responses[4].json()["graph"]["run"]["status"] == "completed"
-
-
 async def test_get_run_graph_missing_reports_not_found(tmp_path: Path) -> None:
     async with _client(tmp_path) as client:
         response = await _post(client, "GetRunGraph", {"runId": "run_404"})

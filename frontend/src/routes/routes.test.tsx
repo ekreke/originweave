@@ -7,6 +7,7 @@ import { RunGraphSchema } from '@/gen/originweave/v1/originweave_pb'
 import { App } from '@/App'
 import {
   factSummary,
+  run,
   sampleProjects,
   sampleRunDetail,
   sampleRunGraph,
@@ -131,6 +132,29 @@ describe('console', () => {
     await screen.findByText('Copilot 提升 55% 生产率')
     expect(mocks.listProjectRuns).toHaveBeenCalledWith({ projectId: 'copilot-productivity' })
     expect(mocks.getRunGraph).toHaveBeenCalledWith({ runId: 'run_009' })
+  })
+
+  it('shows the in-flight activity while the run is running', async () => {
+    mocks.getRunGraph.mockResolvedValue({
+      graph: create(RunGraphSchema, { run: run({ status: 'running', activity: 'reasoning' }) }),
+    })
+
+    const { container } = renderAt('/projects/copilot-productivity/runs/run_009')
+
+    await waitFor(() => expect(container.querySelector('.activity')?.textContent).toBe('推理中'))
+  })
+
+  it('hides the activity once the run is not running', async () => {
+    mocks.getRunGraph.mockResolvedValue({
+      graph: create(RunGraphSchema, {
+        run: run({ status: 'completed', activity: 'reasoning' }),
+      }),
+    })
+
+    const { container } = renderAt('/projects/copilot-productivity/runs/run_009')
+
+    await waitFor(() => expect(container.querySelector('.status-completed')).not.toBeNull())
+    expect(container.querySelector('.activity')).toBeNull()
   })
 
   it('distinguishes a missing run from a connection error', async () => {
