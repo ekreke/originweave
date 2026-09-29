@@ -552,19 +552,22 @@ Console 可改标题且 run 列表同步；pinned 只读模式下 `UpdateRun` �
 问题定位、理论背景（Hearsay-II focus of attention / 黑板 state-explosion）与完整方案见
 `docs/design/fact-explosion-control.md`。
 
-- [ ] **M9a** decompose 仅限 `main-claim`：`_reason` 校验候选 `from_` 所在 fact 的 `role`，
+- [x] **M9a** decompose 仅限 `main-claim`：`_reason` 校验候选 `from_` 所在 fact 的 `role`，
       非 main-claim 的 decompose 写 `status=dropped` 留痕（不 `FAILED`）— `engine.py` `_reason`
-- [ ] **M9b** 每轮宽度上限（dispatch width cap）：`_dispatch` 按 Intent **id 序**每轮只派发前 K 个
-      `open` Intent，其余保持 `open` 下轮再派（节流非丢弃）— `engine.py` `_dispatch`
-- [ ] **M9b** 单 claim fanout 上限：单个 decompose 产出 sub-claim 超 `max_fanout` 时按序截断并留注记 —
-      `engine.py` `_check_explored_facts`/提交路径
-- [ ] **M9c** 配置：`[run]` 暴露 `max_rounds` / `dispatch_width` / `max_fanout`（未知键 `ConfigError`）；
-      `max_steps` 默认收紧 — `config.py`、`originweave.toml`、`tests/test_config.py`
-- [ ] **M9d** prompt 粒度聚合：decompose 子断言 ≤5、枚举集合聚合为一条原子断言；explore 同源证据合并 —
+      （`roles` 映射 + `guarded` 索引；被守卫候选不再送 Validate，避免 VALIDATE 计数失真）
+- [x] **M9b** 每轮宽度上限（dispatch width cap）：`_dispatch` 按 Intent **id 序**每轮只派发前 K 个
+      `open` Intent，其余保持 `open` 下轮再派（节流非丢弃）— `engine.py` `_dispatch`（返回 `throttled`，
+      `_continue` 据此在「本轮无产出」时继续而非提前 `stalled`）
+- [x] **M9b** 单 claim fanout 上限：单个 decompose 产出 sub-claim 超 `max_fanout` 时按序截断并留注记 —
+      `engine.py` 提交路径（截断 facts/key 并丢弃指向 surplus 的语义边；`CONCLUDE.message` 留注记）
+- [x] **M9c** 配置：`[run]` 暴露 `max_rounds` / `dispatch_width` / `max_fanout`（未知键 `ConfigError`）；
+      预算现状文档化（`pi` 无 usage → `max_cost` 失效，实际防线为 `max_steps` / `max_wall`）—
+      `config.py`、`agent-design.md`、`tests/test_config.py`
+- [x] **M9d** prompt 粒度聚合：decompose 子断言 ≤5、枚举集合聚合为一条原子断言；explore 同源证据合并 —
       `prompts/explore.txt`
-- [ ] **M9e** 契约同步：`blackboard-protocol.md` §2.2/§4.2、`agent-design.md`（`[run]` 新键与默认值）
-- [ ] 单测：枚举型输入下 fact 总数有界；同输入两次运行结构一致（确定性）；被裁剪候选经事件留痕
-      （`dropped`）— `tests/test_engine*.py`、`tests/test_config.py`
+- [x] **M9e** 契约同步：`blackboard-protocol.md` §2.2/§4.2、`agent-design.md`（`[run]` 新键与默认值）
+- [x] 单测：枚举型输入下 fact 总数有界；同输入两次运行结构一致（确定性）；被裁剪候选经事件留痕
+      （`dropped`）— `tests/test_engine_m9.py`、`tests/test_config.py`
 
 > 依赖：M2（结构判据）；与 M5/M6/M8 无耦合，可独立推进。方案文档 `docs/design/fact-explosion-control.md`。
 

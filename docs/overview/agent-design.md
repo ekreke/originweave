@@ -88,12 +88,19 @@ max_wall = "10m"        # 正整数 + ms|s|m|h|d
 max_cost = 2.0
 [run]
 dir = "runs"
+max_rounds = 10         # Stigmergy 循环安全阀（超出写 STOPPED）
+dispatch_width = 6      # 每轮派发的 open Intent 上限（M9；其余留待后续轮次）
+max_fanout = 8          # 单个 decompose 提交的 sub-claim 上限（M9；超出按序截断）
 [project]
 dir = "projects"        # 目录式 project 注册表根（M1c-1）
 ```
 
 - `heartbeat_*` 是**单次调用**的租约（liveness），`[worker.budget].max_wall` 是**会话总预算**
   （M3 执行 → `STOPPED`）；两者语义不同。`release` 忠于协议 §8「超时自动释放」，`fail` 则终止 run。
+- **反爆炸（M9，`docs/design/fact-explosion-control.md`）**：`decompose` 固定两层（仅 `main-claim`），
+  `run.dispatch_width` 节流每轮派发宽度、`run.max_fanout` 限制单次 decompose 的产出——三者共同保证
+  fact 规模有界。**注意**：`[worker.budget].max_cost` 依赖 worker 上报 usage；`pi` worker 从
+  `cost.total` 上报（M6），无该字段的 provider 下 cost 为 0，实际防线为 `max_steps` / `max_wall`。
 - **持久化（M1c-1）**：`[run].dir` 下每次 run 一个目录（`events.jsonl` 为唯一事实来源，另有
   `run.json` 元数据与 `sessions/`）；`[project].dir` 是**目录式 project 注册表**根
   （`projects/<project_id>/project.json`）。`run_00N` 全局分配。**`run.json` 只存静态/输入元数据**
@@ -169,8 +176,9 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 ### 3.5 协调与并发
 - **Stigmergy（间接协调）**：Worker 不互相通信，只通过往黑板写 Fact 改变环境，
   其他 Worker 下轮读图感知并调整策略。
-- **多 Worker 并发（I4）**：一轮派发内，所有 `open` 的 `explore`/`decompose`/`verify` Intent 先按
-  id 序统一 `EXECUTE` 认领，再以 `[worker].max_concurrency` 为上限并发执行；结果仍按 Intent id 序
+- **多 Worker 并发（I4）**：一轮派发内，按 id 序取前 `[run].dispatch_width` 个 `open` 的
+  `explore`/`decompose`/`verify`/`extract`/`relate` Intent（M9 宽度上限，其余保持 `open` 待后续轮次），
+  统一 `EXECUTE` 认领，再以 `[worker].max_concurrency` 为上限并发执行；结果仍按 Intent id 序
   **提交回写**（分配 Fact id、写 `CONCLUDE`），故并发不改变 Board 结构（确定性）。`verify` 型
   （M2）走 compare pass（不检索），产出 compare + deviation。
 - **心跳/超时释放（I4）**：执行期间引擎按 `[worker].heartbeat_interval` 写 `HEARTBEAT`；调用超过

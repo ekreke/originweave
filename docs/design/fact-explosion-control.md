@@ -1,8 +1,8 @@
 # Fact 爆炸控制（Focus of Attention）
 
-> 状态：**提案（非契约）**。本文记录问题的定位与解决方案，供评审；采纳实施后，引擎行为改动
-> 需同步 `docs/overview/blackboard-protocol.md`（§2.2 decompose 语义、§4.2 派发）与
-> `docs/overview/agent-design.md`（预算/配置），并回填 `docs/1.0/SPEC.md` 的 M9 checklist。
+> 状态：**已实施（M9，2026-09）**。A 层刹车 + B prompt 粒度已在 `engine.py`/`config.py`/`prompts/` 落地，
+> 契约文字已同步 `blackboard-protocol.md`（§2.2/§4.2）与 `agent-design.md`；进度见 `docs/1.0/SPEC.md` M9。
+> （C 的「默认收紧」按 SPEC M9c 改为预算现状文档化；D 为后续演进。）
 
 ## 1. 问题陈述
 
@@ -80,7 +80,8 @@ fold；所有控制策略**确定性**（按 id 序截断，不依赖并发完�
   只派发前 K 个（K = `[run].dispatch_width`，默认 6）；其余保持 `open`，下一轮继续（**节流而非
   丢弃**，黑板状态完整）。对应 Hearsay-II 的 top-K focus。
 - **A3 · 单 claim fanout 上限**：一个 `decompose` 产出的 sub-claim 数超过 `[run].max_fanout`
-  （默认 8）时，按序保留前 N 条，超出的写入 `INTENT` 事件注记后丢弃（或不写回），保持确定性。
+  （默认 8）时，按序保留前 N 条，超出的丢弃（指向 surplus fact 的语义边一并丢弃），并在
+  `CONCLUDE` 事件的 `message` 留注记；保持确定性。
 
 ### B. 粒度引导（prompt 层）
 

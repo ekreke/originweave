@@ -709,6 +709,9 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             heartbeat_timeout=parse_duration(worker.heartbeat_timeout, "worker.heartbeat_timeout"),
             heartbeat_on_timeout=worker.heartbeat_on_timeout,
             auto=auto,
+            max_rounds=config.run.max_rounds,
+            dispatch_width=config.run.dispatch_width,
+            max_fanout=config.run.max_fanout,
             budget=worker.budget,
             pricing=self._ctx.pricing,
         )

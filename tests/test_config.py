@@ -26,6 +26,9 @@ def test_default_values() -> None:
     assert cfg.worker.budget.max_wall == "10m"
     assert cfg.worker.budget.max_cost == 2.0
     assert cfg.run.dir == "runs"
+    assert cfg.run.max_rounds == 10
+    assert cfg.run.dispatch_width == 6
+    assert cfg.run.max_fanout == 8
 
 
 def test_write_then_load_roundtrip(tmp_path: Path) -> None:
@@ -317,3 +320,27 @@ def test_load_rejects_unknown_project_key(tmp_path: Path) -> None:
     with pytest.raises(config.ConfigError) as excinfo:
         config.load(path)
     assert "root" in str(excinfo.value)
+
+
+def test_load_reads_run_brakes(tmp_path: Path) -> None:
+    path = tmp_path / "originweave.toml"
+    path.write_text(
+        "[run]\nmax_rounds = 3\ndispatch_width = 2\nmax_fanout = 4\n", encoding="utf-8"
+    )
+    cfg = config.load(path)
+    assert (cfg.run.max_rounds, cfg.run.dispatch_width, cfg.run.max_fanout) == (3, 2, 4)
+
+
+def test_load_rejects_unknown_run_key(tmp_path: Path) -> None:
+    path = tmp_path / "originweave.toml"
+    path.write_text("[run]\nwidth = 3\n", encoding="utf-8")
+    with pytest.raises(config.ConfigError) as excinfo:
+        config.load(path)
+    assert "width" in str(excinfo.value)
+
+
+def test_validate_rejects_non_positive_run_brakes() -> None:
+    with pytest.raises(config.ConfigError, match="run.dispatch_width"):
+        config.Config(run=config.RunConfig(dispatch_width=0)).validate()
+    with pytest.raises(config.ConfigError, match="run.max_fanout"):
+        config.Config(run=config.RunConfig(max_fanout=-1)).validate()

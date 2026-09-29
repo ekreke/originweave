@@ -618,6 +618,8 @@ class Engine:
         heartbeat_on_timeout: str = "release",
         auto: bool = False,
         max_rounds: int = 10,
+        dispatch_width: int = 6,
+        max_fanout: int = 8,
         budget: BudgetConfig | None = None,
         pricing: PricingTable | None = None,
         analysis: str = "provenance",
@@ -637,6 +639,10 @@ class Engine:
             )
         if max_rounds <= 0:
             raise ValueError(f"max_rounds must be > 0, got {max_rounds}")
+        if dispatch_width <= 0:
+            raise ValueError(f"dispatch_width must be > 0, got {dispatch_width}")
+        if max_fanout <= 0:
+            raise ValueError(f"max_fanout must be > 0, got {max_fanout}")
         if analysis not in ANALYSES:
             raise ValueError(f"analysis must be one of {sorted(ANALYSES)}; got {analysis!r}")
         self._worker = worker
@@ -655,6 +661,11 @@ class Engine:
         self._auto = auto
         # Safety valve on the Stigmergy loop (I6); see ``_continue``.
         self._max_rounds = max_rounds
+        # Anti-explosion brakes (M9): cap how many open Intents one dispatch round
+        # runs, and how many sub-claims a single decompose may commit (see
+        # docs/design/fact-explosion-control.md).
+        self._dispatch_width = dispatch_width
+        self._max_fanout = max_fanout
         # Budget enforcement (M3b): steps/wall/cost are checked at round boundaries.
         self._budget = budget
         self._max_wall_seconds = (
@@ -1124,7 +1135,7 @@ class Engine:
             if not pending:
                 # Dead-end: Reason offered no runnable direction.
                 return self._stop("dead-end: no runnable intent")
-            await self._dispatch()
+            throttled = await self._dispatch()
             board = reduce(self._store.read_events())
             if board.status != "running":
                 return board
@@ -1137,6 +1148,14 @@ class Engine:
                 # about next round; stop. Facts/relations are append-only and entities
                 # only grow (upsert), so length comparison is exact. (An entity that only
                 # gained an alias is not a new object and does not count as progress.)
+                # If the width cap (M9) deferred runnable Intents, keep going so they get
+                # their turn; a RELEASE'd Intent is *not* retried here (protocol section 8
+                # retries it only once a later round's new facts trigger Reason).
+                if throttled:
+                    rounds += 1
+                    if rounds >= self._max_rounds:
+                        return self._stop("max rounds reached", rounds=rounds)
+                    continue
                 return self._stop("stalled: dispatch produced no new facts")
             rounds += 1
             if rounds >= self._max_rounds:
@@ -1335,10 +1354,15 @@ class Engine:
                 raise EngineError("Reason reply must not carry both intents and complete")
             # An Intent may only hang off a finding or the origin anchor; a ``relate``
             # Intent (M5) hangs off a known entity instead. Graph Intents are rejected
-            # outright in a provenance-only run.
+            # outright in a provenance-only run. A ``decompose`` candidate (M9) that
+            # targets anything but a main-claim is not a malformed reply -- it is a
+            # runaway subdivision -- so it is recorded as a ``dropped`` Intent (below)
+            # rather than killing the run.
             known = {"origin"} | {fact.id for fact in board.facts}
             entity_ids = {entity.id for entity in board.entities}
-            for candidate in result.intents:
+            roles = {fact.id: fact.role for fact in board.facts}
+            guarded: dict[int, str] = {}
+            for index, candidate in enumerate(result.intents):
                 if candidate.type in GRAPH_INTENT_TYPES and self._analysis == "provenance":
                     raise EngineError(
                         f"intent type {candidate.type!r} requires analysis=relation|both"
@@ -1349,6 +1373,10 @@ class Engine:
                     )
                 if candidate.from_ not in known and candidate.type != "relate":
                     raise EngineError(f"intent.from {candidate.from_!r} is not a known fact id")
+                if candidate.type == "decompose" and roles.get(candidate.from_) != "main-claim":
+                    # Only the core claim decomposes (two-level tree, M9): a sub-claim or
+                    # the origin is explored/verified, never split again.
+                    guarded[index] = "decompose targets a non main-claim fact"
         except EngineError as exc:
             # An unusable reply ends the run; keep the session for the audit. The reply
             # is written as FAILED rather than raised, so the board records the death.
@@ -1408,10 +1436,21 @@ class Engine:
             self._write_report()
             return
 
-        decisions: list[IntentDecision] | None = None
-        if result.intents:
+        # Only the candidates the M9 guard did not already reject go through Validate;
+        # a guarded candidate is dropped regardless, so asking the validator about it is
+        # pointless (and would make its kept/dropped counts lie). Decisions are mapped
+        # back to the original candidate positions.
+        decisions: dict[int, IntentDecision] = {}
+        to_validate = [
+            (position, candidate)
+            for position, candidate in enumerate(result.intents)
+            if position not in guarded
+        ]
+        if to_validate:
             try:
-                decisions = (await self._validate(result.intents, board)).decisions
+                validated = (
+                    await self._validate([candidate for _, candidate in to_validate], board)
+                ).decisions
             except (EngineError, CapabilityError, FileNotFoundError) as exc:
                 # A validator we cannot run or trust ends the run rather than guessing.
                 self._fail(
@@ -1424,20 +1463,32 @@ class Engine:
                     ended=ended,
                 )
                 return
+            decisions = {
+                position: decision
+                for (position, _), decision in zip(to_validate, validated, strict=True)
+            }
         # The model's lifecycle fields are untrusted: rebuild each candidate as a fresh
-        # open/dropped Intent so only the engine controls status/claim/heartbeat.
+        # open/dropped Intent so only the engine controls status/claim/heartbeat. A
+        # candidate the M9 guard rejected (runaway decompose) is dropped too, with its
+        # motive on the event message for audit.
         for position, candidate in enumerate(result.intents):
-            decision = decisions[position] if decisions is not None else None
+            decision = decisions.get(position)
             is_dropped = decision.drop if decision is not None else False
+            guard_reason = guarded.get(position)
+            dropped = is_dropped or guard_reason is not None
             intent = Intent(
                 id=self._next_intent_id(),
                 type=candidate.type,
                 from_=candidate.from_,
                 question=candidate.question,
-                status="dropped" if is_dropped else "open",
+                status="dropped" if dropped else "open",
                 duplicateOf=decision.duplicate_of if decision is not None else None,
             )
-            self._store.append_event("INTENT", {"intent": intent.to_dict()})
+            self._store.append_event(
+                "INTENT",
+                {"intent": intent.to_dict()},
+                message=f"dropped: {guard_reason}" if guard_reason else "",
+            )
         if result.hint is not None and not result.intents:
             # Dead-end convergence (no runnable direction was offered): keep Reason's
             # note on the board. A hint alongside Intents is ignored (M3).
@@ -1454,19 +1505,23 @@ class Engine:
             ended=ended,
         )
 
-    async def _dispatch(self) -> None:
+    async def _dispatch(self) -> bool:
         """Run one dispatch round: every open Intent the engine can execute.
 
         The round works on a snapshot of the board as Reason left it (a later Reason
         round handles the facts it produces, I6). ``explore``/``decompose`` chase
         sources; ``verify`` runs the compare pass and scores deviations (M2);
-        ``extract``/``relate`` drive the entity-relation graph (M5). Every pending
-        Intent is claimed up front (id order), then the passes run concurrently,
+        ``extract``/``relate`` drive the entity-relation graph (M5). At most
+        ``dispatch_width`` open Intents are claimed this round (M9), in id order; the
+        rest stay ``open`` for a later round. The claimed passes run concurrently,
         bounded by ``max_concurrency``. Outcomes are committed back in id order, so the
         Board (fact ids, entity ids and semantic edges) is deterministic even though
         completion order is not; the round stops committing at the first hard failure.
         A verify pass may request **Gate B** through its reply; the round then commits
         every fact first and pauses afterwards, so the gate loses nothing.
+
+        Returns ``True`` when the width cap left runnable Intents for a later round, so
+        the loop keeps going even if this round produced no new facts.
         """
         board = reduce(self._store.read_events())
         pending = [
@@ -1475,7 +1530,13 @@ class Engine:
             if intent.status == "open" and intent.type in DISPATCHABLE_TYPES
         ]
         if not pending:
-            return
+            return False
+        # Width cap (M9): run at most ``dispatch_width`` open Intents per round, in id
+        # order. The rest stay ``open`` and are picked up by a later round -- throttling,
+        # not dropping, so the board keeps every direction.
+        throttled = len(pending) > self._dispatch_width
+        if throttled:
+            pending = pending[: self._dispatch_width]
         try:
             # Fetched once for the whole round; a missing template is a provider failure,
             # written before any Intent is claimed. Each kind is fetched only when needed.
@@ -1490,7 +1551,7 @@ class Engine:
                 templates["relate"] = await self._prompt.get("relate")
         except (CapabilityError, FileNotFoundError) as exc:
             self._store.append_event("FAILED", {"reason": str(exc)})
-            return
+            return False
 
         def template_for(intent: Intent) -> PromptTemplate:
             if intent.type in ("explore", "decompose"):
@@ -1544,7 +1605,7 @@ class Engine:
                     ended=outcome.ended,
                     worker=outcome.worker,
                 )
-                return
+                return False
             if outcome.intent_type in GRAPH_INTENT_TYPES:
                 # An extract/relate pass produces no facts; it re-emits/merges entities or
                 # writes judged relations, then concludes like any other Intent.
@@ -1561,7 +1622,7 @@ class Engine:
                         ended=outcome.ended,
                         worker=outcome.worker,
                     )
-                    return
+                    return False
                 # Refresh the derived ``entity-graph.json`` right after this pass commits,
                 # so a later failure in the same round cannot leave it stale (M5).
                 self._flush_entity_graph()
@@ -1580,13 +1641,35 @@ class Engine:
                     worker=outcome.worker,
                 )
                 continue
-            for fact in outcome.facts:
+            facts = outcome.facts
+            fact_keys = outcome.fact_keys
+            edges_raw = outcome.edges
+            conclude_message = ""
+            if outcome.intent_type == "decompose" and len(facts) > self._max_fanout:
+                # Fanout cap (M9): one decompose may commit at most ``max_fanout``
+                # sub-claims, in reply order; the surplus is dropped (the raw reply stays in
+                # the session snapshot). Drop edges that referenced a surplus fact too, so
+                # the cap never turns an otherwise valid reply into a terminal failure.
+                surplus = {
+                    key for key, index in fact_keys.items() if index >= self._max_fanout
+                }
+                facts = facts[: self._max_fanout]
+                fact_keys = {
+                    key: index for key, index in fact_keys.items() if index < self._max_fanout
+                }
+                edges_raw = [
+                    edge
+                    for edge in edges_raw
+                    if str(edge["source"]) not in surplus and str(edge["target"]) not in surplus
+                ]
+                conclude_message = f"decompose capped at {self._max_fanout} sub-claims"
+            for fact in facts:
                 fact.id = self._next_fact_id(fact.kind)
-            key_to_id = {key: outcome.facts[index].id for key, index in outcome.fact_keys.items()}
+            key_to_id = {key: facts[index].id for key, index in fact_keys.items()}
             try:
                 edges = _resolve_edges(
-                    outcome.edges,
-                    [fact.id for fact in outcome.facts],
+                    edges_raw,
+                    [fact.id for fact in facts],
                     key_to_id,
                     board,
                     intent_id=outcome.intent_id,
@@ -1604,14 +1687,15 @@ class Engine:
                     ended=outcome.ended,
                     worker=outcome.worker,
                 )
-                return
+                return False
             self._store.append_event(
                 "CONCLUDE",
                 {
                     "intentId": outcome.intent_id,
-                    "facts": [fact.to_dict() for fact in outcome.facts],
+                    "facts": [fact.to_dict() for fact in facts],
                     "edges": [edge.to_dict() for edge in edges],
                 },
+                message=conclude_message,
             )
             if gate is None and outcome.gate is not None:
                 gate = outcome.gate
@@ -1633,6 +1717,7 @@ class Engine:
                 {"gate": gate["gate"], "question": gate["question"]},
                 message="Gate B: arbitrate a source conflict",
             )
+        return throttled
 
     def _commit_graph_pass(self, outcome: _ExploreOutcome, entities: list[Entity]) -> list[Entity]:
         """Commit one ``extract``/``relate`` outcome; return the advanced graph.

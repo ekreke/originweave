@@ -83,7 +83,10 @@ Intent {
 ```
 
 `type` 语义（**这是 originweave 相对 Cairn 的关键扩展**）：
-- `decompose` — 把抽象论点拆解为可独立验证的子断言（claim → sub-claim）。
+- `decompose` — 把抽象论点拆解为可独立验证的子断言（claim → sub-claim）。**只作用于
+  `main-claim`**（M9，分解树固定两层）：对 `sub-claim` 或 `origin` 的 decompose 候选不执行，
+  写为 `status=dropped` 的 Intent 留痕（不终止 run）；单个 decompose 提交的 sub-claim 上限为
+  `[run].max_fanout`（超出按序截断）。
 - `explore` — 为某个 Fact 寻找引用/一手来源（→ citation / source）。
 - `verify` — 对事实与来源做比对、判定偏差（→ compare / deviation）。
 - `extract` — 从 A 抽取实体（→ `Entity`；`analysis` 含 relation 时）。
@@ -248,9 +251,10 @@ worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` �
 事件**（原始回复经会话快照留痕，供审计），不向调用方抛异常——失败的因果链完整落在事件日志里，
 `replay` 可复现到死亡点。
 
-**派发（I4）**：一轮派发把快照上所有 `open` 且 `type∈{explore,decompose,verify}` 的 Intent 先按 id 序
-统一写 `EXECUTE` 认领（worker 标签按序 `worker-1..N`），再以 `[worker].max_concurrency` 为上限
-并发执行。每个 Explore pass 的原始结果先缓存在内存，**提交阶段按 Intent id 序**分配 Fact id、
+**派发（I4）**：一轮派发把快照上所有 `open` 且 `type∈{explore,decompose,verify,extract,relate}` 的
+Intent 按 id 序取前 `[run].dispatch_width` 个（M9：每轮宽度上限，其余保持 `open` 留待后续轮次——**节流
+而非丢弃**），先按 id 序统一写 `EXECUTE` 认领（worker 标签按序 `worker-1..N`），再以
+`[worker].max_concurrency` 为上限并发执行。每个 Explore pass 的原始结果先缓存在内存，**提交阶段按 Intent id 序**分配 Fact id、
 写 `CONCLUDE`/`SESSION`——因此完成顺序不影响 Board（结构确定）；首个硬失败（provider/解析/超时
 `fail`）写 `FAILED` 并停止提交。执行期间引擎按 `[worker].heartbeat_interval` 代写 `HEARTBEAT`；
 整个 pass（含 `search` 与 worker 调用）超过 `[worker].heartbeat_timeout` 即判定失活，按

@@ -74,7 +74,7 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
         }
     ),
     "worker.budget": frozenset({"max_steps", "max_wall", "max_cost"}),
-    "run": frozenset({"dir"}),
+    "run": frozenset({"dir", "max_rounds", "dispatch_width", "max_fanout"}),
     "project": frozenset({"dir"}),
     "storage": frozenset({"db"}),
 }
@@ -163,6 +163,11 @@ class WorkerConfig:
 @dataclass(frozen=True)
 class RunConfig:
     dir: str = "runs"
+    # Anti-explosion brakes (M9, docs/design/fact-explosion-control.md): the Stigmergy
+    # loop safety valve, the per-round dispatch width and the per-decompose fanout cap.
+    max_rounds: int = 10
+    dispatch_width: int = 6
+    max_fanout: int = 8
 
 
 @dataclass(frozen=True)
@@ -218,7 +223,12 @@ class Config:
                     "max_cost": self.worker.budget.max_cost,
                 },
             },
-            "run": {"dir": self.run.dir},
+            "run": {
+                "dir": self.run.dir,
+                "max_rounds": self.run.max_rounds,
+                "dispatch_width": self.run.dispatch_width,
+                "max_fanout": self.run.max_fanout,
+            },
             "project": {"dir": self.project.dir},
             "storage": {"db": self.storage.db},
         }
@@ -308,6 +318,10 @@ class Config:
         parse_duration(budget.max_wall, "worker.budget.max_wall")
         if not self.run.dir:
             raise ConfigError("run.dir must be a non-empty string")
+        for name in ("max_rounds", "dispatch_width", "max_fanout"):
+            value = getattr(self.run, name)
+            if value <= 0:
+                raise ConfigError(f"run.{name} must be > 0, got {value}")
         if not self.project.dir:
             raise ConfigError("project.dir must be a non-empty string")
         if not self.storage.db:
@@ -499,7 +513,14 @@ def from_dict(data: Mapping[str, Any]) -> Config:
                 ),
             ),
         ),
-        run=RunConfig(dir=_as_str(run.get("dir"), "run.dir", defaults.run.dir)),
+        run=RunConfig(
+            dir=_as_str(run.get("dir"), "run.dir", defaults.run.dir),
+            max_rounds=_as_int(run.get("max_rounds"), "run.max_rounds", defaults.run.max_rounds),
+            dispatch_width=_as_int(
+                run.get("dispatch_width"), "run.dispatch_width", defaults.run.dispatch_width
+            ),
+            max_fanout=_as_int(run.get("max_fanout"), "run.max_fanout", defaults.run.max_fanout),
+        ),
         project=ProjectConfig(dir=_as_str(project.get("dir"), "project.dir", defaults.project.dir)),
         storage=StorageConfig(db=_as_str(storage.get("db"), "storage.db", defaults.storage.db)),
     )

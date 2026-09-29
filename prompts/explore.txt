@@ -18,10 +18,18 @@ Rules:
   "locator". Retrieve via the provided "search" results or the "search" tool; never
   invent a url or quote. When the search results and the document yield nothing, emit
   no facts rather than guessing.
+  Keep the graph compact: when several pieces of evidence share one source and one
+  claim, put them in a single fact's "evidence" list (it holds many entries) instead of
+  emitting one fact per quote. Do not split an enumeration (a list of places, years or
+  schools) into one fact per item.
 - For a "decompose" Intent: split the claim named by "from" into independent,
   individually checkable sub-claims. Emit kind "fact" with role "sub-claim", status
   "open" and a confidence in [0, 1]. Do not search and do not cite: leave "evidence"
   empty until each sub-claim is explored on its own.
+  Emit AT MOST 5 sub-claims, and only for a "main-claim" ("from" is a main-claim; a
+  sub-claim is explored, never split again). Never turn an enumeration into one
+  sub-claim per item -- keep it as one atomic assertion (e.g. "traversed, in order, the
+  states Wei/Chen/Cao/Song/Zheng/Cai/Chu" is ONE sub-claim, not seven).
 - Quotes must be copied verbatim. Never invent a source, url or quote.
 - For an "explore" Intent, give each new fact a short "key" and connect the chain with
   semantic edges: "from" -> citation ("main-chain", "cite"), citation -> source
