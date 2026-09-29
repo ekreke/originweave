@@ -542,3 +542,31 @@ run 详情页（Console）支持**就地编辑标题**（仅静态元数据，�
 
 验收：粘贴资料 A → 点「提取 goal」→ goal/标题回填且可改、可重生成 → `CreateRun` 依 goal 起 run；
 Console 可改标题且 run 列表同步；pinned 只读模式下 `UpdateRun` 被拒、`SuggestGoal` 可用。
+
+---
+
+## M9 · Fact 爆炸控制（Focus of Attention）
+
+目标：给一段资料 A 时，run 的 fact 规模**有界收敛**——decompose 固定两层、每轮派发与单 claim
+产出设上限、枚举型内容聚合；不突破架构红线（引擎唯一写入者、reducer 纯 fold、确定性）。
+问题定位、理论背景（Hearsay-II focus of attention / 黑板 state-explosion）与完整方案见
+`docs/design/fact-explosion-control.md`。
+
+- [ ] **M9a** decompose 仅限 `main-claim`：`_reason` 校验候选 `from_` 所在 fact 的 `role`，
+      非 main-claim 的 decompose 写 `status=dropped` 留痕（不 `FAILED`）— `engine.py` `_reason`
+- [ ] **M9b** 每轮宽度上限（dispatch width cap）：`_dispatch` 按 Intent **id 序**每轮只派发前 K 个
+      `open` Intent，其余保持 `open` 下轮再派（节流非丢弃）— `engine.py` `_dispatch`
+- [ ] **M9b** 单 claim fanout 上限：单个 decompose 产出 sub-claim 超 `max_fanout` 时按序截断并留注记 —
+      `engine.py` `_check_explored_facts`/提交路径
+- [ ] **M9c** 配置：`[run]` 暴露 `max_rounds` / `dispatch_width` / `max_fanout`（未知键 `ConfigError`）；
+      `max_steps` 默认收紧 — `config.py`、`originweave.toml`、`tests/test_config.py`
+- [ ] **M9d** prompt 粒度聚合：decompose 子断言 ≤5、枚举集合聚合为一条原子断言；explore 同源证据合并 —
+      `prompts/explore.txt`
+- [ ] **M9e** 契约同步：`blackboard-protocol.md` §2.2/§4.2、`agent-design.md`（`[run]` 新键与默认值）
+- [ ] 单测：枚举型输入下 fact 总数有界；同输入两次运行结构一致（确定性）；被裁剪候选经事件留痕
+      （`dropped`）— `tests/test_engine*.py`、`tests/test_config.py`
+
+> 依赖：M2（结构判据）；与 M5/M6/M8 无耦合，可独立推进。方案文档 `docs/design/fact-explosion-control.md`。
+
+验收：以枚举型资料 A（如「孔子周游列国」）起 run，fact 总数不超过 `main-claim 数 × (1 + max_fanout)`
+量级；每个 main-claim 至多一层子断言；run 仍正常到 `COMPLETE`；`replay` 同事件得同 Board。

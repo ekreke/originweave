@@ -28,6 +28,7 @@ originweave 的版本与里程碑索引。**当前唯一活跃版本：`1.0`**�
 | M6 | Pi Worker 与可配置工具：执行体抽为可插拔 `Worker`（默认 `pi`，经 `pi-py-sdk`）；节点级隔离会话（原始输入/输出 + 步骤链）；项目级 `[worker]`（provider / 并发 / 工具 / `[worker].budget`，LLM 复用 `[capability.model]`）；TS 搜索扩展回调 server | 进行中 | M1c-1（P3+；P1/P2 不依赖） |
 | M7 | 成果报告：所有终止态（COMPLETE/STOPPED/FAILED）落 `report.md`，`paused` 不写；纯派生、`replay` 不重写 | 未开始 | M2 |
 | M8 | 输入辅助：资料 A 一键抽 goal + 标题（`SuggestGoal`），表单不再手输标题；run 详情页可就地改标题（`UpdateRun`，仅静态元数据） | 已完成 | M1c-1 + M1c-2b |
+| M9 | Fact 爆炸控制（Focus of Attention）：decompose 固定两层 + 每轮宽度/单 claim fanout 上限 + prompt 枚举聚合，fact 总数有界 | 未开始 | M2 |
 
 ## 二期（1.0 移出，待规划）
 

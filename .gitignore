@@ -28,6 +28,10 @@ frontend/src/gen/
 .vscode/
 .workbuddy/
 
+# local runtime credentials (environment only -- never commit)
+.env
+.env.*
+
 # Playwright artifacts
 frontend/test-results/
 frontend/playwright-report/

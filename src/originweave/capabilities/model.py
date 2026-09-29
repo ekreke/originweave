@@ -30,11 +30,16 @@ class ChatMessage:
 
 @dataclass(frozen=True)
 class Usage:
-    """Token usage reported by an OpenAI-compatible endpoint (M3b)."""
+    """Token usage reported by an OpenAI-compatible endpoint (M3b).
+
+    ``cost`` is the provider-reported USD total when available (the Pi runtime reports a
+    ``cost.total`` breakdown); ``None`` means the engine should price the tokens itself.
+    """
 
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    cost: float | None = None
 
 
 class ModelResult(str):

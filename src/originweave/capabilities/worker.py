@@ -70,8 +70,9 @@ class WorkerStep:
 class WorkerReply:
     """A worker's reply: raw text plus the raw input and steps for the session.
 
-    ``usage`` carries token counts when the provider reports them (M3b; the Pi runtime
-    does not surface usage yet, so it stays ``None`` there).
+    ``usage`` carries token counts when the provider reports them (M3b). Providers that
+    surface a cost (the Pi runtime, via ``cost.total``) also set ``Usage.cost``; otherwise
+    the engine prices the tokens from ``pricing.py``.
     """
 
     text: str

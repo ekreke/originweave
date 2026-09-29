@@ -205,8 +205,9 @@ Dispatcher / reducer 分配与推导（§2.4），**语义**边由 Worker 显式
 - **`edges`**（M2，可选）：语义边 `main-chain | dependency | goal-derived`（结构边由 reducer 派生，
   携带结构边即失败）。`source`/`target` 取黑板已有 Fact id 或本 reply 的 `key`；`Bootstrap` 与
   `Explore` 可携带，`Reason`/`Validate` 携带即失败。
-- **`gate`**（M2，可选）：`gate` 仅 `arbitrate`（Gate B），与 `complete`/`intents` 互斥；**仅
-  `Explore`（verify 型）可携带**。
+- **`gate`**（M2，可选）：一个 object `{ "gate": "arbitrate", "question": "..." }`（`gate` 仅
+  `arbitrate`，Gate B），与 `complete`/`intents` 互斥；**仅 `Explore`（verify 型）可携带**。
+  引擎容忍裸字符串简写 `"gate": "arbitrate"`（补空 `question`），以免模型格式漂移终止 run。
 - **`hint`**（M3，可选）：一条经验提示文本，**仅 `Reason` 可携带**（其余任务携带即失败）。
   引擎只在**收敛**时落盘为 `HINT{author:"agent"}`（结构判据满足的 `complete`，或无新 Intent 的
   死胡同）；与 `intents` 同携时忽略，非收敛的 `complete`（结构判据未满足）也不落盘。

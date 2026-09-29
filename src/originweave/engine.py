@@ -381,8 +381,13 @@ def parse_result(
     if raw_gate is not None:
         if not allow_gate:
             raise EngineError("this task must not carry 'gate'")
-        if not isinstance(raw_gate, dict):
-            raise EngineError("'gate' must be an object")
+        if isinstance(raw_gate, str):
+            # The prompt documents gate as an object, but the model sometimes emits the
+            # bare name (``"gate": "arbitrate"``). The name is unambiguous (WORKER_GATES),
+            # so normalise it instead of failing the whole run on a formatting lapse.
+            raw_gate = {"gate": raw_gate, "question": ""}
+        elif not isinstance(raw_gate, dict):
+            raise EngineError("'gate' must be an object or a gate name string")
         gate_name = raw_gate.get("gate")
         question = raw_gate.get("question", "")
         if gate_name not in WORKER_GATES:
@@ -708,6 +713,9 @@ class Engine:
         """Return ``(tokens, cost)`` for one reply (cost is 0 without a known price)."""
         if usage is None:
             return 0, 0.0
+        if usage.cost is not None:
+            # The provider reported the USD cost (Pi does); prefer it over the price table.
+            return usage.total_tokens, usage.cost
         if self._pricing is None:
             return usage.total_tokens, 0.0
         price = self._pricing.lookup(self._worker_model)

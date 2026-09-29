@@ -20,8 +20,9 @@ docs/
 ├── 1.0/
 │   ├── SPEC.md                   # 活跃版本的里程碑 checklist（进度真相）
 │   └── TODO.md                   # 滚动待办与已知阻塞
-└── design/                       # UI 风格稿（非契约，仅参考）
-    └── swiss-blueprint.html      # 选定风格：Swiss / Blueprint（见 overview/dashboard.md）
+└── design/                       # 设计稿与提案（非契约，仅参考）
+    ├── swiss-blueprint.html      # 选定风格：Swiss / Blueprint（见 overview/dashboard.md）
+    └── fact-explosion-control.md # M9 方案：Fact 爆炸控制（Focus of Attention）
 ```
 
 ## 术语表

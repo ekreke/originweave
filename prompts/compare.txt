@@ -19,8 +19,9 @@ Rules:
   "key" and reference it from "edges" (existing fact ids may be used directly). Edges
   may only use "main-chain", "dependency" or "goal-derived".
 - If two sources conflict on a material point and you cannot settle which to trust, ask
-  for a human decision with a "gate" object ("gate": "arbitrate", plus a one-sentence
-  "question"). A "gate" is mutually exclusive with "complete" and with "intents".
+  for a human decision with a "gate" OBJECT -- never a bare string like "arbitrate".
+  Use exactly { "gate": "arbitrate", "question": "<one sentence>" } (or "gate": null when
+  no decision is needed). A "gate" is mutually exclusive with "complete" and "intents".
 - Do not propose intents: "intents" must be empty, and completion is Reason's job, so
   "complete" must be null.
 

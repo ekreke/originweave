@@ -171,6 +171,18 @@ def test_parse_result_reads_a_gate_request() -> None:
     assert result.gate == {"gate": "arbitrate", "question": "which source?"}
 
 
+def test_parse_result_normalises_a_bare_gate_name_string() -> None:
+    # The compare model sometimes emits "gate": "arbitrate" (a bare string); the engine
+    # normalises it to the documented object shape instead of failing the run (run_009).
+    result = parse_result(_reply(gate="arbitrate"), allow_gate=True)
+    assert result.gate == {"gate": "arbitrate", "question": ""}
+
+
+def test_parse_result_rejects_an_unknown_bare_gate_name() -> None:
+    with pytest.raises(EngineError, match="gate.gate"):
+        parse_result(_reply(gate="review"), allow_gate=True)
+
+
 def test_parse_result_rejects_gate_when_not_allowed() -> None:
     with pytest.raises(EngineError, match="must not carry 'gate'"):
         parse_result(_reply(gate={"gate": "arbitrate", "question": "q"}))

@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 from collections.abc import AsyncIterator, Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -25,7 +26,7 @@ from pi_py_sdk import (
 from ..blackboard import Board
 from ..config import ModelConfig
 from .base import MissingCredentialError, PromptTemplate, ProviderError, ProviderUnavailableError
-from .model import BASE_URL_ENV_VAR, ENV_VAR
+from .model import BASE_URL_ENV_VAR, ENV_VAR, Usage
 from .worker import TaskKind, WorkerReply, WorkerStep, render_messages
 
 _PI_PROVIDER = "originweave-openai"
@@ -248,6 +249,7 @@ class PiWorker:
         self._runtime_checker()
         messages = render_messages(task, template, board, extra=extra)
         steps: list[WorkerStep] = []
+        usage = _UsageTotals()
 
         try:
             with tempfile.TemporaryDirectory(prefix="originweave-pi-") as config_dir:
@@ -257,6 +259,7 @@ class PiWorker:
                 async with agent:
                     async for event in agent.prompt_stream(messages[1].content):
                         self._append_step(steps, event)
+                        usage.add(_turn_usage(event))
                     text = await agent.get_last_assistant_text()
         except PiError as exc:
             raise ProviderError(f"Pi worker failed: {exc}") from exc
@@ -267,6 +270,7 @@ class PiWorker:
             text=text,
             input={"system": messages[0].content, "user": messages[1].content},
             steps=steps,
+            usage=usage.finalize(),
         )
 
     @staticmethod
@@ -303,6 +307,66 @@ class PiWorker:
             )
         elif isinstance(event, TurnEndEvent):
             append("turn-end")
+
+
+@dataclass
+class _UsageTotals:
+    """Accumulates the token/cost usage Pi reports across a session's turns."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cost: float | None = None
+
+    def add(self, usage: Usage | None) -> None:
+        if usage is None:
+            return
+        self.prompt_tokens += usage.prompt_tokens
+        self.completion_tokens += usage.completion_tokens
+        self.total_tokens += usage.total_tokens
+        if usage.cost is not None:
+            self.cost = (self.cost or 0.0) + usage.cost
+
+    def finalize(self) -> Usage | None:
+        if self.total_tokens <= 0:
+            return None
+        return Usage(
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+            total_tokens=self.total_tokens,
+            cost=self.cost,
+        )
+
+
+def _turn_usage(event: Event) -> Usage | None:
+    """Tokens Pi reports for one assistant turn (``turn_end``), or ``None``.
+
+    Pi attaches a ``usage`` object to each assistant message --
+    ``{input, output, cacheRead, cacheWrite, totalTokens, cost:{...,total}}``. Cache
+    reads/writes are folded into the prompt side so the counts map onto the OpenAI shape;
+    ``cost.total`` (USD) is carried through so the engine need not re-price the tokens.
+    """
+    if not isinstance(event, TurnEndEvent) or not isinstance(event.message, dict):
+        return None
+    usage = event.message.get("usage")
+    if not isinstance(usage, dict):
+        return None
+
+    def _number(key: str) -> float:
+        value = usage.get(key)
+        return float(value) if isinstance(value, (int, float)) else 0.0
+
+    prompt = int(_number("input") + _number("cacheRead") + _number("cacheWrite"))
+    completion = int(_number("output"))
+    total = int(_number("totalTokens")) or (prompt + completion)
+    cost = usage.get("cost")
+    total_cost = cost.get("total") if isinstance(cost, dict) else None
+    return Usage(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        total_tokens=total,
+        cost=float(total_cost) if isinstance(total_cost, (int, float)) else None,
+    )
 
 
 __all__ = [

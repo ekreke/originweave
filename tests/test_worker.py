@@ -273,6 +273,79 @@ async def test_pi_worker_maps_session_and_tool_events(
     assert provider["apiKey"] == "$OPENAI_API_KEY"
 
 
+async def test_pi_worker_reports_and_sums_turn_usage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    events = [
+        AgentStartEvent(type="agent_start"),
+        TurnEndEvent(
+            type="turn_end",
+            message={
+                "role": "assistant",
+                "usage": {
+                    "input": 100,
+                    "output": 20,
+                    "cacheRead": 30,
+                    "cacheWrite": 0,
+                    "totalTokens": 150,
+                    "cost": {"input": 0.0, "output": 0.0, "total": 0.01},
+                },
+            },
+        ),
+        TurnEndEvent(
+            type="turn_end",
+            message={
+                "role": "assistant",
+                "usage": {
+                    "input": 10,
+                    "output": 5,
+                    "totalTokens": 15,
+                    "cost": {"total": 0.002},
+                },
+            },
+        ),
+    ]
+    worker = PiWorker(
+        model=config.ModelConfig(model="test-model", base_url="https://model.example/v1"),
+        tools=(),
+        cwd=tmp_path,
+        agent_factory=_FakePiFactory(_FakePiAgent(events, text="hi")),
+        runtime_checker=lambda: None,
+    )
+
+    reply = await worker.run(
+        "Bootstrap", PromptTemplate(name="bootstrap", text="SYSTEM"), await _board(tmp_path)
+    )
+
+    assert reply.usage is not None
+    # cacheRead/cacheWrite fold into the prompt side; counts sum across a session's turns.
+    assert reply.usage.prompt_tokens == 100 + 30 + 10
+    assert reply.usage.completion_tokens == 20 + 5
+    assert reply.usage.total_tokens == 150 + 15
+    assert reply.usage.cost == pytest.approx(0.012)
+
+
+async def test_pi_worker_reports_no_usage_when_pi_omits_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    events = [AgentStartEvent(type="agent_start"), TurnEndEvent(type="turn_end")]
+    worker = PiWorker(
+        model=config.ModelConfig(model="test-model", base_url="https://model.example/v1"),
+        tools=(),
+        cwd=tmp_path,
+        agent_factory=_FakePiFactory(_FakePiAgent(events, text="hi")),
+        runtime_checker=lambda: None,
+    )
+
+    reply = await worker.run(
+        "Bootstrap", PromptTemplate(name="bootstrap", text="SYSTEM"), await _board(tmp_path)
+    )
+
+    assert reply.usage is None
+
+
 def _text_delta(delta: str) -> MessageUpdateEvent:
     return MessageUpdateEvent(
         type="message_update",

@@ -174,6 +174,20 @@ async def test_budget_cost_stops_the_run(tmp_path: Path) -> None:
     assert stopped.payload["budget"]["cost"] >= 1.0
 
 
+async def test_provider_reported_cost_wins_over_the_price_table(tmp_path: Path) -> None:
+    """Pi reports its own USD cost (`cost.total`); the engine must use it, not re-price."""
+    store = RunStore(tmp_path / "run_001")
+    pricing = PricingTable({"m": ModelPrice(input_per_1m=1_000_000, output_per_1m=1_000_000)})
+    engine = _engine(store, usage=Usage(10, 5, 15, cost=3.5), pricing=pricing)
+
+    # A provider cost short-circuits the price table...
+    assert engine._usage_cost(Usage(10, 5, 15, cost=3.5)) == (15, 3.5)
+    # ...even when no price table is loaded at all.
+    assert _engine(store)._usage_cost(Usage(10, 5, 15, cost=3.5)) == (15, 3.5)
+    # Without a provider cost, the table still applies ((10 + 5) * $1 = $15).
+    assert engine._usage_cost(Usage(10, 5, 15)) == (15, 15.0)
+
+
 def test_budget_wall_exceeded_is_detected(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
     store.init_layout()
