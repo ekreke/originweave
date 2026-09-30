@@ -26,7 +26,7 @@
 - **已落地**：
   - CLI：`init`（写 `originweave.toml`，已存在需 `--force`）/ `replay`（只读不触网，样例
     `examples/copilot_productivity/` 可复现 Board）/ `ui` / `capabilities list`；
-    `mcp` 与 `capabilities install-obscura` 为 stub（打印 “not implemented yet”）。**CLI 无 `trace`**。
+    `mcp` 为 stub（二期；打印 “not implemented yet”），`capabilities install-obscura` 已移除。**CLI 无 `trace`**。
   - M1 库层 OODA 引擎（`engine.py`）：Bootstrap/Reason/Validate/Explore pass + Stigmergy 收敛、
     并发 + 心跳超时释放（I4）、HITL Gate A（I5，`Engine.resume`）、多轮收敛（I6）；`Engine` 是
     黑板**唯一写入者**。M2 偏差记分卡：verify 型经 `compare` pass、`deviation` Fact、严格

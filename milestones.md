@@ -22,10 +22,10 @@ originweave 的版本与里程碑索引。**当前唯一活跃版本：`1.0`**�
 | M1c-2a | 前端展示层（props 驱动，无 server 依赖）：图映射、页签/INSPECTOR 展示组件、fixture 测试 | 已完成 | M1b |
 | M1c-2b | 前端接线与 UI（2b-1–2b-5）：React Query 数据层、DAG/React Flow 渲染、HITL Gate UI + Replay、端到端 | 已完成 | M1c-1 + M1c-2a |
 | M2 | 偏差记分卡：`Intent(verify)`/`compare(facts × sources × goal)` → deviation 分类与 report、Gate B | 已完成 | M1c-1 |
-| M3 | agent runtime：Docker container-per-worker（每个 Worker 调用一个容器）、容器化 Worker 后端、MCP、`langfuse`、预算、异步 Hint、Gate C（`search`/`model` 已提前至 M1） | 进行中（M3a/M3b 已落地；容器池 / `langfuse` / MCP 移二期） | M2 |
+| M3 | agent runtime：Docker container-per-worker（每个 Worker 调用一个容器）、容器化 Worker 后端、MCP、`langfuse`、预算、异步 Hint、Gate C（`search`/`model` 已提前至 M1） | 已完成（容器池 / `langfuse` / `mcp` 已移二期；`capabilities install-obscura` 已移除） | M2 |
 | M4 | 端到端、Deployment 与文档回归：`make demo` 闭环、server Docker、`overview/`+`proto/` 契约无漂移 | 进行中 | M3 |
-| M5 | 实体/组织关系图：从 A 抽取实体并判别关系，产出独立的关系图（本体 + 证据/推断标注） | 进行中（M5b 已落地；server 接线 / 前端页签 / 样例 fixture 待做） | M4 |
-| M6 | Pi Worker 与可配置工具：执行体抽为可插拔 `Worker`（默认 `pi`，经 `pi-py-sdk`）；节点级隔离会话（原始输入/输出 + 步骤链）；项目级 `[worker]`（provider / 并发 / 工具 / `[worker].budget`，LLM 复用 `[capability.model]`）；TS 搜索扩展回调 server | 进行中 | M1c-1（P3+；P1/P2 不依赖） |
+| M5 | 实体/组织关系图：从 A 抽取实体并判别关系，产出独立的关系图（本体 + 证据/推断标注） | 已完成 | M4 |
+| M6 | Pi Worker 与可配置工具：执行体抽为可插拔 `Worker`（默认 `pi`，经 `pi-py-sdk`）；节点级隔离会话（原始输入/输出 + 步骤链）；项目级 `[worker]`（provider / 并发 / 工具 / `[worker].budget`，LLM 复用 `[capability.model]`）；TS 搜索扩展回调 server | 已完成 | M1c-1（P3+；P1/P2 不依赖） |
 | M7 | 成果报告：所有终止态（COMPLETE/STOPPED/FAILED）落 `report.md`，`paused` 不写；纯派生、`replay` 不重写 | 已完成 | M2 |
 | M8 | 输入辅助：资料 A 一键抽 goal + 标题（`SuggestGoal`），表单不再手输标题；run 详情页可就地改标题（`UpdateRun`，仅静态元数据） | 已完成 | M1c-1 + M1c-2b |
 | M9 | Fact 爆炸控制（Focus of Attention）：decompose 固定两层 + 每轮宽度/单 claim fanout 上限 + prompt 枚举聚合，fact 总数有界 | 已完成 | M2 |

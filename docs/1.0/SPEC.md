@@ -361,8 +361,9 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
       `submit_human_input` 放行 `review`；前端复用通用 `GateCard`（无需改动）— `blackboard-protocol.md §7`
 - [ ] `prompt` provider `langfuse` 真实接入（`local` 已于 M1 可用）**→ 二期（backlog）**：
       现为凭据校验 stub（`capabilities/prompt.py`）
-- [ ] `originweave capabilities list|install-obscura` 实现（`list` 已可用，`install-obscura` 仍为占位；
-      命名待定，见 `TODO.md`）
+- [x] `originweave capabilities list` 实现（M0b）；`install-obscura` 子命令**已移除**
+      （旧 `obscura_kitesurf` 样例与「录制 capability 响应」在 Phase R 后已不存在，语义脱节；
+      见 `TODO.md`）— `cli.py`
 - [ ] `originweave mcp` 暴露 capability / 只读 run 视图（不承担调度）**→ 二期（backlog）**
 - [x] 集成测试：`replay` 路径 + 至少一条真实 provider 冒烟（受凭据约束时可跳过）—
       `tests/test_replay_cli.py`（replay + 断网断言）、`tests/test_engine.py::test_live_bootstrap_smoke`

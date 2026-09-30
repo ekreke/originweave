@@ -37,3 +37,11 @@ def test_init_writes_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 def test_capabilities_list_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     assert main(["capabilities", "list"]) == 0
+
+
+def test_capabilities_install_obscura_is_gone() -> None:
+    # The sub-action was removed (no sample / recorded capabilities since Phase R):
+    # argparse now rejects it as an invalid choice (exit code 2).
+    with pytest.raises(SystemExit) as excinfo:
+        main(["capabilities", "install-obscura"])
+    assert excinfo.value.code == 2

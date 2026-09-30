@@ -1,9 +1,8 @@
 """Command line entry point.
 
 ``init`` / ``capabilities list`` (M0b), ``replay`` (M0c) and ``ui`` (M1c-1 C4) are
-wired. ``mcp`` and ``capabilities install-obscura`` remain placeholders until later
-milestones. A run is started through the server / proto API, not the CLI (see
-``docs/overview/product-overview.md`` section 5).
+wired. ``mcp`` remains a placeholder until later milestones. A run is started through
+the server / proto API, not the CLI (see ``docs/overview/product-overview.md`` section 5).
 """
 
 from __future__ import annotations
@@ -55,8 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     replay.add_argument("run_dir")
     replay.add_argument("--json", action="store_true", help="emit the canonical board as JSON")
 
-    capabilities = sub.add_parser("capabilities", help="inspect or install capabilities")
-    capabilities.add_argument("action", choices=["list", "install-obscura"])
+    capabilities = sub.add_parser("capabilities", help="inspect provider readiness")
+    capabilities.add_argument("action", choices=["list"])
 
     mcp = sub.add_parser("mcp", help="expose capabilities over MCP")
     mcp.add_argument("--run", default=None)
@@ -78,10 +77,8 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def _cmd_capabilities(args: argparse.Namespace) -> int:
-    if args.action != "list":
-        print(_NOT_IMPLEMENTED.format(command=f"capabilities {args.action}"), file=sys.stderr)
-        return 0
-
+    # ``action`` is limited to ``list`` at the parser; the ``install-obscura``
+    # sub-action was removed (its sample and recorded capabilities are gone, Phase R).
     try:
         cfg = config.load()
     except config.ConfigError as exc:

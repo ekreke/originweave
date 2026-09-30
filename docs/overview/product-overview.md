@@ -238,7 +238,7 @@ originweave --version
 originweave init
 originweave replay <run-dir> [--json]
 originweave ui   [--run <dir>] [--port 8765]
-originweave capabilities list|install-obscura
+originweave capabilities list
 originweave mcp [--run <dir>]
 ```
 
@@ -252,8 +252,9 @@ originweave mcp [--run <dir>]
   `8765`）；带 `--run <dir>` 时进**单 run 只读模式**（只服务该 run，写 RPC 被拒绝）。
 
 实现状态：`init`（生成 `originweave.toml`，已存在需 `--force`）、`capabilities list`
-（M0b）、`replay`（M0c，只读重放）与 `ui`（M1c-1 C4，只读 API + 静态托管）已实现；`mcp` /
-`capabilities install-obscura` 仍为占位（`mcp` 移二期），逐个 milestone 落地
+（M0b）、`replay`（M0c，只读重放）与 `ui`（M1c-1 C4，只读 API + 静态托管）已实现；`mcp`
+仍为占位（移二期）。原 `capabilities install-obscura` 子命令已移除（其样例与「录制的
+capability 响应」在 Phase R 后已不存在）。其余逐个 milestone 落地
 （`src/originweave/cli.py`）。
 
 ## 6. 非目标（Non-goals）

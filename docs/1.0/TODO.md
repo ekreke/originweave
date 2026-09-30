@@ -135,9 +135,10 @@
 - [ ] 关系样例 fixture 来源（新增含多个组织的样例 vs 复用 `copilot_productivity`）
 - [x] 实体消歧粒度 → **规范化 key = NFKC + casefold + 折叠空白**（`blackboard.canonical_name`，M5b 落地；
   同名/大小写/多余空白归一，`aliases` 累积；全称/简称等价仍靠模型产出同名）
-- [ ] CLI `capabilities install-obscura` 命名：旧 `obscura_kitesurf` 占位样例已被从零构建的
-      `copilot_productivity` 替换，该命令名（`product-overview.md` §5 冻结契约）语义脱节；
-      是否改名留待 M3 决定
+- [x] CLI `capabilities install-obscura` 命名 → **决策：删除该子命令**（`capabilities` 仅保留
+      `list`）。旧 `obscura_kitesurf` 占位样例已被从零构建的 `copilot_productivity` 替换，且
+      Phase R 移除录制/离线后「安装 capability」已无对应概念；`product-overview.md` §5 冻结契约
+      已同步为 `capabilities list`（`cli.py`、`tests/test_smoke.py`）
 - [ ] **M8** 标题编辑仅改 `Run.title`（`run.json`/workspace 元数据），CreateRun 时写入 PROJECT 事件的
       `origin` Fact label 不随动；如需同步要新增「事实取代」事件（本期不做）
 - [x] **M6 P4** server URL 传递 → **env `ORIGINWEAVE_SERVER_URL`，默认 `http://127.0.0.1:8765`**
