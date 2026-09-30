@@ -9,10 +9,12 @@ from types import ModuleType
 
 import pytest
 
+from originweave.blackboard import Entity, EntityGraph, Relation
 from originweave.cli import main
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = REPO_ROOT / "examples" / "copilot_productivity"
+RELATION_SAMPLE = REPO_ROOT / "examples" / "organization_relations"
 BUILDER_PATH = REPO_ROOT / "scripts" / "build_sample_fixtures.py"
 
 
@@ -25,8 +27,10 @@ def _load_builder() -> ModuleType:
     return module
 
 
-def _read_board(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
-    assert main(["replay", str(SAMPLE), "--json"]) == 0
+def _read_board(
+    capsys: pytest.CaptureFixture[str], sample: Path = SAMPLE
+) -> dict[str, object]:
+    assert main(["replay", str(sample), "--json"]) == 0
     return json.loads(capsys.readouterr().out)
 
 
@@ -106,7 +110,130 @@ def test_fixture_gate_ids_match_frozen_contract() -> None:
 
 def test_fixtures_are_up_to_date(tmp_path: Path) -> None:
     builder = _load_builder()
-    builder.build(tmp_path / "sample")
-    assert (tmp_path / "sample" / "events.jsonl").read_bytes() == (
-        SAMPLE / "events.jsonl"
-    ).read_bytes()
+    for sample in builder.SAMPLES:
+        target = tmp_path / sample.name
+        builder.build(target, sample.events, entity_graph=sample.entity_graph)
+        assert (target / "events.jsonl").read_bytes() == (
+            sample.root / "events.jsonl"
+        ).read_bytes()
+        if sample.entity_graph:
+            assert (target / "entity-graph.json").read_bytes() == (
+                sample.root / "entity-graph.json"
+            ).read_bytes()
+
+
+def test_fixtures_check_passes(capsys: pytest.CaptureFixture[str]) -> None:
+    builder = _load_builder()
+    assert builder.main(["--check"]) == 0
+    assert "fixtures are up to date" in capsys.readouterr().out
+
+
+def test_fixtures_check_detects_a_stale_sample(tmp_path: Path) -> None:
+    builder = _load_builder()
+    target = tmp_path / "sample"
+    builder.build(target)
+    assert builder.main(["--check", "--root", str(target)]) == 0
+
+    (target / "events.jsonl").write_text("{}\n", encoding="utf-8")
+
+    assert builder.main(["--check", "--root", str(target)]) == 1
+
+
+def test_fixtures_check_flags_an_obsolete_capabilities_dir(tmp_path: Path) -> None:
+    builder = _load_builder()
+    (tmp_path / "capabilities").mkdir()
+
+    assert builder.main(["--check", "--root", str(tmp_path)]) == 1
+
+
+# ---------------------------------------------------------------- organization_relations
+
+
+def _snapshots() -> dict[str, str]:
+    manifest = json.loads(
+        (RELATION_SAMPLE / "sources" / "manifest.json").read_text(encoding="utf-8")
+    )
+    snapshots = {
+        entry["url"]: (RELATION_SAMPLE / "sources" / entry["snapshot"]).read_text(encoding="utf-8")
+        for entry in manifest["sources"]
+    }
+    document_url = json.loads(
+        (RELATION_SAMPLE / "input" / "source.json").read_text(encoding="utf-8")
+    )["url"]
+    snapshots[document_url] = (RELATION_SAMPLE / "input" / "document.md").read_text(
+        encoding="utf-8"
+    )
+    return snapshots
+
+
+def test_relation_sample_replay_reproduces_the_graph(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    board = _read_board(capsys, RELATION_SAMPLE)
+    assert board["status"] == "completed"
+    assert board["verdict"] == "组织关系已判定"
+
+    entities = {entity["id"]: entity for entity in board["entities"]}  # type: ignore[union-attr]
+    assert set(entities) == {"n1", "n2", "n3", "n4"}
+    assert entities["n1"]["name"] == "GitHub"
+    assert entities["n1"]["aliases"] == ["GitHub, Inc."]
+    assert all(entity["type"] == "organization" for entity in entities.values())
+
+    relations = {relation["id"]: relation for relation in board["relations"]}  # type: ignore[union-attr]
+    assert set(relations) == {"r1", "r2", "r3", "r4"}
+    assert (relations["r1"]["source"], relations["r1"]["target"]) == ("n1", "n2")
+    assert relations["r1"]["type"] == "partners-with"
+    assert relations["r1"]["status"] == "verified"
+
+    # A relation must be either sourced or explicitly inferred; ids must resolve.
+    for relation in relations.values():
+        assert relation["source"] in entities
+        assert relation["target"] in entities
+        assert relation["source"] != relation["target"]
+        if relation["inferred"]:
+            assert relation["status"] == "inferred"
+            assert relation["evidence"] == []
+            assert relation["confidence"] > 0
+        else:
+            assert relation["status"] == "verified"
+            assert relation["evidence"]
+
+
+def test_relation_sample_inferred_edge(capsys: pytest.CaptureFixture[str]) -> None:
+    relations = {r["id"]: r for r in _read_board(capsys, RELATION_SAMPLE)["relations"]}  # type: ignore[union-attr]
+    inferred = relations["r2"]
+    assert inferred["type"] == "subsidiary-of"
+    assert inferred["inferred"] is True
+    assert inferred["status"] == "inferred"
+    assert inferred["confidence"] == pytest.approx(0.55)
+    assert inferred["evidence"] == []
+
+
+def test_relation_evidence_quotes_are_verbatim(capsys: pytest.CaptureFixture[str]) -> None:
+    board = _read_board(capsys, RELATION_SAMPLE)
+    snapshots = _snapshots()
+    for relation in board["relations"]:  # type: ignore[union-attr]
+        for evidence in relation["evidence"]:
+            assert _collapse(evidence["quote"]) in _collapse(snapshots[evidence["url"]])
+
+
+def test_run_json_declares_relation_analysis() -> None:
+    meta = json.loads((RELATION_SAMPLE / "run.json").read_text(encoding="utf-8"))
+    assert meta["analysis"] == "relation"
+    assert meta["id"] == "organization_relations"
+    # run.json holds static metadata only; result fields are derived from the events.
+    assert "status" not in meta
+    assert "facts" not in meta
+
+
+def test_entity_graph_json_matches_replay(capsys: pytest.CaptureFixture[str]) -> None:
+    board_json = _read_board(capsys, RELATION_SAMPLE)
+    stored = json.loads((RELATION_SAMPLE / "entity-graph.json").read_text(encoding="utf-8"))
+    # Rebuild the derived artifact from the replayed board and compare (sort_keys stable).
+    rebuilt = EntityGraph(
+        entities=[Entity.from_dict(entity) for entity in board_json["entities"]],  # type: ignore[union-attr]
+        relations=[
+            Relation.from_dict(relation) for relation in board_json["relations"]  # type: ignore[union-attr]
+        ],
+    ).to_dict()
+    assert stored == rebuilt

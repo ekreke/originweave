@@ -430,7 +430,11 @@ Hint 注入、Gate C 行为均可观测。
 - [x] 单测：给定 fixture 输入产出确定性 `EntityGraph`（实体 / 关系 / 证据或 `inferred` 断言）— **M5b**：
       `tests/test_engine_m5.py`（fake provider 注入；归并/别名、`n*`/`r*` 序、inferred 校验、`both` 判据、
       确定性两次运行一致、`entity-graph.json` 与板一致；样例 fixture 归 M5e）
-- [ ] 关系样例 fixture（含多个组织，新增于 `examples/`）
+- [x] 关系样例 fixture（含多个组织，新增于 `examples/`）— **M5e**：`examples/organization_relations/`
+      （复用 copilot 的资料 A/来源快照；`run.json analysis=relation`；`events.jsonl` 含 Gate A +
+      `extract`/`relate` pass 与 `ENTITY`/`RELATION` 事件；派生 `entity-graph.json`）；builder
+      `scripts/build_sample_fixtures.py` 泛化为多样例、`--check` 全量；测试 `tests/test_sample_fixture.py`
+      （replay 确定性、证据逐字回链、inferred 标注、`entity-graph.json` 与 replay 一致）
 
 验收：`CreateRun(analysis=relation)` 产出一张实体-关系图，每条关系或带
 `quote+url` 证据、或标记 `inferred`（虚线 + 置信度）；UI 的 `RELATIONS` 页签可查看并

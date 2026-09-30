@@ -17,7 +17,8 @@
   保证 resume 一致、`summarize_run` 填 entities/relations 计数、`convert` 映射 `RunDetail.entity_graph`）；
   **M5d（已完成）** 前端 RELATIONS/ENTITIES 页签（`RelationsTab`/`EntitiesTab`、entity `type` 着色、
   `inferred` 虚线、点击边/实体回链证据、`relationLabel` 正反读、新建表单 `analysis` 选择）；
-  **下一步 M5e** 关系样例 fixture + 文档。
+  **M5e（已完成）** 关系样例 `examples/organization_relations`（复用 copilot 快照、`analysis=relation`、
+  `ENTITY`/`RELATION` 事件 + 派生 `entity-graph.json`）+ builder 多样例化 + 文档。**M5 完成**。
   决策：`relation`/`both` 保留 Bootstrap+Gate A；实体 id `n*`/关系 `r*`；归并键
   `NFKC+casefold+折叠空白`；「已 relate」= 对实体派发过 `relate` Intent；`both` = 溯源判据 且
   relation 判据 且 Reason 判定。
@@ -202,10 +203,10 @@
 - `Makefile` 的 `demo` target 依赖 M4 的 server + 前端，现阶段只打印提示（不执行）。
 - **契约重排**把 server API 与前端从 M4 提前到 **M1b/M1c-1/M1c-2**，M4 收缩为端到端 / Deployment / 文档回归；
   期间 `dashboard.md §4` 已由 REST 改为 proto，`product-overview.md §5` 已移除 `trace`。
-- **契约-代码漂移（M5 进行中）**：`Entity`/`Relation`/`EntityGraph`、`ENTITY`/`RELATION` 事件已实现
+- **契约-代码漂移（M5 已完成）**：`Entity`/`Relation`/`EntityGraph`、`ENTITY`/`RELATION` 事件已实现
   （**M5a**：`blackboard.py`/`events.py`/`reduce.py`）；`Intent.extract`/`relate` 类型与引擎 pass 已落地
   （**M5b**）；server `CreateRun.analysis`、`RunDetail.entity_graph` 已接线（**M5c**）；
-  前端 RELATIONS/ENTITIES 页签已落地（**M5d**），关系样例 + 文档归 **M5e**。
+  前端 RELATIONS/ENTITIES 页签已落地（**M5d**）；关系样例 + 文档已交付（**M5e**）。
 - **枚举定义双份**（`blackboard.py`）：`Literal` 别名（`FactKind` 等）与 `frozenset` 校验集
   （`FACT_KINDS` 等）各写一遍、靠人工同步；且 dataclass 字段仍是 `str`、未用 `Literal` 标注，
   mypy 静态检查未生效。可选收口：字段改用别名标注，或从 `Literal` 派生集合（`typing.get_args`）。

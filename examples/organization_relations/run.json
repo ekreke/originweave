@@ -1,0 +1,9 @@
+{
+  "id": "organization_relations",
+  "project_id": "",
+  "title": "GitHub / Microsoft / Accenture 组织关系图",
+  "source_type": "text",
+  "analysis": "relation",
+  "goal": "抽取资料 A 中的组织实体及其关系，无来源的推断须显式标注",
+  "created_at": "2026-09-17T00:00:00+00:00"
+}

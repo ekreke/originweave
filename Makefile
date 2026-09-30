@@ -5,13 +5,16 @@ PKG ?= src/originweave
 # Paths counted by `make cloc` (hand-written code; generated v1/gen excluded below).
 CLOC_PATHS ?= src/originweave frontend/src
 # RUN_DIR is the committed sample fixture read by replay/ui.
+# RELATION_RUN_DIR is the entity-relation sample (M5e).
 # RUNS_DIR is where the server writes runtime runs (gitignored), never the sample.
 RUN_DIR ?= examples/copilot_productivity
+RELATION_RUN_DIR ?= examples/organization_relations
 RUNS_DIR ?= runs
 PORT ?= 8765
 
 .DEFAULT_GOAL := help
 .PHONY: help install run dev demo smoke image fixtures proto test lint fmt ui replay cloc clean \
+	replay-relations \
 	frontend-install frontend-gen frontend-dev frontend-build frontend-lint \
 	frontend-typecheck frontend-test frontend-e2e
 
@@ -39,7 +42,7 @@ smoke: install ## Boot the server with a fake worker and drive a run end-to-end 
 image: proto ## Build the runtime container image (M3a; requires Docker)
 	docker build -f Dockerfile.runtime -t originweave-runtime:latest .
 
-fixtures: ## Regenerate the committed sample fixtures (events.jsonl)
+fixtures: ## Regenerate the committed sample fixtures (events.jsonl [+ entity-graph.json])
 	$(UV) run python scripts/build_sample_fixtures.py
 
 proto: install ## Generate Python from proto/ (server; M1c. Requires buf + protoc + protoc-gen-connect-python)
@@ -88,6 +91,9 @@ ui: install ## Serve the read-only run view
 
 replay: install ## Replay a run directory offline (deterministic, no network)
 	$(UV) run originweave replay $(RUN_DIR)
+
+replay-relations: install ## Replay the entity-relation sample (M5e)
+	$(UV) run originweave replay $(RELATION_RUN_DIR)
 
 cloc: ## Count logical lines under src/originweave + frontend/src (excludes tests/fixtures/generated/vendor)
 	@if command -v tokei >/dev/null 2>&1; then \

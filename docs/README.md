@@ -10,6 +10,7 @@
 milestones.md                     # 版本与里程碑索引（仓库根目录）
 proto/                            # Connect/buf proto 契约（字段源：overview/）
 frontend/                         # React + Vite + TS 前端（M1b 脚手架、M1c-2b 接线）
+examples/                         # 冻结样例 run（copilot_productivity 溯源；organization_relations 实体-关系图，M5e）
 docs/
 ├── README.md                     # 本文件：导航、术语表、更新规则
 ├── overview/                     # 跨版本稳定的设计与契约

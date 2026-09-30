@@ -1,0 +1,136 @@
+{
+  "entities": [
+    {
+      "aliases": [
+        "GitHub, Inc."
+      ],
+      "confidence": 0.95,
+      "evidence": [],
+      "id": "n1",
+      "name": "GitHub",
+      "note": "Copilot 的开发方与代码托管平台。",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "status": "verified",
+      "type": "organization"
+    },
+    {
+      "aliases": [],
+      "confidence": 0.9,
+      "evidence": [],
+      "id": "n2",
+      "name": "Microsoft",
+      "note": "与 GitHub 合作开展实验的组织。",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "status": "verified",
+      "type": "organization"
+    },
+    {
+      "aliases": [],
+      "confidence": 0.85,
+      "evidence": [],
+      "id": "n3",
+      "name": "Accenture",
+      "note": "企业研究的合作方。",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "status": "open",
+      "type": "organization"
+    },
+    {
+      "aliases": [],
+      "confidence": 0.8,
+      "evidence": [],
+      "id": "n4",
+      "name": "OpenAI",
+      "note": "Codex 模型提供方。",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "status": "open",
+      "type": "organization"
+    }
+  ],
+  "relations": [
+    {
+      "confidence": 0.85,
+      "evidence": [
+        {
+          "id": "r1-ev0",
+          "locator": "Acknowledgements",
+          "quote": "GitHub Next conducted the experiment in partnership with the Microsoft Office of the Chief Economist",
+          "sourceTitle": "Research: quantifying GitHub Copilot's impact on developer productivity and happiness",
+          "url": "https://github.blog/news-insights/research/research-quantifying-github-copilots-impact-on-developer-productivity-and-happiness/"
+        }
+      ],
+      "id": "r1",
+      "inferred": false,
+      "label": "partnership",
+      "note": "",
+      "source": "n1",
+      "status": "verified",
+      "target": "n2",
+      "type": "partners-with"
+    },
+    {
+      "confidence": 0.55,
+      "evidence": [],
+      "id": "r2",
+      "inferred": true,
+      "label": "",
+      "note": "GitHub 隶属 Microsoft：资料 A 与来源均未直接陈述，属推断。",
+      "source": "n1",
+      "status": "inferred",
+      "target": "n2",
+      "type": "subsidiary-of"
+    },
+    {
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "id": "r3-ev0",
+          "locator": "intro",
+          "quote": "we partnered with Accenture to study how developers integrated GitHub Copilot into their daily workflows",
+          "sourceTitle": "Research: Quantifying GitHub Copilot's impact in the enterprise with Accenture",
+          "url": "https://github.blog/news-insights/research/research-quantifying-github-copilots-impact-in-the-enterprise-with-accenture/"
+        }
+      ],
+      "id": "r3",
+      "inferred": false,
+      "label": "partnered",
+      "note": "",
+      "source": "n1",
+      "status": "verified",
+      "target": "n3",
+      "type": "partners-with"
+    },
+    {
+      "confidence": 0.75,
+      "evidence": [
+        {
+          "id": "r4-ev0",
+          "locator": "What GitHub Copilot Does",
+          "quote": "GitHub Copilot is an AI pair programmer built on OpenAI's Codex and GitHub's own large language models",
+          "sourceTitle": "55% Faster Code, 84% Better Builds: GitHub Copilot's Real Enterprise Impact",
+          "url": "https://www.sityos.com/en/use-cases/55-faster-code-84-better-builds-github-copilots-real-enterprise-impact"
+        }
+      ],
+      "id": "r4",
+      "inferred": false,
+      "label": "built on Codex",
+      "note": "",
+      "source": "n4",
+      "status": "verified",
+      "target": "n1",
+      "type": "supplies"
+    }
+  ]
+}

@@ -244,7 +244,8 @@ def render_summary(board: Board) -> str:
         f"status: {board.status}",
         f"origin: {board.origin.label or board.origin.id} ({board.origin.id})",
         f"goal: {board.goal.label or board.goal.id} ({board.goal.id})",
-        f"facts: {len(board.facts)}  intents: {len(board.intents)} "
+        f"facts: {len(board.facts)}  entities: {len(board.entities)} "
+        f"relations: {len(board.relations)}  intents: {len(board.intents)} "
         f"(open {counts['open']}, claimed {counts['claimed']}, done {counts['done']}, "
         f"dropped {counts['dropped']})  hints: {len(board.hints)}  edges: {len(board.edges)}",
     ]

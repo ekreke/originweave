@@ -69,6 +69,6 @@ make fixtures     # 重新生成 events.jsonl（应逐字节一致）
 INTENT/CONCLUDE（Bootstrap/explore 抽取 → decompose 拆解 → explore 回链 → verify 比对）→
 REQUEST_HUMAN/HUMAN_INPUT（Gate A `confirm-claim` / Gate B `arbitrate`）→ COMPLETE`。事件类型
 只用 `blackboard-protocol.md` §5 已实现类型中的 10 种（本样例未用 `RELEASE`；`ENTITY`/`RELATION`
-属 M5）。
+的样例见 `examples/organization_relations/`，M5e）。
 `spawns`/`resolves`/`decomposes` 结构性边由 reducer 派生；`main-chain`/`dependency`/
 `goal-derived` 语义边显式写在事件 payload。
