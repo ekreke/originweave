@@ -3,6 +3,8 @@ import { create, type JsonObject } from '@bufbuild/protobuf'
 import {
   BudgetSchema,
   EdgeSchema,
+  EntityGraphSchema,
+  EntitySchema,
   EventSchema,
   EvidenceSchema,
   FactSchema,
@@ -12,6 +14,7 @@ import {
   IntentSchema,
   LlmSettingsSchema,
   ProjectSchema,
+  RelationSchema,
   RunDetailSchema,
   RunGraphSchema,
   RunSchema,
@@ -23,6 +26,8 @@ import {
   WorkerBudgetSchema,
   WorkerSettingsSchema,
   type Edge,
+  type Entity,
+  type EntityGraph,
   type Event,
   type Evidence,
   type Fact,
@@ -30,6 +35,7 @@ import {
   type Hint,
   type Intent,
   type Project,
+  type Relation,
   type Run,
   type RunDetail,
   type RunGraph,
@@ -116,6 +122,37 @@ export function edge(overrides: Partial<Edge> = {}): Edge {
     target: 'b',
     relation: 'main-chain',
     note: '',
+    ...overrides,
+  })
+}
+
+export function entity(overrides: Partial<Entity> = {}): Entity {
+  return create(EntitySchema, {
+    id: 'n1',
+    name: 'GitHub',
+    type: 'organization',
+    aliases: [],
+    status: 'open',
+    confidence: 0,
+    note: '',
+    position: vec2(),
+    evidence: [],
+    ...overrides,
+  })
+}
+
+export function relation(overrides: Partial<Relation> = {}): Relation {
+  return create(RelationSchema, {
+    id: 'r1',
+    source: 'n1',
+    target: 'n2',
+    type: 'acquires',
+    label: '',
+    status: 'verified',
+    confidence: 0,
+    inferred: false,
+    note: '',
+    evidence: [],
     ...overrides,
   })
 }
@@ -397,6 +434,72 @@ export function sampleRunGraph(): RunGraph {
     hints: detail.hints,
     waitingFor: detail.waitingFor,
     eventCount: detail.events.length,
+  })
+}
+
+// A representative entity-relation graph (M5d): two organizations with one verified
+// and one inferred relation.
+export function sampleEntityGraph(): EntityGraph {
+  return create(EntityGraphSchema, {
+    entities: [
+      entity({
+        id: 'n1',
+        name: 'GitHub',
+        type: 'organization',
+        status: 'verified',
+        confidence: 0.9,
+        aliases: ['GH'],
+        evidence: [evidence({ id: 'ev1' })],
+      }),
+      entity({
+        id: 'n2',
+        name: 'Microsoft',
+        type: 'organization',
+        status: 'open',
+        confidence: 0.8,
+      }),
+    ],
+    relations: [
+      relation({
+        id: 'r1',
+        source: 'n1',
+        target: 'n2',
+        type: 'acquires',
+        label: 'acquired',
+        status: 'verified',
+        confidence: 0.8,
+        evidence: [evidence({ id: 'evr1', quote: 'GitHub acquires Microsoft' })],
+      }),
+      relation({
+        id: 'r2',
+        source: 'n2',
+        target: 'n1',
+        type: 'competes-with',
+        label: 'rival',
+        status: 'inferred',
+        confidence: 0.5,
+        inferred: true,
+      }),
+    ],
+  })
+}
+
+// The same board as `sampleRunDetail()`, but a relation run: analysis=relation and
+// an entity graph present (the server emits both, M5c/M5d).
+export function sampleRelationRunDetail(): RunDetail {
+  const base = sampleRunDetail()
+  return create(RunDetailSchema, {
+    ...base,
+    run: create(RunSchema, { ...base.run!, analysis: 'relation', entities: 2, relations: 2 }),
+    entityGraph: sampleEntityGraph(),
+  })
+}
+
+export function sampleRelationRunGraph(): RunGraph {
+  const base = sampleRunGraph()
+  return create(RunGraphSchema, {
+    ...base,
+    run: create(RunSchema, { ...base.run!, analysis: 'relation', entities: 2, relations: 2 }),
   })
 }
 

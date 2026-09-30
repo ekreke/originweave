@@ -26,6 +26,14 @@
   --c-k-deviation: 209 73 91;
   --c-k-intent: 8 145 178;
 
+  /* Entity-relation graph: colour by Entity.type (M5d / dashboard.md §2). */
+  --c-e-person: 122 90 209;
+  --c-e-organization: 29 78 216;
+  --c-e-product: 8 145 178;
+  --c-e-location: 47 158 104;
+  --c-e-event: 194 135 43;
+  --c-e-other: 91 107 128;
+
   --radius: 0px;
   --radius-sm: 0px;
   --font-ui: 'Space Grotesk', Inter, 'PingFang SC', sans-serif;
@@ -57,4 +65,11 @@
   --c-k-compare: 45 212 191;
   --c-k-deviation: 239 107 125;
   --c-k-intent: 45 212 191;
+
+  --c-e-person: 167 139 250;
+  --c-e-organization: 91 140 255;
+  --c-e-product: 45 212 191;
+  --c-e-location: 67 201 138;
+  --c-e-event: 224 165 74;
+  --c-e-other: 125 143 168;
 }

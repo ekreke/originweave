@@ -72,6 +72,18 @@ describe('useRun', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_001' })
   })
+
+  it('stays idle until enabled (relation tabs gate the heavier GetRun)', async () => {
+    const { result, rerender } = renderHook(({ enabled }) => useRun('run_001', null, enabled), {
+      wrapper,
+      initialProps: { enabled: false },
+    })
+    expect(result.current.fetchStatus).toBe('idle')
+    expect(mocks.getRun).not.toHaveBeenCalled()
+
+    rerender({ enabled: true })
+    await waitFor(() => expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_001' }))
+  })
 })
 
 describe('useAddHint', () => {
@@ -227,6 +239,23 @@ describe('useCreateRun', () => {
         analysis: 'provenance',
         auto: false,
       }),
+    )
+  })
+
+  it('passes an explicit analysis through', async () => {
+    const { result } = renderHook(() => useCreateRun(), { wrapper })
+
+    result.current.mutate({
+      projectId: 'p',
+      sourceText: 'doc A',
+      goal: 'g',
+      analysis: 'relation',
+    })
+
+    await waitFor(() =>
+      expect(mocks.createRun).toHaveBeenCalledWith(
+        expect.objectContaining({ analysis: 'relation' }),
+      ),
     )
   })
 

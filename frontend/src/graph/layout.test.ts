@@ -1,9 +1,9 @@
 import { create } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
 
-import { RunGraphSchema } from '@/gen/originweave/v1/originweave_pb'
-import { hasPosition, layoutRunGraph } from '@/graph/layout'
-import { edge, factSummary, intent, vec2 } from '@/test/fixtures'
+import { EntityGraphSchema, RunGraphSchema } from '@/gen/originweave/v1/originweave_pb'
+import { hasPosition, layoutEntityGraph, layoutRunGraph } from '@/graph/layout'
+import { edge, entity, factSummary, intent, relation, vec2 } from '@/test/fixtures'
 
 function graph(edges: { source: string; target: string }[]) {
   return create(RunGraphSchema, {
@@ -102,5 +102,39 @@ describe('layoutRunGraph', () => {
   it('is deterministic for the same input', () => {
     const input = graph([{ source: 'origin', target: 'f1' }])
     expect(layoutRunGraph(input)).toEqual(layoutRunGraph(input))
+  })
+})
+
+describe('layoutEntityGraph', () => {
+  it('lays out every entity and never overlaps', () => {
+    const points = layoutEntityGraph(
+      create(EntityGraphSchema, {
+        entities: [entity({ id: 'n1' }), entity({ id: 'n2' }), entity({ id: 'n3' })],
+        relations: [relation({ id: 'r1', source: 'n1', target: 'n2' })],
+      }),
+    )
+    expect(points.size).toBe(3)
+    const keys = [...points.values()].map((p) => `${p.x},${p.y}`)
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it('honours explicit positions and fills the gaps', () => {
+    const points = layoutEntityGraph(
+      create(EntityGraphSchema, {
+        entities: [entity({ id: 'n1', position: vec2(11, 22) }), entity({ id: 'n2' })],
+      }),
+    )
+    expect(points.get('n1')).toEqual({ x: 11, y: 22 })
+    const n2 = points.get('n2')!
+    expect(n2.x !== 0 || n2.y !== 0).toBe(true)
+  })
+
+  it('returns an empty map without entities and is deterministic', () => {
+    expect(layoutEntityGraph(create(EntityGraphSchema, {})).size).toBe(0)
+    const input = create(EntityGraphSchema, {
+      entities: [entity({ id: 'n1' }), entity({ id: 'n2' })],
+      relations: [relation({ id: 'r1', source: 'n1', target: 'n2' })],
+    })
+    expect(layoutEntityGraph(input)).toEqual(layoutEntityGraph(input))
   })
 })

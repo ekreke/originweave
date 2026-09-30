@@ -1,7 +1,11 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { CSSProperties } from 'react'
 
-import type { FactNode as FactNodeType, IntentNode as IntentNodeType } from './mapping'
+import type {
+  EntityNode as EntityNodeType,
+  FactNode as FactNodeType,
+  IntentNode as IntentNodeType,
+} from './mapping'
 
 // Custom React Flow nodes: compact cards (dashboard.md §2). Colour comes from the
 // `--c-k-*` tokens so the graph follows the light/dark theme; the header carries
@@ -51,6 +55,35 @@ export function IntentNode({ data, selected }: NodeProps<IntentNodeType>) {
       <div className="node-hd">
         <span className="node-id mono">{data.intent.id}</span>
         <span className="node-kind">{data.intent.type}</span>
+      </div>
+      <span className="node-label">{data.preview}</span>
+      <Handle type="target" position={Position.Left} />
+      <Handle type="source" position={Position.Right} />
+    </div>
+  )
+}
+
+// Entity node (M5d): compact card colour-coded by Entity.type; the header carries the
+// entity id + type, the body a short name preview (full details in the Inspector).
+export function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
+  const style = { '--node-color': `rgb(var(${data.color}))` } as CSSProperties
+  return (
+    <div
+      className={`node entity-node${selected ? ' selected' : ''}`}
+      style={style}
+      data-testid={`entity-node-${data.entity.id}`}
+      title={data.entity.name}
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          data.onSelect?.(data.entity.id)
+        }
+      }}
+    >
+      <div className="node-hd">
+        <span className="node-id mono">{data.entity.id}</span>
+        <span className="node-kind">{data.entity.type}</span>
       </div>
       <span className="node-label">{data.preview}</span>
       <Handle type="target" position={Position.Left} />

@@ -4,7 +4,14 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { Inspector } from '@/layout/Inspector'
 import { RunList } from '@/layout/RunList'
-import { hint, run, sampleRunDetail, sampleRunGraph, sampleRuns } from '@/test/fixtures'
+import {
+  hint,
+  run,
+  sampleEntityGraph,
+  sampleRunDetail,
+  sampleRunGraph,
+  sampleRuns,
+} from '@/test/fixtures'
 
 const detail = sampleRunDetail()
 const graph = sampleRunGraph()
@@ -50,6 +57,24 @@ describe('Inspector', () => {
     render(<Inspector selection={{ type: 'intent', intent: detail.intents[3]! }} />)
     expect(screen.getByText('等待人工裁决')).toBeInTheDocument()
     expect(screen.getByText('awaiting_human')).toBeInTheDocument()
+  })
+
+  it('shows the entity detail with aliases and evidence', () => {
+    const entity = sampleEntityGraph().entities[0]!
+    render(<Inspector selection={{ type: 'entity', entity }} />)
+    expect(screen.getByText('GitHub')).toBeInTheDocument()
+    expect(screen.getByText('organization')).toBeInTheDocument()
+    expect(screen.getByText(/别名：GH/)).toBeInTheDocument()
+    expect(screen.getByText('verbatim quote from the source')).toBeInTheDocument()
+  })
+
+  it('shows the relation detail with the forward label and its evidence', () => {
+    const relation = sampleEntityGraph().relations[0]!
+    render(<Inspector selection={{ type: 'relation', relation }} />)
+    expect(screen.getByText('acquires')).toBeInTheDocument()
+    // The reverse reading is derived by the renderer (product-overview.md §4).
+    expect(screen.getByText(/反读 被收购/)).toBeInTheDocument()
+    expect(screen.getByText('GitHub acquires Microsoft')).toBeInTheDocument()
   })
 
   it('renders the gate card and only fires decisions when wired', () => {

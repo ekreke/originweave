@@ -1,10 +1,12 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { EventsTab } from '@/tabs/EventsTab'
+import { EntitiesTab } from '@/tabs/EntitiesTab'
 import { FactsTab } from '@/tabs/FactsTab'
 import { IntentsTab } from '@/tabs/IntentsTab'
-import { event, sampleRunDetail, sampleRunGraph } from '@/test/fixtures'
+import { RelationsTab } from '@/tabs/RelationsTab'
+import { event, sampleEntityGraph, sampleRunDetail, sampleRunGraph } from '@/test/fixtures'
 
 const detail = sampleRunDetail()
 const graph = sampleRunGraph()
@@ -16,11 +18,35 @@ describe('presentation tabs', () => {
         <FactsTab />
         <IntentsTab />
         <EventsTab />
+        <EntitiesTab />
       </>,
     )
     expect(screen.getByText(/暂无事实节点/)).toBeInTheDocument()
     expect(screen.getByText(/暂无 Intent/)).toBeInTheDocument()
     expect(screen.getByText(/暂无事件/)).toBeInTheDocument()
+    expect(screen.getByText(/暂无实体节点/)).toBeInTheDocument()
+  })
+
+  it('renders the entity table from an entity graph', () => {
+    render(<EntitiesTab entities={sampleEntityGraph().entities} />)
+    expect(screen.getByText('GitHub')).toBeInTheDocument()
+    expect(screen.getByText('GH')).toBeInTheDocument()
+    expect(screen.getAllByText('organization').length).toBeGreaterThan(0)
+  })
+
+  it('reports the entity row selection', () => {
+    const onSelect = vi.fn()
+    render(<EntitiesTab entities={sampleEntityGraph().entities} onSelect={onSelect} />)
+    fireEvent.click(screen.getByText('GitHub'))
+    expect(onSelect).toHaveBeenCalledWith('n1')
+  })
+
+  it('renders the RELATIONS canvas (and stays empty without data)', () => {
+    const { rerender, container } = render(<RelationsTab runId="run_009" />)
+    expect(container.querySelector('.graph-canvas')).not.toBeNull()
+
+    rerender(<RelationsTab graph={sampleEntityGraph()} runId="run_009" />)
+    expect(screen.getByTestId('entity-node-n1')).toBeInTheDocument()
   })
 
   it('renders the facts table with evidence counts', () => {

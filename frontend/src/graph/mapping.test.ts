@@ -1,10 +1,27 @@
 import { create } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
 
-import { RunGraphSchema } from '@/gen/originweave/v1/originweave_pb'
-import { edgeDash, factColor, intentVariant, runGraphToFlow, shortLabel } from '@/graph/mapping'
+import { EntityGraphSchema, RunGraphSchema } from '@/gen/originweave/v1/originweave_pb'
+import {
+  edgeDash,
+  entityColor,
+  entityGraphToFlow,
+  factColor,
+  intentVariant,
+  relationLabel,
+  runGraphToFlow,
+  shortLabel,
+} from '@/graph/mapping'
 
-import { edge, factSummary, sampleRunGraph, vec2 } from '@/test/fixtures'
+import {
+  edge,
+  entity,
+  factSummary,
+  relation,
+  sampleEntityGraph,
+  sampleRunGraph,
+  vec2,
+} from '@/test/fixtures'
 
 describe('shortLabel', () => {
   it('collapses whitespace and keeps short labels intact', () => {
@@ -36,6 +53,20 @@ describe('visual encoding', () => {
     expect(intentVariant('awaiting_human')).toBe('awaiting_human')
     expect(intentVariant('dropped')).toBe('dropped')
     expect(intentVariant('whatever')).toBe('open')
+  })
+
+  it('maps entity types to colour tokens', () => {
+    expect(entityColor('person')).toBe('--c-e-person')
+    expect(entityColor('organization')).toBe('--c-e-organization')
+    expect(entityColor('unknown')).toBe('--c-e-other')
+  })
+
+  it('derives forward and reverse relation labels', () => {
+    expect(relationLabel('acquires')).toBe('收购')
+    expect(relationLabel('acquires', true)).toBe('被收购')
+    expect(relationLabel('subsidiary-of', true)).toBe('母公司')
+    // Unknown types fall back to the raw type in both directions.
+    expect(relationLabel('made-up', true)).toBe('made-up')
   })
 })
 
@@ -111,5 +142,43 @@ describe('runGraphToFlow', () => {
     })
     const node = runGraphToFlow(detail).nodes.find((n) => n.id === 'origin')
     expect(node?.position).toEqual({ x: 30, y: 30 })
+  })
+})
+
+describe('entityGraphToFlow', () => {
+  it('produces an empty graph without data', () => {
+    const flow = entityGraphToFlow(create(EntityGraphSchema, {}))
+    expect(flow.nodes).toEqual([])
+    expect(flow.edges).toEqual([])
+  })
+
+  it('maps entities and relations, colour-coding by type', () => {
+    const flow = entityGraphToFlow(sampleEntityGraph())
+
+    expect(flow.nodes.map((n) => n.id)).toEqual(['n1', 'n2'])
+    expect(flow.nodes.map((n) => n.type)).toEqual(['entity', 'entity'])
+    const n1 = flow.nodes.find((n) => n.id === 'n1')
+    expect((n1?.data as { color: string }).color).toBe('--c-e-organization')
+    expect(flow.edges.map((e) => e.id)).toEqual(['r1', 'r2'])
+    expect(flow.edges[0]?.label).toBe('acquires')
+  })
+
+  it('dashes inferred relations and keeps explicit positions', () => {
+    const graph = create(EntityGraphSchema, {
+      entities: [entity({ id: 'n1', position: vec2(10, 20) }), entity({ id: 'n2' })],
+      relations: [
+        relation({ id: 'r1', inferred: false }),
+        relation({ id: 'r2', source: 'n2', target: 'n1', inferred: true }),
+      ],
+    })
+    const flow = entityGraphToFlow(graph)
+
+    expect(flow.edges[0]?.style?.strokeDasharray).toBeUndefined()
+    expect(flow.edges[1]?.style?.strokeDasharray).toBe('6 4')
+    expect(flow.nodes.find((n) => n.id === 'n1')?.position).toEqual({ x: 10, y: 20 })
+  })
+
+  it('is deterministic for the same input', () => {
+    expect(entityGraphToFlow(sampleEntityGraph())).toEqual(entityGraphToFlow(sampleEntityGraph()))
   })
 })

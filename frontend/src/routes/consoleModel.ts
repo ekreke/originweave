@@ -15,3 +15,14 @@ export function activityLabel(activity: string | undefined): string {
   if (!activity) return ''
   return Object.hasOwn(ACTIVITY_LABELS, activity) ? ACTIVITY_LABELS[activity] : ''
 }
+
+// Console tabs. RELATIONS/ENTITIES only exist for a run whose analysis includes
+// relation (dashboard.md §2 / §4.3); EVENTS always stays last.
+const TABS = ['GRAPH', 'FACTS', 'INTENTS', 'RELATIONS', 'ENTITIES', 'EVENTS'] as const
+
+export type Tab = (typeof TABS)[number]
+
+export function tabsFor(analysis: string | undefined): Tab[] {
+  const relational = analysis === 'relation' || analysis === 'both'
+  return TABS.filter((name) => relational || (name !== 'RELATIONS' && name !== 'ENTITIES'))
+}

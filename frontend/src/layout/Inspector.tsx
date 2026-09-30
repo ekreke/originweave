@@ -1,15 +1,18 @@
 import { useState } from 'react'
 
 import type {
+  Entity,
   Evidence,
   Fact,
   FactSummary,
   Hint,
   Intent,
+  Relation,
   Run,
   Session,
   WaitingFor,
 } from '@/gen/originweave/v1/originweave_pb'
+import { relationLabel } from '@/graph/mapping'
 
 // Presentation-only inspector: run stat tiles, node detail (summary now, verbatim
 // evidence on demand), the HITL gate card and the worker session view. Gate
@@ -17,7 +20,10 @@ import type {
 // them over RPC is the console's job.
 
 export type InspectorSelection =
-  { type: 'fact'; fact: FactSummary } | { type: 'intent'; intent: Intent }
+  | { type: 'fact'; fact: FactSummary }
+  | { type: 'intent'; intent: Intent }
+  | { type: 'entity'; entity: Entity }
+  | { type: 'relation'; relation: Relation }
 
 export type GateDecision = 'approve' | 'edit' | 'reject'
 
@@ -373,6 +379,72 @@ function IntentDetail({ intent }: { intent: Intent }) {
   )
 }
 
+// Entity detail (M5d): name/type/aliases/status plus the verbatim evidence.
+function EntitySection({ entity }: { entity: Entity }) {
+  return (
+    <div className="detail">
+      <div className="detail-id mono">{entity.id}</div>
+      <dl className="detail-grid">
+        <dt>name</dt>
+        <dd>{entity.name}</dd>
+        <dt>type</dt>
+        <dd>{entity.type}</dd>
+        <dt>status</dt>
+        <dd>
+          <span className={`status-badge status-${entity.status}`}>{entity.status}</span>
+        </dd>
+        <dt>conf.</dt>
+        <dd className="mono">{entity.confidence.toFixed(2)}</dd>
+      </dl>
+      {entity.aliases.length > 0 ? <p className="cnt">别名：{entity.aliases.join('、')}</p> : null}
+      {entity.note ? <div className="detail-scroll">{entity.note}</div> : null}
+      {entity.evidence.length > 0 ? <EvidenceBlock evidence={entity.evidence} /> : null}
+    </div>
+  )
+}
+
+// Relation detail (M5d): directed type with forward/reverse reading, inferred flag
+// and the (optional) verbatim evidence for the "回链" flow.
+function RelationSection({ relation }: { relation: Relation }) {
+  return (
+    <div className="detail">
+      <div className="detail-id mono">{relation.id}</div>
+      <dl className="detail-grid">
+        <dt>type</dt>
+        <dd>
+          {relation.type}
+          <span className="cnt">
+            {' '}
+            · {relationLabel(relation.type)} / 反读 {relationLabel(relation.type, true)}
+          </span>
+        </dd>
+        <dt>label</dt>
+        <dd>{relation.label || '—'}</dd>
+        <dt>status</dt>
+        <dd>
+          <span className={`status-badge status-${relation.status}`}>{relation.status}</span>
+        </dd>
+        {relation.inferred ? (
+          <>
+            <dt>inferred</dt>
+            <dd>是（无来源推断 · 虚线）</dd>
+          </>
+        ) : null}
+        <dt>conf.</dt>
+        <dd className="mono">{relation.confidence.toFixed(2)}</dd>
+      </dl>
+      <p className="cnt mono">
+        {relation.source} → {relation.target}
+      </p>
+      <p className="detail-note">
+        {relation.source} {relationLabel(relation.type)} {relation.target}
+      </p>
+      {relation.note ? <div className="detail-scroll">{relation.note}</div> : null}
+      {relation.evidence.length > 0 ? <EvidenceBlock evidence={relation.evidence} /> : null}
+    </div>
+  )
+}
+
 export function Inspector({
   run,
   selection,
@@ -421,6 +493,8 @@ export function Inspector({
         />
       ) : null}
       {selection?.type === 'intent' ? <IntentDetail intent={selection.intent} /> : null}
+      {selection?.type === 'entity' ? <EntitySection entity={selection.entity} /> : null}
+      {selection?.type === 'relation' ? <RelationSection relation={selection.relation} /> : null}
 
       {intentSessions.length > 0 ? (
         <div className="sessions">

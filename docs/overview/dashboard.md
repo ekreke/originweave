@@ -67,8 +67,10 @@ boundary 灰、compare 青、deviation 红）；`Intent` 为**状态色迷你卡
   - **INTENTS** — Intent 表：`ID | Type | Question | Status | From`，含 `dropped`（死胡同）。
   - **RELATIONS** — 实体-关系图（`analysis` 含 relation 时）。复用 PROVENANCE DAG 的图
     组件：`Entity` 按 `type`（person/organization/product/location/event/other）着色，
-    边标 `Relation.type`，`inferred=true` 用虚线（无来源推断）。
-  - **ENTITIES** — 实体表：`ID | Name | Type | Aliases | Conf. | Mentions`。
+    边标 `Relation.type`，`inferred=true` 用虚线（无来源推断）；点击边选中关系，INSPECTOR
+    显示其 `label` / 正反读标签（`relationLabel`）/ 证据。
+  - **ENTITIES** — 实体表：`ID | Name | Type | Aliases | Conf. | Evidence`（实体表仅在
+    `analysis` 含 relation 时出现，与 RELATIONS 一同挂载）。
   - **EVENTS** — 事件时间线，按 `tone` 着色（黑板协议事件）。
 - 右栏 **INSPECTOR**：顶部 **run 统计块**（FACTS / INTENTS / OPEN / HINTS 四格）+
   元信息行（Status / Goal / Created / Steps / Conf. / Budget）；`status` 为 `failed`/`stopped`
@@ -183,8 +185,8 @@ goal, max_steps?, max_wall?, max_cost?, auto?, source_text?
 预算三项为**覆盖**，未给出时回落 `[worker].budget` 配置；`auto=true` 跳过 HITL Gate（默认
 未给定时回落 `[hitl].auto`）。
 `source_text` 提供资料 A 正文，用于 `source_type="text"`（**目前仅支持 text；url 暂不支持**）。
-`analysis` 支持 `provenance|relation|both`（server 已接线，含 resume 一致性，**M5c**）；
-`relation`/`both` 关系图的 RELATIONS/ENTITIES 页签渲染归 **M5d**。
+`analysis` 支持 `provenance|relation|both`（server 已接线，含 resume 一致性，**M5c**；
+新建核验表单可选，RELATIONS/ENTITIES 页签渲染 **M5d**）。
 `title` 可省略：省略时由 server 自动生成（前端在 `SuggestGoal` 的建议标题、或资料 A 首行之间
 回落）；创建后可用 `UpdateRun` 就地修改（**M8**，改的是静态元数据，不动 `origin` Fact）。
 `CreateRun` 把资料 A 落盘为 `input/document.md`（+ `input/source.json`），并起一个后台 asyncio

@@ -1,6 +1,6 @@
 import { Graph, layout as dagreLayout } from '@dagrejs/dagre'
 
-import type { RunGraph } from '@/gen/originweave/v1/originweave_pb'
+import type { EntityGraph, RunGraph } from '@/gen/originweave/v1/originweave_pb'
 
 // Deterministic layered layout for the provenance DAG (dashboard.md §2). Dagre
 // ranks the board left-to-right (origin on the left, claims then citations to the
@@ -13,6 +13,8 @@ export const FACT_NODE_W = 190
 export const FACT_NODE_H = 68
 export const INTENT_NODE_W = 172
 export const INTENT_NODE_H = 48
+export const ENTITY_NODE_W = 170
+export const ENTITY_NODE_H = 56
 
 // Tight spacing so the left-to-right layers read as compact columns (dashboard.md
 // §2): `nodesep` is the within-layer (vertical) gap, `ranksep` the between-layer
@@ -88,6 +90,52 @@ export function layoutRunGraph(detail: RunGraph): Map<string, LayoutPoint> {
     if (pinned.has(id)) continue
     const node = g.node(id)
     // dagre returns the node center; React Flow wants the top-left corner.
+    points.set(id, { x: node.x - size.width / 2, y: node.y - size.height / 2 })
+  }
+  return points
+}
+
+/**
+ * Lay the entity-relation graph out with dagre (M5d): entities become nodes, every
+ * relation a directed dependency. Explicit (non-zero) `Entity.position` values are
+ * pinned verbatim, everything else gets a dagre coordinate. Pure, so a replay step
+ * or a re-render places entities identically.
+ */
+export function layoutEntityGraph(graph: EntityGraph): Map<string, LayoutPoint> {
+  const points = new Map<string, LayoutPoint>()
+  const sizes = new Map<string, { width: number; height: number }>()
+  const pinned = new Set<string>()
+
+  for (const entity of graph.entities) {
+    if (!sizes.has(entity.id)) sizes.set(entity.id, { width: ENTITY_NODE_W, height: ENTITY_NODE_H })
+    if (hasPosition(entity.position)) {
+      points.set(entity.id, { x: entity.position?.x ?? 0, y: entity.position?.y ?? 0 })
+      pinned.add(entity.id)
+    }
+  }
+  if (sizes.size === 0) return points
+
+  // Multigraph: several relations may connect the same pair (e.g. both directions).
+  const g = new Graph({ multigraph: true })
+  g.setGraph({ rankdir: 'LR', nodesep: NODESEP, ranksep: RANKSEP, marginx: 24, marginy: 24 })
+  g.setDefaultEdgeLabel(() => ({}))
+  for (const [id, size] of sizes) g.setNode(id, size)
+  let seq = 0
+  for (const relation of [...graph.relations].sort(byId)) {
+    if (
+      !sizes.has(relation.source) ||
+      !sizes.has(relation.target) ||
+      relation.source === relation.target
+    ) {
+      continue
+    }
+    g.setEdge(relation.source, relation.target, {}, `e${seq++}`)
+  }
+  dagreLayout(g)
+
+  for (const [id, size] of sizes) {
+    if (pinned.has(id)) continue
+    const node = g.node(id)
     points.set(id, { x: node.x - size.width / 2, y: node.y - size.height / 2 })
   }
   return points

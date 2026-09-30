@@ -62,12 +62,14 @@ export function activePollInterval(status: string | undefined): number | false {
 
 // Live run detail. `atEvent` (Replay) asks the server to fold only the first
 // `atEvent` events so the board reflects that step; the timeline stays full. Only
-// the live view polls.
-export function useRun(runId: string | undefined, atEvent?: number | null) {
+// the live view polls. `enabled` gates the (heavier) fetch behind a tab that needs
+// it (RELATIONS / ENTITIES -> RunDetail.entity_graph); the console otherwise polls
+// the light GetRunGraph.
+export function useRun(runId: string | undefined, atEvent?: number | null, enabled = true) {
   const replaying = atEvent != null
   return useQuery({
     queryKey: ['run', runId, atEvent ?? null],
-    enabled: Boolean(runId),
+    enabled: Boolean(runId) && enabled,
     // Keep the previous board visible while stepping (no empty flash, and the
     // timeline length stays stable for the stepper's bounds). Scoped to the same
     // run: navigating to another run must not flash the previous run's board.
@@ -197,6 +199,7 @@ export interface CreateRunInput {
   sourceText: string
   goal: string
   title?: string
+  analysis?: string
   auto?: boolean
   maxSteps?: number
   maxWall?: string
@@ -214,7 +217,7 @@ export function useCreateRun() {
         sourceType: 'text',
         sourceText: input.sourceText,
         goal: input.goal,
-        analysis: 'provenance',
+        analysis: input.analysis ?? 'provenance',
         ...(input.title ? { title: input.title } : {}),
         ...(input.auto !== undefined ? { auto: input.auto } : {}),
         ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),

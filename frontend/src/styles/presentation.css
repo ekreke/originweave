@@ -20,6 +20,13 @@
   border-color: rgb(var(--c-hairline));
 }
 
+/* An inferred relation has no source evidence: dashed, mirroring its graph edge (M5d). */
+.status-inferred {
+  color: rgb(var(--c-muted));
+  border-style: dashed;
+  border-color: rgb(var(--c-muted));
+}
+
 .status-running,
 .status-review,
 .status-claimed {
@@ -152,6 +159,26 @@
 }
 .kind-deviation {
   background: rgb(var(--c-k-deviation));
+}
+
+/* Entity type swatches for the ENTITIES table (M5d). */
+.etype-person {
+  background: rgb(var(--c-e-person));
+}
+.etype-organization {
+  background: rgb(var(--c-e-organization));
+}
+.etype-product {
+  background: rgb(var(--c-e-product));
+}
+.etype-location {
+  background: rgb(var(--c-e-location));
+}
+.etype-event {
+  background: rgb(var(--c-e-event));
+}
+.etype-other {
+  background: rgb(var(--c-e-other));
 }
 
 .role-tag,
@@ -318,6 +345,25 @@
   color: rgb(var(--c-warn));
 }
 
+/* Entity node (M5d): compact card colour-coded by Entity.type (left border + type
+   chip), mirroring the Fact card. Size mirrors layout.ts ENTITY_NODE_*. */
+.entity-node {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 170px;
+  min-height: 56px;
+  padding: 5px 8px 7px;
+  border: 1px solid rgb(var(--c-hairline));
+  border-left: 3px solid var(--node-color);
+  background: rgb(var(--c-panel));
+  box-shadow: 0 1px 2px rgb(var(--c-ink) / 0.08);
+}
+
+.entity-node .node-id {
+  color: var(--node-color, rgb(var(--c-accent)));
+}
+
 .node.selected {
   outline: 2px solid rgb(var(--c-accent));
   outline-offset: 2px;
@@ -336,6 +382,17 @@
 
 .react-flow__edge.edge-dim {
   opacity: 0.15;
+}
+
+/* Relation edge label = Relation.type (M5d). */
+.react-flow__edge-text {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: rgb(var(--c-ink));
+}
+
+.react-flow__edge-textbg {
+  fill: rgb(var(--c-panel));
 }
 
 @keyframes intent-pulse {

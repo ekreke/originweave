@@ -288,7 +288,7 @@ M1c-2b。仅依赖已就绪的 `proto/`，**可与 M1c-1 C2–C4 并行**。
 
 ### 2b-4 · 新建核验表单 + 顶栏
 
-- [x] 新建核验表单（`CreateRun`：`source_text`/`title`/`goal`/`auto`，含可选预算覆盖）→ 导航到
+- [x] 新建核验表单（`CreateRun`：`source_text`/`title`/`goal`/`analysis`/`auto`，含可选预算覆盖）→ 导航到
       Console；失败行内报错 — `frontend/src/routes/NewRun.tsx`、`frontend/src/api/hooks.ts`（`useCreateRun`）
 - [x] 顶栏：run 状态/预算徽标（`status` + `steps`/`tok`/`cost`/`intents`，置于 Console 中栏 header）
       与连通性（LIVE/OFFLINE，`AppShell`，2b-1 已落地）指示 — `frontend/src/routes/Console.tsx`、
@@ -415,13 +415,18 @@ Hint 注入、Gate C 行为均可观测。
       `summarize_run` 从 reduce 后的 board 填充
 - [x] run dir 产物 `entity-graph.json`（可由事件重建，非事实来源）— **M5b**：`store.py` `write_entity_graph`
       + `engine.py` `_flush_entity_graph`（每次图 pass 提交后增量重写，`sort_keys` 确定性）
-- [ ] 无来源推断标注：`Relation.status=inferred` + 置信度，渲染为虚线
-      （引擎侧已归一 `status=inferred` 并校验置信度；前端虚线渲染待 M5d）
+- [x] 无来源推断标注：`Relation.status=inferred` + 置信度，渲染为虚线 — **M5d**：引擎侧归一
+      `status=inferred` 并校验置信度；前端 `mapping.entityGraphToFlow` 对 `inferred` 边加
+      `strokeDasharray`，ENTITY/RELATION 详情见 INSPECTOR
 - [x] server：`RunDetail.entity_graph` 与 `CreateRunRequest.analysis`（proto）— **M5c**：`convert.py`
       `entity_pb`/`relation_pb`/`entity_graph_pb` + `run_detail_pb` 在 `analysis != provenance` 时
       `CopyFrom`（空图也填，区别于 provenance 的「无图」）；测试 `tests/test_server.py`（relation/
       both/空图/provenance 缺省/resume 保持/未知值 400）
-- [ ] dashboard：`RELATIONS`（关系图，复用图组件）与 `ENTITIES`（实体表）页签
+- [x] dashboard：`RELATIONS`（关系图，复用图组件）与 `ENTITIES`（实体表）页签 — **M5d**：
+      `Console` 按 `Run.analysis` 动态挂载两页签（仅 relation/both），按需取 `GetRun` 的
+      `entity_graph`；`tabs/RelationsTab`（复用 `GraphCanvas`，`variant=relations`）/`tabs/EntitiesTab`
+      （`ID|Name|Type|Aliases|Conf.|Evidence`）；实体 `type` 着色（`--c-e-*`）、边标 `Relation.type`、
+      `inferred` 虚线、点击边/实体经 INSPECTOR 回链证据；新建核验表单可选 `analysis`
 - [x] 单测：给定 fixture 输入产出确定性 `EntityGraph`（实体 / 关系 / 证据或 `inferred` 断言）— **M5b**：
       `tests/test_engine_m5.py`（fake provider 注入；归并/别名、`n*`/`r*` 序、inferred 校验、`both` 判据、
       确定性两次运行一致、`entity-graph.json` 与板一致；样例 fixture 归 M5e）

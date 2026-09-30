@@ -14,9 +14,9 @@ import {
 
 import { applyPositionOverrides, collectPositionChanges, type PositionOverrides } from './drag'
 import { classifyEdges } from './mapping'
-import { FactNode, IntentNode } from './nodes'
+import { EntityNode, FactNode, IntentNode } from './nodes'
 
-const nodeTypes = { fact: FactNode, intent: IntentNode }
+const nodeTypes = { fact: FactNode, intent: IntentNode, entity: EntityNode }
 
 const EMPTY_NODES: Node[] = []
 const EMPTY_EDGES: Edge[] = []
@@ -38,12 +38,27 @@ const RELATION_LEGEND = [
   ['decomposes', 'dotted'],
 ] as const
 
+// RELATIONS legend (M5d): Entity.type colour chips + the inferred dashed line.
+const ENTITY_LEGEND = [
+  ['person', '--c-e-person'],
+  ['organization', '--c-e-organization'],
+  ['product', '--c-e-product'],
+  ['location', '--c-e-location'],
+  ['event', '--c-e-event'],
+  ['other', '--c-e-other'],
+] as const
+
 export interface GraphCanvasProps {
   nodes?: Node[]
   edges?: Edge[]
   onSelect?: (id: string | null) => void
   /** Console-managed selection: highlights the node and dims unrelated edges. */
   selectedId?: string | null
+  /** Selected relation edge (M5d): highlights it and dims every other edge. */
+  selectedEdgeId?: string | null
+  onEdgeClick?: (id: string) => void
+  /** Which graph this canvas renders; selects the legend (M5d). */
+  variant?: 'provenance' | 'relations'
 }
 
 // Presentation-only canvas: nodes/edges are supplied by the caller (mapped from
@@ -57,9 +72,15 @@ export function GraphCanvas({
   edges = EMPTY_EDGES,
   onSelect,
   selectedId,
+  selectedEdgeId,
+  onEdgeClick,
+  variant = 'provenance',
 }: GraphCanvasProps) {
   const [overrides, setOverrides] = useState<PositionOverrides>(() => new Map())
-  const styledEdges = useMemo(() => classifyEdges(edges, selectedId), [edges, selectedId])
+  const styledEdges = useMemo(
+    () => classifyEdges(edges, selectedId, selectedEdgeId),
+    [edges, selectedId, selectedEdgeId],
+  )
 
   // Inject the console-managed selection/onSelect and the session drag positions.
   // Re-derived whenever the graph data, selection or drags change; a poll that
@@ -103,6 +124,7 @@ export function GraphCanvas({
         nodesFocusable
         elementsSelectable
         onNodeClick={(_event, node) => onSelect?.(node.id)}
+        onEdgeClick={(_event, edge) => onEdgeClick?.(edge.id)}
         onPaneClick={() => onSelect?.(null)}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
@@ -113,26 +135,43 @@ export function GraphCanvas({
         </Panel>
         <Panel position="bottom-left">
           <div className="graph-legend" aria-label="graph legend">
-            <div className="legend-col">
-              {KIND_LEGEND.map(([label, token]) => (
-                <span key={label} className="legend-row">
-                  <i className="legend-chip" style={{ background: `rgb(var(${token}))` }} />
-                  {label}
+            {variant === 'relations' ? (
+              <div className="legend-col">
+                {ENTITY_LEGEND.map(([label, token]) => (
+                  <span key={label} className="legend-row">
+                    <i className="legend-chip" style={{ background: `rgb(var(${token}))` }} />
+                    {label}
+                  </span>
+                ))}
+                <span className="legend-row">
+                  <i className="legend-line legend-dashed" />
+                  inferred
                 </span>
-              ))}
-            </div>
-            <div className="legend-col">
-              {RELATION_LEGEND.map(([label, line]) => (
-                <span key={label} className="legend-row">
-                  <i className={`legend-line legend-${line}`} />
-                  {label}
-                </span>
-              ))}
-              <span className="legend-row">
-                <i className="legend-line legend-intent" />
-                intent
-              </span>
-            </div>
+              </div>
+            ) : (
+              <>
+                <div className="legend-col">
+                  {KIND_LEGEND.map(([label, token]) => (
+                    <span key={label} className="legend-row">
+                      <i className="legend-chip" style={{ background: `rgb(var(${token}))` }} />
+                      {label}
+                    </span>
+                  ))}
+                </div>
+                <div className="legend-col">
+                  {RELATION_LEGEND.map(([label, line]) => (
+                    <span key={label} className="legend-row">
+                      <i className={`legend-line legend-${line}`} />
+                      {label}
+                    </span>
+                  ))}
+                  <span className="legend-row">
+                    <i className="legend-line legend-intent" />
+                    intent
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </Panel>
       </ReactFlow>

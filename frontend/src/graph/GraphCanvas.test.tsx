@@ -2,8 +2,8 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { GraphCanvas } from '@/graph/GraphCanvas'
-import { classifyEdges, runGraphToFlow } from '@/graph/mapping'
-import { factSummary, intent, sampleRunGraph } from '@/test/fixtures'
+import { classifyEdges, entityGraphToFlow, runGraphToFlow } from '@/graph/mapping'
+import { factSummary, intent, sampleEntityGraph, sampleRunGraph } from '@/test/fixtures'
 import { create } from '@bufbuild/protobuf'
 import { RunGraphSchema } from '@/gen/originweave/v1/originweave_pb'
 
@@ -126,5 +126,25 @@ describe('GraphCanvas', () => {
     render(<GraphCanvas nodes={nodes} edges={edges} />)
 
     expect(screen.getByTestId('intent-node-i1')).toHaveClass('intent-open')
+  })
+
+  it('renders entity nodes and the RELATIONS legend', () => {
+    const { nodes, edges } = entityGraphToFlow(sampleEntityGraph())
+    render(<GraphCanvas nodes={nodes} edges={edges} variant="relations" />)
+
+    expect(screen.getByTestId('entity-node-n1')).toBeInTheDocument()
+    expect(screen.getByTestId('entity-node-n1').querySelector('.node-kind')?.textContent).toBe(
+      'organization',
+    )
+    const legend = within(screen.getByLabelText('graph legend'))
+    expect(legend.getByText('organization')).toBeInTheDocument()
+    expect(legend.getByText('inferred')).toBeInTheDocument()
+  })
+
+  it('highlights a selected relation edge and dims the rest', () => {
+    const { edges } = entityGraphToFlow(sampleEntityGraph())
+    const classified = classifyEdges(edges, null, 'r2')
+    expect(classified.find((edge) => edge.id === 'r2')?.className).toBe('edge-active')
+    expect(classified.find((edge) => edge.id === 'r1')?.className).toBe('edge-dim')
   })
 })

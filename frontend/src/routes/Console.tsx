@@ -8,39 +8,53 @@ import {
   useFactDetail,
   useProjectRuns,
   useProjects,
+  useRun,
   useRunEvents,
   useRunGraph,
   useRunSessions,
   useSubmitHumanInput,
   useUpdateRun,
 } from '@/api/hooks'
-import type { FactSummary, Intent, RunGraph } from '@/gen/originweave/v1/originweave_pb'
+import type {
+  EntityGraph,
+  FactSummary,
+  Intent,
+  RunGraph,
+} from '@/gen/originweave/v1/originweave_pb'
 import { Inspector, type InspectorSelection } from '@/layout/Inspector'
 import { RunList } from '@/layout/RunList'
-import { activityLabel } from '@/routes/consoleModel'
+import { activityLabel, tabsFor, type Tab } from '@/routes/consoleModel'
+import { EntitiesTab } from '@/tabs/EntitiesTab'
 import { EventsTab } from '@/tabs/EventsTab'
 import { FactsTab } from '@/tabs/FactsTab'
 import { GraphTab } from '@/tabs/GraphTab'
 import { IntentsTab } from '@/tabs/IntentsTab'
-
-const TABS = ['GRAPH', 'FACTS', 'INTENTS', 'EVENTS'] as const
-
-type Tab = (typeof TABS)[number]
+import { RelationsTab } from '@/tabs/RelationsTab'
 
 // Map a graph/table selection id to an Inspector selection. The origin and goal
 // anchors are selectable too, so they are searched alongside the derived facts.
+// Entity and relation ids (n*/r*) come from the on-demand entity graph (M5d).
 function resolveSelection(
   graph: RunGraph | undefined,
+  entityGraph: EntityGraph | undefined,
   id: string | null,
 ): InspectorSelection | null {
-  if (!graph || !id) return null
-  const anchors = [graph.origin, graph.goal, ...graph.facts].filter(
-    (f): f is FactSummary => f !== undefined,
-  )
-  const fact = anchors.find((f) => f.id === id)
-  if (fact) return { type: 'fact', fact }
-  const intent: Intent | undefined = graph.intents.find((it) => it.id === id)
-  if (intent) return { type: 'intent', intent }
+  if (!id) return null
+  if (graph) {
+    const anchors = [graph.origin, graph.goal, ...graph.facts].filter(
+      (f): f is FactSummary => f !== undefined,
+    )
+    const fact = anchors.find((f) => f.id === id)
+    if (fact) return { type: 'fact', fact }
+    const intent: Intent | undefined = graph.intents.find((it) => it.id === id)
+    if (intent) return { type: 'intent', intent }
+  }
+  if (entityGraph) {
+    const entity = entityGraph.entities.find((e) => e.id === id)
+    if (entity) return { type: 'entity', entity }
+    const relation = entityGraph.relations.find((r) => r.id === id)
+    if (relation) return { type: 'relation', relation }
+  }
   return null
 }
 
@@ -162,20 +176,32 @@ export function Console() {
   // Light graph projection (polled); full detail and heavy sections load on demand.
   const graphQuery = useRunGraph(runId, atEvent)
   const graph = graphQuery.data
+  // Tabs depend on the run's analysis; fall back to GRAPH if the current tab is not
+  // available (e.g. navigating from a relation run to a provenance run).
+  const tabs = tabsFor(graph?.run?.analysis)
+  const activeTab: Tab = tabs.includes(tab) ? tab : 'GRAPH'
+  // The entity graph lives on RunDetail (not the light RunGraph), so the heavier
+  // GetRun is fetched only while a relation tab is open (M5d), mirroring EVENTS.
+  const relationTab = activeTab === 'RELATIONS' || activeTab === 'ENTITIES'
+  const runQuery = useRun(runId, atEvent, relationTab)
+  const entityGraph = runQuery.data?.entityGraph
   const runs = useProjectRuns(projectId)
   const projects = useProjects()
   const sessionsQuery = useRunSessions(runId)
   const eventsQuery = useRunEvents(
     runId,
     atEvent,
-    tab === 'EVENTS',
+    activeTab === 'EVENTS',
     activePollInterval(graph?.run?.status) !== false,
   )
   const addHint = useAddHint(runId)
   const submitGate = useSubmitHumanInput(runId)
 
   const selectionId = selected.run === runId ? selected.id : null
-  const selection = resolveSelection(graph, selectionId)
+  const selection = resolveSelection(graph, entityGraph, selectionId)
+  // A relation edge is a non-node selection: highlight the edge (not a node).
+  const selectedEdgeId = selection?.type === 'relation' ? selection.relation.id : null
+  const selectedNodeId = selection?.type === 'relation' ? null : selectionId
   // Stable identity so the graph's node memo survives Console re-renders (polls).
   const select = useCallback((id: string | null) => setSelected({ run: runId, id }), [runId])
 
@@ -268,13 +294,34 @@ export function Console() {
   }
 
   function renderTab() {
-    switch (tab) {
+    switch (activeTab) {
       case 'GRAPH':
-        return <GraphTab graph={graph} runId={runId} onSelect={select} selectedId={selectionId} />
+        return (
+          <GraphTab graph={graph} runId={runId} onSelect={select} selectedId={selectedNodeId} />
+        )
       case 'FACTS':
-        return <FactsTab facts={graph?.facts} onSelect={select} selectedId={selectionId} />
+        return <FactsTab facts={graph?.facts} onSelect={select} selectedId={selectedNodeId} />
       case 'INTENTS':
-        return <IntentsTab intents={graph?.intents} onSelect={select} selectedId={selectionId} />
+        return <IntentsTab intents={graph?.intents} onSelect={select} selectedId={selectedNodeId} />
+      case 'RELATIONS':
+        return (
+          <RelationsTab
+            graph={entityGraph}
+            runId={runId}
+            onSelect={select}
+            selectedId={selectedNodeId}
+            selectedEdgeId={selectedEdgeId}
+            onEdgeClick={select}
+          />
+        )
+      case 'ENTITIES':
+        return (
+          <EntitiesTab
+            entities={entityGraph?.entities}
+            onSelect={select}
+            selectedId={selectedNodeId}
+          />
+        )
       case 'EVENTS':
         return <EventsTab events={events} step={replayStep} />
     }
@@ -379,13 +426,13 @@ export function Console() {
             </div>
           </div>
           <div className="tabs" role="tablist">
-            {TABS.map((name) => (
+            {tabs.map((name) => (
               <button
                 key={name}
                 type="button"
                 role="tab"
-                aria-selected={name === tab}
-                className={name === tab ? 'tab on' : 'tab'}
+                aria-selected={name === activeTab}
+                className={name === activeTab ? 'tab on' : 'tab'}
                 onClick={() => setTab(name)}
               >
                 {name}

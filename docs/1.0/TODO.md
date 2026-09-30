@@ -15,7 +15,9 @@
   规范化归并 upsert、`n*`/`r*` id、进度/COMPLETE 判据、`entity-graph.json` 增量落盘）；**M5c（已完成）**
   server 接线（`create_run` 放行 `analysis ∈ ANALYSES`、`_build_engine` 从 run meta 传 `Engine(analysis)`
   保证 resume 一致、`summarize_run` 填 entities/relations 计数、`convert` 映射 `RunDetail.entity_graph`）；
-  **下一步 M5d** 前端 RELATIONS/ENTITIES 页签（含 inferred 虚线渲染）；**M5e** 关系样例 + 文档。
+  **M5d（已完成）** 前端 RELATIONS/ENTITIES 页签（`RelationsTab`/`EntitiesTab`、entity `type` 着色、
+  `inferred` 虚线、点击边/实体回链证据、`relationLabel` 正反读、新建表单 `analysis` 选择）；
+  **下一步 M5e** 关系样例 fixture + 文档。
   决策：`relation`/`both` 保留 Bootstrap+Gate A；实体 id `n*`/关系 `r*`；归并键
   `NFKC+casefold+折叠空白`；「已 relate」= 对实体派发过 `relate` Intent；`both` = 溯源判据 且
   relation 判据 且 Reason 判定。
@@ -203,7 +205,7 @@
 - **契约-代码漂移（M5 进行中）**：`Entity`/`Relation`/`EntityGraph`、`ENTITY`/`RELATION` 事件已实现
   （**M5a**：`blackboard.py`/`events.py`/`reduce.py`）；`Intent.extract`/`relate` 类型与引擎 pass 已落地
   （**M5b**）；server `CreateRun.analysis`、`RunDetail.entity_graph` 已接线（**M5c**）；
-  前端 RELATIONS/ENTITIES 页签仍待做（**M5d**），关系样例 + 文档归 **M5e**。
+  前端 RELATIONS/ENTITIES 页签已落地（**M5d**），关系样例 + 文档归 **M5e**。
 - **枚举定义双份**（`blackboard.py`）：`Literal` 别名（`FactKind` 等）与 `frozenset` 校验集
   （`FACT_KINDS` 等）各写一遍、靠人工同步；且 dataclass 字段仍是 `str`、未用 `Literal` 标注，
   mypy 静态检查未生效。可选收口：字段改用别名标注，或从 `Literal` 派生集合（`typing.get_args`）。

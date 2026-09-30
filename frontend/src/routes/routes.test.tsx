@@ -5,10 +5,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { RunGraphSchema } from '@/gen/originweave/v1/originweave_pb'
 import { App } from '@/App'
+import { tabsFor } from '@/routes/consoleModel'
 import {
   factSummary,
   run,
   sampleProjects,
+  sampleRelationRunDetail,
+  sampleRelationRunGraph,
   sampleRunDetail,
   sampleRunGraph,
   sampleRuns,
@@ -119,6 +122,10 @@ describe('console', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'EVENTS' }))
     expect(await screen.findByText('Gate A: confirm the claim')).toBeInTheDocument()
+
+    // A provenance run has no entity-relation tabs.
+    expect(screen.queryByRole('tab', { name: 'RELATIONS' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'ENTITIES' })).not.toBeInTheDocument()
   })
 
   it('shows the awaiting_human status and the gate question', async () => {
@@ -251,6 +258,74 @@ describe('console', () => {
     await waitFor(() =>
       expect(mocks.addHint).toHaveBeenCalledWith({ runId: 'run_009', text: 'check it' }),
     )
+  })
+})
+
+describe('console relations', () => {
+  beforeEach(() => {
+    mocks.getRunGraph.mockResolvedValue({ graph: sampleRelationRunGraph() })
+    mocks.getRun.mockResolvedValue({ runDetail: sampleRelationRunDetail() })
+  })
+
+  it('exposes RELATIONS/ENTITIES only for relation analyses', () => {
+    expect(tabsFor('relation')).toEqual(expect.arrayContaining(['RELATIONS', 'ENTITIES']))
+    expect(tabsFor('both')).toEqual(expect.arrayContaining(['RELATIONS', 'ENTITIES']))
+    expect(tabsFor('provenance')).not.toContain('RELATIONS')
+    expect(tabsFor(undefined)).not.toContain('ENTITIES')
+  })
+
+  it('shows the RELATIONS/ENTITIES tabs only for a relation run', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByTestId('fact-node-f1')
+
+    expect(screen.getByRole('tab', { name: 'RELATIONS' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'ENTITIES' })).toBeInTheDocument()
+  })
+
+  it('loads the entity graph on demand and renders entity nodes', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByTestId('fact-node-f1')
+
+    // The heavier GetRun is only fetched once a relation tab opens.
+    expect(mocks.getRun).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('tab', { name: 'RELATIONS' }))
+
+    expect(await screen.findByTestId('entity-node-n1')).toBeInTheDocument()
+    expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_009' })
+  })
+
+  it('folds the entity graph with at_event while replaying', async () => {
+    const { container } = renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByTestId('fact-node-f1')
+    fireEvent.click(screen.getByRole('tab', { name: 'RELATIONS' }))
+    await screen.findByTestId('entity-node-n1')
+
+    fireEvent.click(container.querySelector('button[aria-label="replay back"]')!)
+
+    // Replay folds both graphs; GetRun carries the same at_event as GetRunGraph.
+    await waitFor(() => expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_009', atEvent: 4 }))
+  })
+
+  it('drives the Inspector from an entity node selection', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByTestId('fact-node-f1')
+    fireEvent.click(screen.getByRole('tab', { name: 'RELATIONS' }))
+    fireEvent.click(await screen.findByTestId('entity-node-n1'))
+
+    const inspector = within(screen.getByLabelText('inspector'))
+    expect(await inspector.findByText('GitHub')).toBeInTheDocument()
+    expect(inspector.getByText('verbatim quote from the source')).toBeInTheDocument()
+  })
+
+  it('drives the Inspector from an ENTITIES row selection', async () => {
+    renderAt('/projects/copilot-productivity/runs/run_009')
+    await screen.findByTestId('fact-node-f1')
+    fireEvent.click(screen.getByRole('tab', { name: 'ENTITIES' }))
+
+    fireEvent.click(await screen.findByText('GitHub'))
+
+    const inspector = within(screen.getByLabelText('inspector'))
+    expect(await inspector.findByText('verbatim quote from the source')).toBeInTheDocument()
   })
 })
 
@@ -406,6 +481,13 @@ describe('new run', () => {
     expect(screen.getByLabelText('source text')).toHaveValue('Document A text.')
     expect(screen.getByLabelText('goal')).toHaveValue('判定 55% 是否忠实于一手研究')
     expect(mocks.getRun).toHaveBeenCalledWith({ runId: 'run_009' })
+  })
+
+  it('keeps the source run analysis when retrying (?from=)', async () => {
+    mocks.getRun.mockResolvedValue({ runDetail: sampleRelationRunDetail() })
+    renderAt('/projects/copilot-productivity/runs/new?from=run_009')
+
+    await waitFor(() => expect(screen.getByLabelText('analysis')).toHaveValue('relation'))
   })
 
   it('extracts a goal and title from document A', async () => {
