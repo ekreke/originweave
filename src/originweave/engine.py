@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from .blackboard import (
+    ANALYSES,
     BlackboardError,
     Board,
     Edge,
@@ -81,10 +82,9 @@ DISPATCHABLE_TYPES: tuple[str, ...] = ("explore", "decompose", "verify", "extrac
 # provenance-only run, and their completions commit ``ENTITY``/``RELATION`` events.
 GRAPH_INTENT_TYPES: frozenset[str] = frozenset({"extract", "relate"})
 
-# Whole-run analysis modes (proto ``CreateRunRequest.analysis``): provenance only,
-# entity-relation graph only, or both. ``both`` completes only when both the provenance
-# and the relation stop condition hold (TODO M5 decision).
-ANALYSES: frozenset[str] = frozenset({"provenance", "relation", "both"})
+# ``ANALYSES`` (the whole-run analysis modes) is imported from ``blackboard`` and
+# re-exported here; ``both`` completes only when both the provenance and the relation
+# stop condition hold (TODO M5 decision).
 
 # What an "explore" Intent may produce (blackboard-protocol.md section 2.2): it chases
 # citations/sources. "decompose" yields sub-claims, checked separately via Fact.role.

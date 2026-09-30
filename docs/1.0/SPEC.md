@@ -409,14 +409,18 @@ Hint 注入、Gate C 行为均可观测。
 - [x] 实体消歧/合并：按规范化名称归并同名实体，`aliases` 累积（保证重放确定性）— **M5b**：`blackboard.py`
       `canonical_name`（NFKC+casefold+折叠空白）+ `engine.py` `_commit_extract`/`_merge_into`/`_find_entity`
       （实体 id `n*`，首见名/状态胜出、`type` 从 `other` 升级、`confidence` 取 max、evidence 合并重编号）
-- [ ] server `CreateRun(analysis=relation|both)` 触发关系图抽取（测试注入 fake provider）
+- [x] server `CreateRun(analysis=relation|both)` 触发关系图抽取（测试注入 fake provider）— **M5c**：
+      `service.py` `create_run` 校验 `analysis ∈ ANALYSES`（`provenance|relation|both`）、`_build_engine`
+      从 run meta 读 `analysis` 传入 `Engine`（resume 一致）；`Run.entities/relations` 计数由
+      `summarize_run` 从 reduce 后的 board 填充
 - [x] run dir 产物 `entity-graph.json`（可由事件重建，非事实来源）— **M5b**：`store.py` `write_entity_graph`
       + `engine.py` `_flush_entity_graph`（每次图 pass 提交后增量重写，`sort_keys` 确定性）
 - [ ] 无来源推断标注：`Relation.status=inferred` + 置信度，渲染为虚线
       （引擎侧已归一 `status=inferred` 并校验置信度；前端虚线渲染待 M5d）
-- [ ] server：`RunDetail.entity_graph` 与 `CreateRunRequest.analysis`（proto）
-      （proto 字段已定义：`EntityGraph entity_graph = 8`、`optional string analysis = 4`；
-      server `CreateRun` 放行 `relation|both` 与 `convert` 映射待 M5c）
+- [x] server：`RunDetail.entity_graph` 与 `CreateRunRequest.analysis`（proto）— **M5c**：`convert.py`
+      `entity_pb`/`relation_pb`/`entity_graph_pb` + `run_detail_pb` 在 `analysis != provenance` 时
+      `CopyFrom`（空图也填，区别于 provenance 的「无图」）；测试 `tests/test_server.py`（relation/
+      both/空图/provenance 缺省/resume 保持/未知值 400）
 - [ ] dashboard：`RELATIONS`（关系图，复用图组件）与 `ENTITIES`（实体表）页签
 - [x] 单测：给定 fixture 输入产出确定性 `EntityGraph`（实体 / 关系 / 证据或 `inferred` 断言）— **M5b**：
       `tests/test_engine_m5.py`（fake provider 注入；归并/别名、`n*`/`r*` 序、inferred 校验、`both` 判据、

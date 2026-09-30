@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .blackboard import BlackboardError
+from .blackboard import BlackboardError, normalize_analysis
 from .config import BudgetConfig
 from .events import Event
 from .reduce import reduce
@@ -206,7 +206,7 @@ class Run:
             project_id=_str(data.get("project_id")),
             title=_str(data.get("title")),
             source_type=_str(data.get("source_type")) or "text",
-            analysis=_str(data.get("analysis")) or "provenance",
+            analysis=normalize_analysis(data.get("analysis")),
             status=_str(data.get("status")) or "queued",
             status_reason=_str(data.get("status_reason")),
             activity=_str(data.get("activity")),
@@ -365,7 +365,7 @@ def summarize_run(
         project_id=_str(meta.get("project_id")),
         title=_str(meta.get("title")) or store.root.name,
         source_type=_str(meta.get("source_type")) or "text",
-        analysis=_str(meta.get("analysis")) or "provenance",
+        analysis=normalize_analysis(meta.get("analysis")),
         status=status,
         activity=derive_activity(events, status=status),
         status_reason=(
@@ -378,6 +378,8 @@ def summarize_run(
         deviations=sum(1 for fact in board.facts if fact.kind == "deviation")
         if board is not None
         else 0,
+        entities=len(board.entities) if board is not None else 0,
+        relations=len(board.relations) if board is not None else 0,
         intents=intents,
         steps=Steps(current=sessions, total=max_steps),
         budget=Budget(tokens=tokens, cost=cost, elapsed=_format_elapsed(events)),

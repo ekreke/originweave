@@ -183,7 +183,8 @@ goal, max_steps?, max_wall?, max_cost?, auto?, source_text?
 预算三项为**覆盖**，未给出时回落 `[worker].budget` 配置；`auto=true` 跳过 HITL Gate（默认
 未给定时回落 `[hitl].auto`）。
 `source_text` 提供资料 A 正文，用于 `source_type="text"`（**目前仅支持 text；url 暂不支持**）。
-`analysis` 目前仅 `provenance`（`relation`/`both` 归 M5）。
+`analysis` 支持 `provenance|relation|both`（server 已接线，含 resume 一致性，**M5c**）；
+`relation`/`both` 关系图的 RELATIONS/ENTITIES 页签渲染归 **M5d**。
 `title` 可省略：省略时由 server 自动生成（前端在 `SuggestGoal` 的建议标题、或资料 A 首行之间
 回落）；创建后可用 `UpdateRun` 就地修改（**M8**，改的是静态元数据，不动 `origin` Fact）。
 `CreateRun` 把资料 A 落盘为 `input/document.md`（+ `input/source.json`），并起一个后台 asyncio

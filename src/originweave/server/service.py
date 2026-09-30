@@ -19,7 +19,7 @@ from connectrpc.errors import ConnectError
 from originweave.v1 import originweave_pb2 as pb
 from originweave.v1.originweave_connect import OriginweaveService
 
-from ..blackboard import BlackboardError, Fact, Hint
+from ..blackboard import DEFAULT_ANALYSIS, BlackboardError, Fact, Hint, normalize_analysis
 from ..capabilities import CapabilityError, ChatMessage, build_model
 from ..config import (
     BudgetConfig,
@@ -32,7 +32,7 @@ from ..config import (
     parse_duration,
 )
 from ..config import save as save_config
-from ..engine import GATE_A, GATE_B, GATE_C, Engine, EngineError
+from ..engine import ANALYSES, GATE_A, GATE_B, GATE_C, Engine, EngineError
 from ..events import Event, now_iso
 from ..persistence import (
     Project,
@@ -367,10 +367,11 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             raise ConnectError(
                 Code.INVALID_ARGUMENT, "source_text is required for source_type='text'"
             )
-        analysis = request.analysis if request.HasField("analysis") else "provenance"
-        if analysis != "provenance":
+        analysis = request.analysis if request.HasField("analysis") else DEFAULT_ANALYSIS
+        if analysis not in ANALYSES:
             raise ConnectError(
-                Code.INVALID_ARGUMENT, f"analysis {analysis!r} is not supported until M5"
+                Code.INVALID_ARGUMENT,
+                f"analysis {analysis!r} must be one of {sorted(ANALYSES)}",
             )
         if not request.goal.strip():
             raise ConnectError(Code.INVALID_ARGUMENT, "goal is required")
@@ -694,7 +695,14 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
 
     def _build_engine(self, store: RunStore, *, auto: bool) -> Engine:
         """Build an engine over ``store`` using its immutable runtime snapshot."""
-        config = self._runtime_config(store)
+        # ``analysis`` and the runtime snapshot are both static run-level fields
+        # (run.json), not part of the config snapshot; read the meta once and derive
+        # both from it. ``normalize_analysis`` degrades a missing/corrupt ``analysis``
+        # value to ``provenance`` (matching ``summarize_run``) so a resumed run keeps
+        # its graph passes without raising in Engine().
+        meta = load_run_meta(store, self._ctx.workspace) or {}
+        config = self._runtime_config(meta)
+        analysis = normalize_analysis(meta.get("analysis"))
         worker = config.worker
         resolved_worker = self._ctx.worker_for(store.root, config=config)
         engine = Engine(
@@ -714,6 +722,7 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             max_fanout=config.run.max_fanout,
             budget=worker.budget,
             pricing=self._ctx.pricing,
+            analysis=analysis,
         )
         if isinstance(resolved_worker, RunContainerWorker):
             async def fail_lease(reason: str) -> None:
@@ -723,9 +732,8 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             resolved_worker.set_failure_callback(fail_lease)
         return engine
 
-    def _runtime_config(self, store: RunStore) -> Config:
+    def _runtime_config(self, meta: dict[str, Any]) -> Config:
         """The configuration frozen at CreateRun, with a legacy-run fallback."""
-        meta = load_run_meta(store, self._ctx.workspace) or {}
         runtime = meta.get("runtime")
         if isinstance(runtime, dict):
             snapshot = from_dict(runtime)

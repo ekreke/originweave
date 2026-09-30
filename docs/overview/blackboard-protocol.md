@@ -202,7 +202,7 @@ Dispatcher / reducer 分配与推导（§2.4），**语义**边由 Worker 显式
 
 - `complete` 为 `null` 表示未判定完成；`gate` 为 `null` 表示无需人工介入。
 - 一次 `Bootstrap` 的 `facts` 为 **0..N 个 `role=main-claim`**——资料 A 可能含**多个**核心抽象
-  论点（`kind=fact`）；`Explore` 通常产出 1 个 Fact（`extract`/`relate` 时产 Entity/Relation，归 M5）。
+  论点（`kind=fact`）；`Explore` 通常产出 1 个 Fact（M5：`extract` 产 Entity、`relate` 产 Relation）。
 - **`key`**（M2，可选，仅限本 reply 内唯一）：新 Fact 的本地引用，供 `edges` 引用**同批** Fact；引擎
   分配真实 id 后丢弃，**不写入 `Fact`**。
 - **`edges`**（M2，可选）：语义边 `main-chain | dependency | goal-derived`（结构边由 reducer 派生，
@@ -291,8 +291,7 @@ Intent 按 id 序取前 `[run].dispatch_width` 个（M9：每轮宽度上限，�
 
 `analysis` 含 `relation`（或 `both`）时，同一循环改为处理 `extract`（抽实体）与 `relate`
 （判关系）两类 Intent，产出写入 `entities` / `relations` 而非 `facts`；事件溯源、
-心跳释放、Stigmergy 与 Gate 机制不变。（M1 I6 的「本轮是否产生新 Fact」进度判据目前只看 `facts`；
-待 M5 引入 `entities`/`relations` 后，判据一并纳入。）
+心跳释放、Stigmergy 与 Gate 机制不变。（进度/COMPLETE 判据已含 `entities`/`relations`：`Engine._relations_satisfied`，**M5b** 落地。）
 
 ### 4.4 走查示例：一次 Bootstrap + Reason + 单轮派发（M1 I3）
 

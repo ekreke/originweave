@@ -175,6 +175,20 @@ def test_summarize_run_meta_overrides_static_fields(tmp_path: Path) -> None:
     assert run.steps.total == 7
 
 
+def test_summarize_run_normalizes_the_analysis(tmp_path: Path) -> None:
+    """A valid analysis passes through; a corrupt one degrades to ``provenance``.
+
+    ``_build_engine`` and ``run_detail_pb`` both key off ``Run.analysis``, so the
+    summary must be the single place that rejects an unknown persisted value.
+    """
+    store = _store_with_events(tmp_path / "run_001")
+
+    assert summarize_run(store, meta={"analysis": "relation"}).analysis == "relation"
+    assert summarize_run(store, meta={"analysis": "graphs"}).analysis == "provenance"
+    assert summarize_run(store, meta={"analysis": 42}).analysis == "provenance"
+    assert summarize_run(store).analysis == "provenance"
+
+
 def test_summarize_run_empty_dir_defaults_to_queued(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_007")
     store.init_layout()
@@ -245,6 +259,12 @@ def test_run_dict_round_trip() -> None:
     )
 
     assert Run.from_dict(run.to_dict()) == run
+
+
+def test_run_from_dict_normalizes_the_analysis() -> None:
+    assert Run.from_dict({"id": "r", "analysis": "both"}).analysis == "both"
+    assert Run.from_dict({"id": "r", "analysis": "graphs"}).analysis == "provenance"
+    assert Run.from_dict({"id": "r"}).analysis == "provenance"
 
 
 def _running_store(root: Path) -> RunStore:

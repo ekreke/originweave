@@ -155,7 +155,9 @@ def _client_for(ctx: ServerContext) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
-async def _create_run(client: httpx.AsyncClient, *, auto: bool | None = None) -> dict[str, object]:
+async def _create_run(
+    client: httpx.AsyncClient, *, auto: bool | None = None, analysis: str | None = None
+) -> dict[str, object]:
     body: dict[str, object] = {
         "projectId": "p",
         "sourceType": "text",
@@ -164,6 +166,8 @@ async def _create_run(client: httpx.AsyncClient, *, auto: bool | None = None) ->
     }
     if auto is not None:
         body["auto"] = auto
+    if analysis is not None:
+        body["analysis"] = analysis
     response = await _post(client, "CreateRun", body)
     assert response.status_code == 200, response.text
     return response.json()["run"]
@@ -842,10 +846,10 @@ async def test_create_run_rejects_unsupported_input(tmp_path: Path) -> None:
         url = await _post(client, "CreateRun", {**base, "sourceType": "url"})
         empty = await _post(client, "CreateRun", {**base, "sourceText": "   "})
         no_goal = await _post(client, "CreateRun", {**base, "goal": ""})
-        relation = await _post(client, "CreateRun", {**base, "analysis": "relation"})
+        bad_analysis = await _post(client, "CreateRun", {**base, "analysis": "graphs"})
         bad_wall = await _post(client, "CreateRun", {**base, "maxWall": "soon"})
 
-    for response in (url, empty, no_goal, relation, bad_wall):
+    for response in (url, empty, no_goal, bad_analysis, bad_wall):
         assert response.status_code == 400
         assert response.json()["code"] == "invalid_argument"
 
@@ -2065,3 +2069,257 @@ async def test_update_run_leaves_the_event_log_untouched(tmp_path: Path) -> None
     assert [(event.id, event.type) for event in after] == [
         (event.id, event.type) for event in before
     ]
+
+
+# ------------------------------------------------------------------ M5c relation
+
+
+def _m5c_chain_replies() -> tuple[str, ...]:
+    """A scripted relation-analysis run: bootstrap, extract, relate, then converge."""
+    bootstrap = _bootstrap("A claim")  # f1 (main-claim)
+    reason_extract = json.dumps(
+        {
+            "facts": [],
+            "intents": [{"type": "extract", "from": "origin", "question": "Extract entities."}],
+            "complete": None,
+        }
+    )
+    extract = json.dumps(
+        {
+            "entities": [
+                {"name": "GitHub", "type": "organization", "status": "open", "confidence": 0.9},
+                {"name": "Microsoft", "type": "organization", "status": "open", "confidence": 0.9},
+            ],
+            "relations": [],
+            "facts": [],
+            "intents": [],
+            "complete": None,
+        }
+    )
+    reason_relate = json.dumps(
+        {
+            "facts": [],
+            "intents": [
+                {"type": "relate", "from": "n1", "question": "Judge n1."},
+                {"type": "relate", "from": "n2", "question": "Judge n2."},
+            ],
+            "complete": None,
+        }
+    )
+    evidence = [
+        {"quote": "acquired", "sourceTitle": "A", "url": "https://example.com/a", "locator": "p.1"}
+    ]
+    relate = json.dumps(
+        {
+            "relations": [
+                {
+                    "source": "n1",
+                    "target": "n2",
+                    "type": "acquires",
+                    "label": "acquired",
+                    "status": "verified",
+                    "confidence": 0.8,
+                    "inferred": False,
+                    "evidence": evidence,
+                },
+                {
+                    "source": "n2",
+                    "target": "n1",
+                    "type": "competes-with",
+                    "label": "rival",
+                    "status": "inferred",
+                    "confidence": 0.5,
+                    "inferred": True,
+                    "evidence": [],
+                },
+            ],
+            "entities": [],
+            "facts": [],
+            "intents": [],
+            "complete": None,
+        }
+    )
+    relate_empty = json.dumps(
+        {"relations": [], "entities": [], "facts": [], "intents": [], "complete": None}
+    )
+    keep1 = json.dumps({"keep": [0], "drop": []})
+    keep2 = json.dumps({"keep": [0, 1], "drop": []})
+    complete = json.dumps({"facts": [], "intents": [], "complete": {"verdict": "graph judged"}})
+    return (
+        bootstrap,
+        reason_extract,
+        keep1,
+        extract,
+        reason_relate,
+        keep2,
+        relate,
+        relate_empty,  # the second relate pass (one worker call per Intent)
+        complete,
+    )
+
+
+async def test_create_relation_run_exposes_the_entity_graph(tmp_path: Path) -> None:
+    """CreateRun(analysis=relation) builds the entity graph and serves it (M5c)."""
+    ctx = _ctx(tmp_path, *_m5c_chain_replies())
+    async with _client_for(ctx) as client:
+        run = await _create_run(client, auto=True, analysis="relation")
+        run_id = str(run["id"])
+        await ctx.scheduler.wait(run_id)
+        detail = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
+
+    assert detail["run"]["status"] == "completed"
+    assert detail["run"]["analysis"] == "relation"
+    assert detail["run"]["entities"] == 2
+    assert detail["run"]["relations"] == 2
+    graph = detail["entityGraph"]
+    assert [entity["name"] for entity in graph["entities"]] == ["GitHub", "Microsoft"]
+    assert [entity["type"] for entity in graph["entities"]] == ["organization", "organization"]
+    assert graph["entities"][0].get("aliases", []) == []  # empty list is omitted by protojson
+    assert [relation["type"] for relation in graph["relations"]] == ["acquires", "competes-with"]
+    assert (graph["relations"][0]["source"], graph["relations"][0]["target"]) == ("n1", "n2")
+    assert graph["relations"][0]["label"] == "acquired"
+    assert graph["relations"][1]["inferred"] is True
+    assert graph["relations"][1]["status"] == "inferred"
+    assert graph["relations"][0]["evidence"][0]["quote"] == "acquired"
+
+
+async def test_relation_run_resume_keeps_the_analysis(tmp_path: Path) -> None:
+    """A resumed relation run rebuilds its engine with analysis=relation (M5c).
+
+    If ``_build_engine`` dropped ``analysis``, the resumed Reason's ``extract`` Intent
+    would be rejected and the run would FAIL instead of reaching Gate C.
+    """
+    ctx = _ctx(tmp_path, *_m5c_chain_replies())
+    async with _client_for(ctx) as client:
+        run = await _create_run(client, auto=False, analysis="relation")
+        run_id = str(run["id"])
+        await ctx.scheduler.wait(run_id)
+        paused = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
+        assert paused["waitingFor"]["gate"] == "confirm-claim"
+
+        approved = await _post(
+            client,
+            "SubmitHumanInput",
+            {"runId": run_id, "gate": "confirm-claim", "decision": "approve"},
+        )
+        assert approved.status_code == 200, approved.text
+        await ctx.scheduler.drain()
+
+        review = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
+        assert review["run"]["status"] == "awaiting_human"
+        assert review["waitingFor"]["gate"] == "review"
+        assert review["run"]["entities"] == 2  # the graph passes ran after the resume
+
+        confirmed = await _post(
+            client,
+            "SubmitHumanInput",
+            {"runId": run_id, "gate": "review", "decision": "approve"},
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        await ctx.scheduler.drain()
+        detail = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
+
+    assert detail["run"]["status"] == "completed"
+    assert len(detail["entityGraph"]["entities"]) == 2
+
+
+async def test_create_run_rejects_an_unknown_analysis(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    async with _client_for(ctx) as client:
+        response = await _post(
+            client,
+            "CreateRun",
+            {
+                "projectId": "p",
+                "sourceType": "text",
+                "sourceText": "doc",
+                "goal": "g",
+                "analysis": "graphs",
+            },
+        )
+    assert response.status_code == 400, response.text
+    assert "analysis" in response.text
+
+
+async def test_resume_degrades_a_corrupt_persisted_analysis(tmp_path: Path) -> None:
+    """A corrupt persisted analysis falls back to provenance on resume, not a crash (M5c).
+
+    ``_build_engine`` runs on every resume; an unknown ``analysis`` value must degrade
+    to ``provenance`` instead of raising ``ValueError`` inside ``Engine`` (which would
+    fail the RPC / flip the run to FAILED).
+    """
+    ctx = _ctx(tmp_path, _bootstrap("A claim"), NO_REASON)
+    workspace = ctx.workspace
+    assert workspace is not None
+    async with _client_for(ctx) as client:
+        await _create_run(client)  # auto defaults to [hitl].auto = False
+        await ctx.scheduler.wait("run_001")
+
+        meta = workspace.get_run_meta("run_001")
+        assert meta is not None
+        workspace.upsert_run_meta("run_001", {**meta, "analysis": "graphs"})
+
+        approved = await _post(
+            client,
+            "SubmitHumanInput",
+            {"runId": "run_001", "gate": "confirm-claim", "decision": "approve"},
+        )
+        assert approved.status_code == 200, approved.text
+        await ctx.scheduler.drain()
+
+        detail = (await _post(client, "GetRun", {"runId": "run_001"})).json()["runDetail"]
+
+    assert detail["run"]["analysis"] == "provenance"  # summarized from the corrupt value
+    assert detail["run"]["status"] == "stopped"  # ran as provenance, did not fail
+    assert "FAILED" not in [event["type"] for event in detail["events"]]
+
+
+async def test_provenance_run_has_no_entity_graph(tmp_path: Path) -> None:
+    _write_run(tmp_path / "runs", "run_001", project_id="p")
+    ctx = _ctx(tmp_path)
+    async with _client_for(ctx) as client:
+        detail = (await _post(client, "GetRun", {"runId": "run_001"})).json()["runDetail"]
+
+    assert detail["run"]["analysis"] == "provenance"
+    assert "entityGraph" not in detail
+
+
+async def test_relation_run_with_no_relations_still_exposes_an_empty_graph(tmp_path: Path) -> None:
+    """An empty entity graph is a presence, not an absence (M5c)."""
+    replies = list(_m5c_chain_replies())
+    # Replace the populated relate reply with two empty passes: entities, no relations.
+    empty = json.dumps(
+        {"relations": [], "entities": [], "facts": [], "intents": [], "complete": None}
+    )
+    replies[6] = empty
+    ctx = _ctx(tmp_path, *replies)
+    async with _client_for(ctx) as client:
+        run = await _create_run(client, auto=True, analysis="relation")
+        run_id = str(run["id"])
+        await ctx.scheduler.wait(run_id)
+        detail = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
+
+    # The relates yield nothing, so the loop stalls before Reason can converge -- the
+    # point here is only that an entity-only graph is still exposed as present.
+    assert detail["run"]["status"] == "stopped"
+    assert detail["run"].get("entities", 0) == 2
+    assert detail["run"].get("relations", 0) == 0  # omitted when zero by protojson
+    assert "entityGraph" in detail
+    assert len(detail["entityGraph"]["entities"]) == 2
+    assert detail["entityGraph"].get("relations", []) == []
+
+
+async def test_create_both_analysis_run_is_accepted(tmp_path: Path) -> None:
+    """`analysis=both` is a valid mode and still exposes the entity graph (M5c)."""
+    ctx = _ctx(tmp_path, *_m5c_chain_replies())
+    async with _client_for(ctx) as client:
+        run = await _create_run(client, auto=True, analysis="both")
+        run_id = str(run["id"])
+        await ctx.scheduler.wait(run_id)
+        detail = (await _post(client, "GetRun", {"runId": run_id})).json()["runDetail"]
+
+    assert detail["run"]["analysis"] == "both"
+    # `both` also requires the provenance chain, which this script does not build, so the
+    # run stops rather than completing -- but the graph passes still ran.
+    assert detail["run"]["status"] == "stopped"
+    assert len(detail["entityGraph"]["entities"]) == 2

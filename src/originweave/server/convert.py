@@ -14,7 +14,19 @@ from google.protobuf import json_format, struct_pb2
 
 from originweave.v1 import originweave_pb2 as pb
 
-from ..blackboard import Board, Edge, Evidence, Fact, Hint, HumanDecision, Intent, WaitingFor
+from ..blackboard import (
+    DEFAULT_ANALYSIS,
+    Board,
+    Edge,
+    Entity,
+    Evidence,
+    Fact,
+    Hint,
+    HumanDecision,
+    Intent,
+    Relation,
+    WaitingFor,
+)
 from ..config import Config, ModelConfig, WorkerConfig
 from ..events import Event
 from ..persistence import Project, Run
@@ -88,6 +100,45 @@ def edge_pb(edge: Edge) -> Any:
 
 def waiting_for_pb(waiting: WaitingFor) -> Any:
     return pb.WaitingFor(gate=waiting.gate, question=waiting.question)
+
+
+def entity_pb(entity: Entity) -> Any:
+    return pb.Entity(
+        id=entity.id,
+        name=entity.name,
+        type=entity.type,
+        aliases=list(entity.aliases),
+        status=entity.status,
+        confidence=entity.confidence,
+        note=entity.note,
+        position=pb.Vec2(
+            x=float(entity.position.get("x", 0.0)),
+            y=float(entity.position.get("y", 0.0)),
+        ),
+        evidence=[evidence_pb(item) for item in entity.evidence],
+    )
+
+
+def relation_pb(relation: Relation) -> Any:
+    return pb.Relation(
+        id=relation.id,
+        source=relation.source,
+        target=relation.target,
+        type=relation.type,
+        label=relation.label,
+        status=relation.status,
+        confidence=relation.confidence,
+        inferred=relation.inferred,
+        note=relation.note,
+        evidence=[evidence_pb(item) for item in relation.evidence],
+    )
+
+
+def entity_graph_pb(board: Board) -> Any:
+    return pb.EntityGraph(
+        entities=[entity_pb(entity) for entity in board.entities],
+        relations=[relation_pb(relation) for relation in board.relations],
+    )
 
 
 def decision_pb(decision: HumanDecision) -> Any:
@@ -299,9 +350,13 @@ def run_detail_pb(
         sessions=[session_pb(session) for session in sessions],
         source_text=source_text,
         # proto3 optional *message* fields reject direct assignment; constructor kwargs
-        # work (and CopyFrom below). Same applies to entity_graph when M5 lands.
+        # work (and CopyFrom below).
         waiting_for=waiting,
     )
+    if run.analysis != DEFAULT_ANALYSIS:
+        # The relation analysis always carries a graph: an empty one is a valid state,
+        # distinct from a provenance run that has none.
+        detail.entity_graph.CopyFrom(entity_graph_pb(board))
     if report.verdict or report.findings:
         detail.report.CopyFrom(report_pb(report))
     return detail

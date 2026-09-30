@@ -38,8 +38,26 @@ EdgeRelation = Literal[
 RunStatus = Literal[
     "queued", "running", "awaiting_human", "paused", "stopped", "completed", "failed"
 ]
+# Analysis mode (proto CreateRunRequest.analysis): the provenance DAG only, the
+# entity-relation graph only, or both. A provenance run carries no entity graph; a
+# relation/both run always carries one (possibly empty).
+AnalysisMode = Literal["provenance", "relation", "both"]
+ANALYSES: frozenset[str] = frozenset({"provenance", "relation", "both"})
+DEFAULT_ANALYSIS = "provenance"
 # Author of a Hint or a human decision.
 Author = Literal["human", "agent"]
+
+
+def normalize_analysis(value: object) -> str:
+    """Coerce a persisted analysis value to a known mode.
+
+    Missing or unknown values (e.g. a hand-edited ``run.json``) fall back to
+    ``provenance`` so a corrupt value degrades instead of raising deep inside
+    ``Engine``. Request-time validation rejects an unknown value earlier
+    (``CreateRun`` returns ``INVALID_ARGUMENT``).
+    """
+    return value if isinstance(value, str) and value in ANALYSES else DEFAULT_ANALYSIS
+
 
 # Entity-relation graph (M5). Nodes are entities, edges are relations from a frozen
 # ontology; reverse labels are derived by the renderer (only forward types are stored).
@@ -587,7 +605,9 @@ class Board:
 
 
 __all__ = [
+    "ANALYSES",
     "AUTHORS",
+    "DEFAULT_ANALYSIS",
     "EDGE_RELATIONS",
     "ENTITY_STATUSES",
     "ENTITY_TYPES",
@@ -599,6 +619,7 @@ __all__ = [
     "RELATION_STATUSES",
     "RELATION_TYPES",
     "RUN_STATUSES",
+    "AnalysisMode",
     "Author",
     "Board",
     "Edge",
