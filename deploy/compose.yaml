@@ -1,0 +1,45 @@
+# originweave server deployment (M4). Runs the Connect API + built SPA in a container,
+# on a user-defined network so the server can spawn worker containers and reach them by
+# name -- and so the workers can call the server's Search RPC back.
+#
+# The data root is bound at the SAME absolute path host<->container: the server mounts
+# each run dir into its worker with `-v <run_dir>:<run_dir>`, so both sides must resolve
+# the path identically. Build the runtime image first (`make image`).
+#
+#   make deploy                     # DATA_ROOT defaults to ~/originweave
+#   DATA_ROOT=/srv/originweave make deploy
+#
+# Prereqs: a Docker daemon (socket mounted) and `make image` for the worker runtime image.
+
+name: originweave
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: Dockerfile.server
+    image: originweave-server:latest
+    networks:
+      ow:
+        # The worker's callback URL (ORIGINWEAVE_SERVER_URL) resolves this alias.
+        aliases:
+          - originweave-server
+    ports:
+      - "${PORT:-8765}:8765"
+    environment:
+      ORIGINWEAVE_DATA_ROOT: "${DATA_ROOT:-/srv/originweave}"
+      ORIGINWEAVE_DOCKER_NETWORK: ow
+      ORIGINWEAVE_SERVER_URL: http://originweave-server:8765
+      # Credentials stay environment-only (never config); all are optional.
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
+      EXA_API_KEY: "${EXA_API_KEY:-}"
+      PARALLEL_API_KEY: "${PARALLEL_API_KEY:-}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same path on both sides (see the header note).
+      - "${DATA_ROOT:-/srv/originweave}:${DATA_ROOT:-/srv/originweave}"
+
+networks:
+  ow:
+    name: ow

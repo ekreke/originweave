@@ -1434,6 +1434,24 @@ def test_ui_command_rejects_missing_run(tmp_path: Path, monkeypatch: pytest.Monk
     assert main(["ui", "--run", str(tmp_path / "nope")]) == 1
 
 
+def test_ui_command_binds_a_custom_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from originweave.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ORIGINWEAVE_SERVER_URL", raising=False)
+    captured: dict[str, object] = {}
+
+    def fake_run(app: object, *, host: str, port: int, log_level: str) -> None:
+        captured.update(host=host, port=port)
+
+    monkeypatch.setattr("uvicorn.run", fake_run)
+
+    assert main(["ui", "--host", "0.0.0.0", "--port", "0"]) == 0
+    assert captured["host"] == "0.0.0.0"
+    # A wildcard bind has no usable callback address; the deployment must set it.
+    assert "ORIGINWEAVE_SERVER_URL" not in os.environ
+
+
 def test_ui_command_exports_the_server_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from originweave.cli import main
 

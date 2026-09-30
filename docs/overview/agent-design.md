@@ -267,6 +267,23 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 - 容器镜像与 server 镜像分离：server 常驻，runtime 短命。
 - 安全边界：容器内可触网执行检索；server 仅负责编排与持久化。
 
+### 6.1 部署：server 运行于 Docker（M4）
+
+- **镜像**：`Dockerfile.server`（多阶段）——node 阶段构建 `frontend/dist`；python 阶段
+  `buf generate` 生成 `src/originweave/v1` 并 `pip install .`；运行阶段 = python + **docker CLI**
+  + 包 + `prompts/` + `dist` + 默认 `originweave.toml`；`ENTRYPOINT` 经 `scripts/docker-entrypoint.sh`
+  落数据根后 `originweave ui --host 0.0.0.0`。`make server-image` 构建；`make deploy`（compose）起服务。
+- **网络模式**：server 容器与 worker 容器置于同一**用户定义网络**（`ORIGINWEAVE_DOCKER_NETWORK`）。
+  `ContainerManager` 据此改用 `docker run --network <net> --name ow-worker-<id>`（**不 publish 端口**），
+  server 以**容器名**寻址 worker（同网络 DNS）。未设该变量时退回宿主 publish 模式（`-p 127.0.0.1::8000`）。
+- **run dir 路径一致**：worker 仍以 `-v <run_dir>:<run_dir>` 挂载，故数据根必须**宿主与容器同绝对路径**
+  （compose 以 `${DATA_ROOT}:${DATA_ROOT}` 绑定，entrypoint `cd ${DATA_ROOT}`）。
+- **回调地址**：`_worker_env` 把 `ORIGINWEAVE_SERVER_URL`（= server 的网络别名，如
+  `http://originweave-server:8765`）转发给 worker；仅当设了网络时**挂载 `search` 工具**，此时 Pi 走
+  自检索（M6 P4）回调 server `Search` RPC；publish 模式下仍过滤 `search`、主机预取（M3a）。
+- 凭据仍只经环境变量注入（compose 透传）；`/var/run/docker.sock` 由 server 容器挂载（DooD），
+  server 依旧只编排，实际执行在 worker 容器内（红线 3 不变）。
+
 > **容器池（后续优化，2026-09）**：设置 `[worker].max_concurrency` 时**预热启动** N 个 runtime
 > 容器（池），实际调用从池中取容器下发任务、调用后归还复用（而非每次 `docker run`）。M3 先落地
 > per-call 起/销毁；池化待评估（启动开销 vs 复用收益）。见 `docs/1.0/TODO.md`。

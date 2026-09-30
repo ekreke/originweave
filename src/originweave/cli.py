@@ -49,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     ui = sub.add_parser("ui", help="serve the run view (read-only with --run)")
     ui.add_argument("--run", default=None)
     ui.add_argument("--port", type=int, default=8765)
+    ui.add_argument("--host", default="127.0.0.1", help="bind address (0.0.0.0 in a container)")
 
     replay = sub.add_parser("replay", help="replay a run directory")
     replay.add_argument("run_dir")
@@ -149,10 +150,13 @@ def _cmd_ui(args: argparse.Namespace) -> int:
     if not static_dir.is_dir():
         print(f"note: {static_dir} not found; serving the API only", file=sys.stderr)
 
-    host = "127.0.0.1"
+    host = args.host
     # The Pi search extension (M6 P4) calls back this server's Search RPC; point it at
-    # the actual port unless the operator set an explicit override.
-    os.environ.setdefault("ORIGINWEAVE_SERVER_URL", f"http://{host}:{args.port}")
+    # the actual port unless the operator set an explicit override. A wildcard bind has
+    # no usable callback address, so the operator must provide ORIGINWEAVE_SERVER_URL
+    # (e.g. the container's network alias) in that mode.
+    if host != "0.0.0.0":  # noqa: S104 -- an explicit opt-in bind address, not a default
+        os.environ.setdefault("ORIGINWEAVE_SERVER_URL", f"http://{host}:{args.port}")
     app = create_app(config=cfg, root=root, run_dir=run_dir, static_dir=static_dir)
 
     suffix = f" (single run {run_dir})" if run_dir is not None else ""

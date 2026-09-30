@@ -385,7 +385,13 @@ Hint 注入、Gate C 行为均可观测。
   pinned 拒绝）；`dashboard.md §3/§4.1`；前端 `/projects/new`（`routes/NewProject.tsx` + `useCreateProject` +
   Overview 入口）；`Makefile` `dev`（可写，`ui`/`run` 仍为只读样例）
 - [ ] 端到端 `make demo`：资料 A → 抽象论点 → DAG → 记分卡 → 前端可见 → `replay` 可复现
-- [ ] server 运行于 Docker（Deployment 层）
+- [x] server 运行于 Docker（Deployment 层）— **M4**：`Dockerfile.server`（多阶段：node 建
+      `frontend/dist` → python `buf generate` + `pip install .` → 运行阶段装 docker CLI + prompts/dist
+      + 默认 `originweave.toml`）/ `scripts/docker-entrypoint.sh` / `deploy/compose.yaml`（用户定义网络
+      `ow`、挂 `docker.sock`、数据根同路径绑定）；`ContainerManager` 增网络模式（`--network`/`--name`，
+      不 publish 端口，server 按容器名寻址 worker）；`originweave ui --host`；`_worker_env` 转发
+      `ORIGINWEAVE_SERVER_URL` 并在网络模式下挂载 `search`（worker 自检索回调 server）；`make
+      server-image`/`deploy`；见 `agent-design.md §6.1`
 - [ ] 文档一致性回归：`overview/`、`proto/` 与本文件术语/契约无漂移
 
 验收：从 UI 发起一次核验并看到由抽象论点拆解出的 DAG + 记分卡，可在 Gate 处人工介入；

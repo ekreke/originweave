@@ -1,0 +1,37 @@
+# Keep the build context small and secret-free. Note: src/originweave/v1 is generated
+# by `make proto` and is intentionally NOT ignored here -- Dockerfile.runtime's build
+# context relies on it (Dockerfile.server regenerates it in its own stage).
+.git
+.github
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.workbuddy/
+.env
+.env.*
+
+runs/
+projects/
+*.db
+*.db-wal
+*.db-shm
+
+docs/
+examples/
+tests/
+
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/src/gen/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+*.tsbuildinfo
+.DS_Store

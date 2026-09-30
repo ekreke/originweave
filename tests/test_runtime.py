@@ -102,15 +102,46 @@ async def test_container_manager_spawns_mounts_and_reaps(
     handle = await manager.spawn(run_dir=tmp_path, env={"ORIGINWEAVE_MODEL": "m"})
     assert handle.container_id == "cid-abc"
     assert handle.base_url == "http://127.0.0.1:32768"
+    assert handle.name is None
 
     run_argv = calls[0]
     assert run_argv[0] == "docker"
     assert run_argv[-1] == "img:latest"
     assert f"{tmp_path}:{tmp_path}" in run_argv
     assert "-e" in run_argv and "ORIGINWEAVE_MODEL=m" in run_argv
+    assert "--network" not in run_argv
+    assert "-p" in run_argv
 
     await manager.remove(handle)
     assert calls[-1][:3] == ["docker", "rm", "-f"]
+
+
+async def test_container_manager_network_mode_addresses_by_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+
+    async def fake_run(argv: list[str], *, check: bool = True) -> str:
+        calls.append(argv)
+        return "cid-net\n" if argv[1] == "run" else ""
+
+    monkeypatch.setattr(container_module, "_run_command", fake_run)
+    manager = ContainerManager(image="img:latest", network="ow")
+
+    handle = await manager.spawn(run_dir=tmp_path, env={})
+    assert handle.container_id == "cid-net"
+    assert handle.name is not None and handle.name.startswith("ow-worker-")
+    assert handle.base_url == f"http://{handle.name}:8000"
+
+    run_argv = calls[0]
+    assert "--network" in run_argv and "ow" in run_argv
+    assert "--name" in run_argv and handle.name in run_argv
+    assert "-p" not in run_argv
+    # No host port is published, so there is no `docker port` lookup.
+    assert all(call[1] != "port" for call in calls)
+
+    await manager.remove(handle)
+    assert calls[-1] == ["docker", "rm", "-f", handle.name]
 
 
 async def test_container_manager_reports_a_missing_docker(
@@ -420,6 +451,10 @@ def test_worker_env_filters_search_and_reads_credentials(
 ) -> None:
     monkeypatch.setenv("OPENAI_BASE_URL", "http://env-base")
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
+    # Publish mode: even a set callback URL is not forwarded (it would be unreachable
+    # in a container off the server's network), and `search` is not mounted.
+    monkeypatch.delenv("ORIGINWEAVE_DOCKER_NETWORK", raising=False)
+    monkeypatch.setenv("ORIGINWEAVE_SERVER_URL", "http://host-called:1234")
     cfg = Config(
         worker=WorkerConfig(execution="container", provider="pi", tools=("search", "read"))
     )
@@ -429,6 +464,37 @@ def test_worker_env_filters_search_and_reads_credentials(
     assert env["ORIGINWEAVE_WORKER_TOOLS"] == "read"  # search is not mounted in-container
     assert env["ORIGINWEAVE_MODEL_BASE_URL"] == "http://env-base"
     assert env["OPENAI_API_KEY"] == "secret"  # credentials come from the environment
+    assert "ORIGINWEAVE_SERVER_URL" not in env
+    assert ctx.container_manager is not None
+    assert ctx.container_manager._network is None
+
+
+def test_docker_network_empty_falls_back_to_host_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ORIGINWEAVE_DOCKER_NETWORK", "")
+    ctx = ServerContext.build(config=_container_config(), root=tmp_path)
+    assert ctx.container_manager is not None
+    assert ctx.container_manager._network is None
+
+
+def test_worker_env_mounts_search_and_forwards_the_callback_on_a_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ORIGINWEAVE_DOCKER_NETWORK", "ow")
+    monkeypatch.setenv("ORIGINWEAVE_SERVER_URL", "http://originweave-server:8765")
+    cfg = Config(
+        worker=WorkerConfig(execution="container", provider="pi", tools=("search", "read"))
+    )
+    ctx = ServerContext.build(config=cfg, root=tmp_path)
+
+    env = ctx._worker_env()
+    # The container can reach the server on the shared network, so `search` is mounted
+    # and the callback address is forwarded for the Pi TS search extension.
+    assert env["ORIGINWEAVE_WORKER_TOOLS"] == "search,read"
+    assert env["ORIGINWEAVE_SERVER_URL"] == "http://originweave-server:8765"
+    assert ctx.container_manager is not None
+    assert ctx.container_manager._network == "ow"
 
 
 def test_config_from_settings_preserves_execution_and_image() -> None:

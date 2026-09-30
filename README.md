@@ -33,6 +33,8 @@ make lint                # ruff check + mypy
 make test                # pytest
 make smoke               # 端到端冒烟（进程内起 server + fake worker，建 run → Gate → 记分卡）
 make image               # 烤 runtime 容器镜像（M3a；需 Docker）
+make server-image        # 烤 server 容器镜像（M4 Deployment；需 Docker）
+make deploy              # docker compose 起 server 容器（含 runtime 镜像 + docker.sock 挂载）
 make cloc                # src/originweave 逻辑代码行数
 ```
 
@@ -61,6 +63,8 @@ make frontend-e2e        # Playwright 浏览器 e2e（构建真实 dist + fake-p
 | `test` | `pytest`。 |
 | `smoke` | 端到端冒烟：进程内起 server（fake worker），`CreateRun` → Gate A → 记分卡；退出码非零即失败。 |
 | `image` | 构建 runtime 容器镜像 `originweave-runtime:latest`（M3a；需 Docker）。`[worker].execution=container` 时每次 Worker 调用用它起一个容器。 |
+| `server-image` | 构建 server 容器镜像 `originweave-server:latest`（M4 Deployment；多阶段：前端构建 + proto 生成 + 打包）。 |
+| `deploy` | `docker compose -f deploy/compose.yaml up --build` 起 server 容器（先 `make image` 备好 runtime 镜像；`DATA_ROOT` 默认 `~/originweave`）。 |
 | `lint` | `ruff check` + `mypy`。 |
 | `fmt` | `ruff format`。 |
 | `ui` | 起只读 UI 服务：Connect API + `frontend/dist`（存在时），端口 8765；`--run` 进单 run 只读模式。 |
@@ -80,8 +84,25 @@ scripts/           # 辅助脚本
 examples/          # 端到端样例（fixtures）
 proto/             # Connect/buf proto 契约
 frontend/          # React + Vite + TS 界面（M1b 脚手架、M1c-2b 接线）
+deploy/            # server 容器编排（compose.yaml；M4 Deployment）
 .github/workflows/ # CI
 ```
+
+## 部署（server 运行于 Docker，M4）
+
+```bash
+make image          # 先备好 worker runtime 镜像
+make deploy         # 构建 + 起 server 容器（DATA_ROOT=$HOME/originweave，端口 8765）
+# 或自定义数据根（须为绝对路径；宿主与容器同路径）：
+DATA_ROOT=/srv/originweave make deploy
+```
+
+`deploy/compose.yaml` 把 server 容器置于用户定义网络 `ow`（worker 容器同网、按容器名寻址），
+挂载 `/var/run/docker.sock`（server 仍只编排，实际任务在临时 worker 容器内执行，红线 3 不变），
+并以 `ORIGINWEAVE_DOCKER_NETWORK=ow` / `ORIGINWEAVE_SERVER_URL=http://originweave-server:8765`
+让 worker 经网络回调 server 的 `Search` RPC（M6 P4）。数据根**同绝对路径**绑定，保证
+`-v <run_dir>:<run_dir>` 在宿主与容器两侧一致。凭据仅经环境变量（compose 透传）。细节见
+`docs/overview/agent-design.md §6.1`。
 
 ## 开发
 

@@ -325,6 +325,13 @@
   （避免与 `/projects/new` 路由冲突）、`registry.get` 错误经 `_lookup_project` 归一、`ProjectRegistry.write`
   改**原子写**（temp+`os.replace`）。`make lint` + `make test`（396 passed, 1 skipped）+ 前端
   `typecheck/lint/format:check/test`(89)/`build` 全绿。
+- **M4 · server 运行于 Docker（Deployment，已完成）**：`Dockerfile.server`（多阶段：node 建
+  `frontend/dist` → python `buf generate` + `pip install .` → 运行阶段装 docker CLI + prompts/dist
+  + 默认配置）+ `scripts/docker-entrypoint.sh`（数据根同路径落盘、`ui --host 0.0.0.0`）+
+  `deploy/compose.yaml`（网络 `ow`、挂 `docker.sock`、`${DATA_ROOT}:${DATA_ROOT}`）；`ContainerManager`
+  增网络模式（`--network`/`--name`，不 publish，按容器名寻址）+ `ContainerHandle.name`；
+  `originweave ui --host`；`_worker_env` 转发 `ORIGINWEAVE_SERVER_URL` 且网络模式下挂载 `search`；
+  `make server-image`/`deploy`；文档 `agent-design.md §6.1`/`README`/`SPEC:388`。
 - **UI 修复 · 设置页边框 + 项目核验「重试」**：
   - **设置页**：`presentation.css` 里 4 处用了未定义的 `rgb(var(--c-line))`（`tokens.css` 只有
     `--c-hairline`）→ 边框声明非法、`input`/`select` 全无边框；改为 `--c-hairline`，并给

@@ -29,6 +29,7 @@ from ..capabilities import (
     build_worker,
 )
 from ..capabilities.model import BASE_URL_ENV_VAR, ENV_VAR
+from ..capabilities.pi import SERVER_URL_ENV
 from ..config import Config
 from ..engine import Engine
 from ..persistence import ProjectRegistry
@@ -40,12 +41,21 @@ from ..workspace import WorkspaceStore
 
 _log = logging.getLogger(__name__)
 
+# When set, worker containers join this user-defined Docker network and are addressed
+# by container name (server-in-Docker, M4). Unset keeps the host-publish mode.
+DOCKER_NETWORK_ENV_VAR = "ORIGINWEAVE_DOCKER_NETWORK"
+
 
 def _container_manager_for(cfg: Config) -> ContainerManager | None:
     """A runtime container manager when ``[worker].execution == "container"``."""
     if cfg.worker.execution == "container":
-        return ContainerManager(image=cfg.worker.image)
+        return ContainerManager(image=cfg.worker.image, network=_docker_network())
     return None
+
+
+def _docker_network() -> str | None:
+    """The configured worker Docker network, or ``None`` for host-publish mode."""
+    return os.environ.get(DOCKER_NETWORK_ENV_VAR) or None
 
 
 @dataclass
@@ -266,7 +276,7 @@ class ServerContext:
             and self.config.worker.image == config.worker.image
         ):
             return self.container_manager
-        return ContainerManager(image=config.worker.image)
+        return ContainerManager(image=config.worker.image, network=_docker_network())
 
     async def release_run_worker(self, run_dir: Path) -> None:
         """Release a run-level container at a terminal lifecycle boundary."""
@@ -278,16 +288,21 @@ class ServerContext:
         """Env injected into the container: worker config + credentials (env only)."""
         cfg = self.config if config is None else config
         model = cfg.capability.model
-        # `search` is not mounted inside the container: the Pi TS search extension would
-        # call the server at an address the container cannot reach. Retrieval therefore
-        # stays a host-side pre-fetch (the engine sees no `search` tool and pre-fetches),
-        # so container and in-process workers agree on who searches (M3a).
-        tools = tuple(tool for tool in cfg.worker.tools if tool != "search")
-        if "search" in cfg.worker.tools:
-            _log.warning(
-                "worker.tools 'search' is not mounted under execution=container; "
-                "retrieval runs as a host-side pre-fetch (M3a)"
-            )
+        # In host-publish mode the container cannot reach the server, so `search` is not
+        # mounted: retrieval stays a host-side pre-fetch (the engine sees no `search` tool
+        # and pre-fetches, M3a). With a user-defined network the server IS reachable (the
+        # callback URL is forwarded below), so the Pi TS `search` extension is mounted and
+        # the agent self-searches (M4).
+        if _docker_network() is None:
+            tools = tuple(tool for tool in cfg.worker.tools if tool != "search")
+            if "search" in cfg.worker.tools:
+                _log.warning(
+                    "worker.tools 'search' is not mounted without a Docker network "
+                    "(ORIGINWEAVE_DOCKER_NETWORK); retrieval runs as a host-side "
+                    "pre-fetch (M3a)"
+                )
+        else:
+            tools = cfg.worker.tools
         env = {
             ENV_PROVIDER: cfg.worker.provider,
             ENV_MODEL: model.model,
@@ -298,6 +313,13 @@ class ServerContext:
             value = os.environ.get(name)
             if value:
                 env[name] = value
+        # Only forward the callback URL in network mode: a host/loopback address would be
+        # meaningless (and unreachable) inside a container that is not on the server's
+        # network, and `search` is not mounted there anyway.
+        if _docker_network() is not None:
+            server_url = os.environ.get(SERVER_URL_ENV)
+            if server_url:
+                env[SERVER_URL_ENV] = server_url
         return env
 
     @classmethod

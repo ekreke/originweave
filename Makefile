@@ -11,10 +11,15 @@ RUN_DIR ?= examples/copilot_productivity
 RELATION_RUN_DIR ?= examples/organization_relations
 RUNS_DIR ?= runs
 PORT ?= 8765
+# Deployment (M4): the server image and the host data root bound at the same path.
+SERVER_IMAGE ?= originweave-server:latest
+DATA_ROOT ?= $(HOME)/originweave
+export DATA_ROOT
+export PORT
 
 .DEFAULT_GOAL := help
 .PHONY: help install run dev demo smoke image fixtures proto test lint fmt ui replay cloc clean \
-	replay-relations \
+	replay-relations server-image deploy \
 	frontend-install frontend-gen frontend-dev frontend-build frontend-lint \
 	frontend-typecheck frontend-test frontend-e2e
 
@@ -41,6 +46,12 @@ smoke: install ## Boot the server with a fake worker and drive a run end-to-end 
 
 image: proto ## Build the runtime container image (M3a; requires Docker)
 	docker build -f Dockerfile.runtime -t originweave-runtime:latest .
+
+server-image: ## Build the server container image (M4 Deployment; requires Docker)
+	docker build -f Dockerfile.server -t $(SERVER_IMAGE) .
+
+deploy: image ## Run the server in Docker (M4; docker compose + runtime image + socket mount)
+	docker compose -f deploy/compose.yaml up --build
 
 fixtures: ## Regenerate the committed sample fixtures (events.jsonl [+ entity-graph.json])
 	$(UV) run python scripts/build_sample_fixtures.py

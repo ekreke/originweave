@@ -1,0 +1,59 @@
+# originweave server image (M4 Deployment): the long-lived Connect API + built SPA.
+#
+# Multi-stage: build the frontend bundle, generate the Python proto/Connect code and
+# install the package, then assemble a slim runtime carrying the docker CLI (the server
+# owns container-per-worker, so it shells out to the host daemon via the mounted socket).
+#
+# Deployment: the server and its worker containers must agree on the run-dir path, so the
+# data root is bound at the SAME absolute path host<->container. `docker compose -f
+# deploy/compose.yaml up --build` wires this (plus the `ow` network and socket). See
+# docs/overview/agent-design.md §6/§7.
+#
+# Build: `make server-image` (and `make image` for the runtime image it spawns).
+
+# ---------------------------------------------------------------- frontend bundle
+FROM node:24-slim AS frontend
+RUN corepack enable && corepack prepare pnpm@10.21.0 --activate
+COPY --from=bufbuild/buf:1.47.2 /usr/local/bin/buf /usr/local/bin/buf
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY frontend/ ./
+COPY proto /app/proto
+RUN pnpm gen && pnpm build
+
+# ---------------------------------------------------------------- python package
+FROM python:3.11-slim AS backend
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=bufbuild/buf:1.47.2 /usr/local/bin/buf /usr/local/bin/buf
+# The Connect Python plugin is a dev-only dependency; it must exist at generation time.
+ARG PROTOC_GEN_CONNECT_PYTHON=0.9.0
+RUN pip install --no-cache-dir "protoc-gen-connect-python==${PROTOC_GEN_CONNECT_PYTHON}"
+WORKDIR /app
+COPY pyproject.toml README.md buf.gen.yaml ./
+COPY proto ./proto
+COPY src ./src
+RUN buf generate && pip install --no-cache-dir .
+
+# ---------------------------------------------------------------- runtime
+FROM python:3.11-slim AS runtime
+# The docker CLI lets the server spawn worker containers on the host daemon.
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=backend /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=backend /usr/local/bin/originweave /usr/local/bin/originweave
+
+# Static, read-only assets the entrypoint links into the data root.
+WORKDIR /opt/originweave
+COPY prompts ./prompts
+COPY --from=frontend /app/frontend/dist ./dist
+# A default originweave.toml (worker.execution=container, image=originweave-runtime:latest).
+RUN originweave init
+
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+EXPOSE 8765
+# The entrypoint seeds the data root and execs `originweave ui --host 0.0.0.0`.
+ENTRYPOINT ["docker-entrypoint.sh"]

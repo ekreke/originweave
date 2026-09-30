@@ -4,9 +4,15 @@
 ``PiWorker`` but executes every call in a **fresh** container (red line 3):
 
     Engine (server) --Worker.run()--> ContainerWorker
-        docker run -d --rm -p 127.0.0.1::8000 -v <run_dir>:<run_dir> <image>
+        docker run -d --rm [-p 127.0.0.1::8000 | --network <net> --name <c>] \
+            -v <run_dir>:<run_dir> <image>
         wait GET /health -> POST /run {task, template, board, extra} -> WorkerReply
         docker rm -f
+
+Two addressing modes (M4):
+- default (server on the host): publish the port on ``127.0.0.1`` and read it back;
+- ``network=<name>`` (server in a container): join a user-defined Docker network and
+  address the worker by container name, so no host port is needed.
 
 The engine stays the sole blackboard writer (red lines 2/4); the container only runs
 the worker (calls the model / Pi tools) and returns the raw reply. ``docker`` is
@@ -17,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,7 +51,8 @@ class ContainerError(CapabilityError):
 @dataclass(frozen=True)
 class ContainerHandle:
     container_id: str
-    base_url: str  # e.g. http://127.0.0.1:32768
+    base_url: str  # e.g. http://127.0.0.1:32768, or http://ow-worker-<id>:8000
+    name: str | None = None  # set in network mode (the ``docker run --name``)
 
 
 async def _run_command(argv: list[str], *, check: bool = True) -> str:
@@ -106,30 +114,39 @@ def _error_detail(response: httpx.Response) -> str:
 class ContainerManager:
     """Starts and reclaims one runtime container per Worker call (M3a)."""
 
-    def __init__(self, *, image: str, docker: str = "docker") -> None:
+    def __init__(
+        self, *, image: str, docker: str = "docker", network: str | None = None
+    ) -> None:
         self._image = image
         self._docker = docker
+        # When set, worker containers join this user-defined Docker network and are
+        # addressed by container name (server-in-Docker, M4). ``None`` keeps the host
+        # mode: publish the port on 127.0.0.1 and read it back with ``docker port``.
+        self._network = network or None
 
     async def spawn(self, *, run_dir: Path, env: Mapping[str, str]) -> ContainerHandle:
         """Start a detached container mounting ``run_dir`` and return its endpoint."""
-        argv = [
-            self._docker,
-            "run",
-            "-d",
-            "--rm",
-            "-p",
-            f"127.0.0.1::{CONTAINER_PORT}",
-            "-v",
-            f"{run_dir}:{run_dir}",
-            "-w",
-            str(run_dir),
-        ]
+        argv = [self._docker, "run", "-d", "--rm"]
+        container_name: str | None = None
+        if self._network is not None:
+            container_name = f"ow-worker-{uuid.uuid4().hex[:12]}"
+            argv += ["--network", self._network, "--name", container_name]
+        else:
+            argv += ["-p", f"127.0.0.1::{CONTAINER_PORT}"]
+        argv += ["-v", f"{run_dir}:{run_dir}", "-w", str(run_dir)]
         for key, value in env.items():
             argv += ["-e", f"{key}={value}"]
         argv.append(self._image)
         container_id = (await _run_command(argv)).strip()
         if not container_id:
             raise ContainerError(f"docker run for image {self._image!r} returned no container id")
+        if container_name is not None:
+            # Same-network DNS resolves the container name; no host port needed.
+            return ContainerHandle(
+                container_id=container_id,
+                base_url=f"http://{container_name}:{CONTAINER_PORT}",
+                name=container_name,
+            )
         try:
             port = _first_host_port(
                 await _run_command([self._docker, "port", container_id, str(CONTAINER_PORT)])
@@ -142,7 +159,10 @@ class ContainerManager:
 
     async def remove(self, handle: ContainerHandle) -> None:
         """Force-remove the container (idempotent; ``--rm`` also cleans up on exit)."""
-        await _run_command([self._docker, "rm", "-f", handle.container_id], check=False)
+        # Prefer the assigned name: it is unique per spawn, so it cannot remove a
+        # container this manager did not start (a reused id could after a daemon restart).
+        target = handle.name or handle.container_id
+        await _run_command([self._docker, "rm", "-f", target], check=False)
 
 
 class ContainerWorker:
