@@ -8,7 +8,7 @@ A run directory looks like::
     ├── input/              # document A snapshot
     ├── sources/            # source snapshots
     ├── sessions/           # per-worker-call session snapshots (raw in/out + steps)
-    └── report.md           # final artefact             (populated in M2)
+    └── report.md           # final report, all terminal states (M2/M7)
 
 The event log sits behind the :class:`EventLog` protocol; :class:`RunStore` is a
 facade that owns the directory layout and delegates log storage to a backend.

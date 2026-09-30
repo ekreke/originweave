@@ -158,6 +158,8 @@ async def test_budget_steps_stops_the_run(tmp_path: Path) -> None:
     stopped = [e for e in store.read_events() if e.type == "STOPPED"]
     assert stopped and stopped[-1].payload["reason"] == "budget exceeded"
     assert stopped[-1].payload["budget"]["steps"] == 1
+    # A budget stop is terminal, so it leaves a report naming the cause (M7).
+    assert "stopped: budget exceeded" in store.report_path.read_text(encoding="utf-8")
 
 
 async def test_budget_cost_stops_the_run(tmp_path: Path) -> None:
@@ -258,11 +260,15 @@ async def test_pause_then_resume(tmp_path: Path) -> None:
     board = await engine.run(origin=_origin(), goal=_goal())
     assert board.status == "paused"
     assert any(e.type == "PAUSED" for e in store.read_events())
+    # A pause is recoverable, not terminal: no report is written yet (M7).
+    assert not store.report_path.exists()
 
     resumed = await engine.resume_from_pause()
     # Resume re-enters the loop, which then dead-ends on ``NO_REASON`` (a terminal stop).
     assert resumed.status == "stopped"
     assert any(e.type == "RESUMED" for e in store.read_events())
+    # The terminal stop then writes the report.
+    assert "stopped: dead-end: no runnable intent" in store.report_path.read_text(encoding="utf-8")
 
 
 async def test_resume_from_pause_rejects_a_running_run(tmp_path: Path) -> None:

@@ -188,8 +188,9 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
   Reason 判定 `COMPLETE`，或三个非完成出口写 `STOPPED`（死胡同 `dead-end: no runnable intent`、本轮
   无新 Fact `stalled: dispatch produced no new facts`、`Engine(max_rounds=…)` 安全阀
   `max rounds reached`）——都落终态，run 不再停在 `running`；预算触顶同样 `STOPPED`（M3）。**M2 起**
-  `COMPLETE` 需过严格判据（论点全部拆解、子断言回链或 `open`、已有 compare），否则被忽略；完成后落
-  run dir `report.md`。
+  `COMPLETE` 需过严格判据（论点全部拆解、子断言回链或 `open`、已有 compare），否则被忽略；**任一终止态**
+  （`COMPLETE`/`STOPPED`/`FAILED`）都落 run dir `report.md`（M7；`paused`/`awaiting_human` 不落，
+  `STOPPED`/`FAILED` 的 verdict 由终止原因填充）。
 - **异步 Hint（M3）**：`HINT` 是普通事件、非阻塞——dispatch 期间经 `AddHint` 注入的 Hint，
   只要循环继续（本轮产生了新 Fact），必然进入下一轮 Reason 的 Observe（引擎每轮从事件日志折
   Board）；agent 侧 Hint 由引擎在 Reason 收敛时写入（`author=agent`，id 与 human hint 共用事件
@@ -233,7 +234,7 @@ e1 × e2 --Intent(relate)--> r1 关系(Relation: type+quote 或 inferred 虚线)
 ├── sources/            # 来源快照（可回链的原文/存档）
 ├── sessions/           # 会话快照：一次 Worker 调用的原始输入/输出 + 步骤链（M6）
 ├── entity-graph.json   # 实体-关系图快照（可重建，非事实来源）
-└── report.md           # 最终产物（可再生成）
+└── report.md           # 终止态报告（COMPLETE/STOPPED/FAILED；可再生成，M7）
 ```
 
 `events.jsonl` 每行一个 Event（`id` 单调 `e0001`、`at` 为 ISO-8601 UTC）：

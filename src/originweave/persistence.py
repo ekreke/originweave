@@ -51,7 +51,7 @@ def _float(value: Any) -> float:
     return float(value)
 
 
-def _terminal_reason(events: Sequence[Event]) -> str:
+def terminal_reason(events: Sequence[Event]) -> str:
     """The last ``FAILED``/``STOPPED`` event's ``reason`` ("" when there is none).
 
     The terminal reason is a *derived* field: it lives in the event log and is only
@@ -369,7 +369,7 @@ def summarize_run(
         status=status,
         activity=derive_activity(events, status=status),
         status_reason=(
-            _terminal_reason(events)
+            terminal_reason(events)
             if board is not None and board.status in {"failed", "stopped"}
             else ""
         ),

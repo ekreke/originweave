@@ -42,7 +42,14 @@ from .config import BudgetConfig, parse_duration
 from .events import Event, now_iso
 from .pricing import PricingTable
 from .reduce import reduce
-from .report import SEVERITY_STATUS, ReportError, derive_report, parse_severity, render_report
+from .report import (
+    SEVERITY_STATUS,
+    ReportError,
+    derive_report,
+    parse_severity,
+    render_report,
+    termination_label,
+)
 from .store import RunStore
 
 # Default worker label for the serial passes (Bootstrap/Reason/Validate). Dispatch
@@ -832,7 +839,7 @@ class Engine:
                 ended=ended,
                 worker=worker,
             )
-        self._store.append_event("FAILED", {"reason": str(exc)})
+        self._terminal("FAILED", {"reason": str(exc)})
 
     async def run(self, *, origin: Fact, goal: Fact, auto: bool | None = None) -> Board:
         """Start a run: ``PROJECT``, Bootstrap, then Reason + one dispatch round.
@@ -921,7 +928,7 @@ class Engine:
         if gate == GATE_C:
             return await self._resume_review(decision, text=text, targets=targets, events=events)
         if decision == "reject":
-            self._store.append_event("STOPPED", {"reason": f"{label} rejected by human"})
+            self._terminal("STOPPED", {"reason": f"{label} rejected by human"})
             return reduce(self._store.read_events())
         return await self._continue()
 
@@ -997,7 +1004,7 @@ class Engine:
         """Record a server-owned runtime shutdown through the Engine write path."""
         board = reduce(self._store.read_events())
         if board.status not in {"completed", "failed", "stopped"}:
-            self._store.append_event("FAILED", {"reason": reason})
+            self._terminal("FAILED", {"reason": reason})
         return reduce(self._store.read_events())
 
     def request_pause(self) -> None:
@@ -1031,7 +1038,7 @@ class Engine:
         }
 
     def _stop_for_budget(self, info: dict[str, Any]) -> None:
-        self._store.append_event(
+        self._terminal(
             "STOPPED",
             {"reason": "budget exceeded", "budget": info},
             message="budget exceeded",
@@ -1045,7 +1052,7 @@ class Engine:
         ``STOPPED`` for each keeps the run out of a permanent ``running`` limbo that no
         resume path could reach.
         """
-        self._store.append_event("STOPPED", {"reason": reason, **extra}, message=reason)
+        self._terminal("STOPPED", {"reason": reason, **extra}, message=reason)
         return reduce(self._store.read_events())
 
     def _restore_counters(self, board: Board, events: Sequence[Event]) -> None:
@@ -1224,25 +1231,54 @@ class Engine:
         hint = Hint(id=self._store.next_hint_id(), text=text, author="agent", createdAt=now_iso())
         self._store.append_event("HINT", {"hint": hint.to_dict()}, message="Reason left a hint")
 
-    def _write_report(self) -> None:
-        """Write ``report.md`` for a completed run (a derived artifact, never an event)."""
+    def _write_report(self, *, termination: str = "") -> None:
+        """Write ``report.md`` for a terminal run (a derived artifact, never an event).
+
+        ``termination`` is the :func:`termination_label` of a ``STOPPED``/``FAILED`` run,
+        used as the verdict when ``COMPLETE`` never set one, so **every** terminal state
+        leaves a readable report (M7). ``paused``/``awaiting_human`` never call this.
+        """
         board = reduce(self._store.read_events())
-        report = derive_report(board, run_id=self._store.root.name)
+        report = derive_report(board, run_id=self._store.root.name, termination=termination)
         self._store.write_report(render_report(report))
+
+    def _terminal(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        message: str = "",
+    ) -> None:
+        """Append a terminal ``FAILED``/``STOPPED`` event and write its ``report.md``.
+
+        The single write path for abnormal termination: keeps the event (blackboard is the
+        source of truth) and the derived report in lockstep, so no terminal exit can leave
+        the run without a ``report.md`` (M7).
+        """
+        if event_type not in ("FAILED", "STOPPED"):
+            raise EngineError(f"{event_type!r} is not a terminal event")
+        self._store.append_event(event_type, payload, message=message)
+        reason = payload.get("reason")
+        self._write_report(
+            termination=termination_label(
+                "failed" if event_type == "FAILED" else "stopped",
+                reason if isinstance(reason, str) else "",
+            )
+        )
 
     async def _bootstrap(self) -> None:
         try:
             template = await self._prompt.get("bootstrap")
         except (CapabilityError, FileNotFoundError) as exc:
             # A missing template is a provider failure: terminal, on the board.
-            self._store.append_event("FAILED", {"reason": str(exc)})
+            self._terminal("FAILED", {"reason": str(exc)})
             return
         board = reduce(self._store.read_events())  # Observe: the current graph
         try:
             reply, started, ended, session_id = await self._invoke("Bootstrap", template, board)
         except CapabilityError as exc:
             # A worker/provider failure still ends the run loudly and terminal.
-            self._store.append_event("FAILED", {"reason": str(exc)})
+            self._terminal("FAILED", {"reason": str(exc)})
             return
         try:
             result = parse_result(reply.text, allow_edges=True)
@@ -1333,7 +1369,7 @@ class Engine:
             template = await self._prompt.get("reason")
         except (CapabilityError, FileNotFoundError) as exc:
             # A missing template is a provider failure: terminal, on the board.
-            self._store.append_event("FAILED", {"reason": str(exc)})
+            self._terminal("FAILED", {"reason": str(exc)})
             return
         board = reduce(self._store.read_events())  # Observe: the current graph
         triggers = list(trigger_facts)
@@ -1344,7 +1380,7 @@ class Engine:
             reply, started, ended, session_id = await self._invoke("Reason", template, board)
         except CapabilityError as exc:
             # A worker/provider failure still ends the run loudly and terminal.
-            self._store.append_event("FAILED", {"reason": str(exc)})
+            self._terminal("FAILED", {"reason": str(exc)})
             return
         try:
             result = parse_result(reply.text, allow_hint=True)
@@ -1550,7 +1586,7 @@ class Engine:
             if any(intent.type == "relate" for intent in pending):
                 templates["relate"] = await self._prompt.get("relate")
         except (CapabilityError, FileNotFoundError) as exc:
-            self._store.append_event("FAILED", {"reason": str(exc)})
+            self._terminal("FAILED", {"reason": str(exc)})
             return False
 
         def template_for(intent: Intent) -> PromptTemplate:

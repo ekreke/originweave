@@ -2,9 +2,10 @@
 
 The report is a **derivation** from the board, never an event: :func:`derive_report`
 folds the ``kind=deviation`` facts (and their evidence) into the ``Report`` shape frozen
-in ``product-overview.md`` section 4. The engine writes ``report.md`` when a run
-completes; the server maps the same object into ``RunDetail.report``. Because it is a
-pure fold, ``replay`` reproduces it exactly and never rewrites the file.
+in ``product-overview.md`` section 4. The engine writes ``report.md`` for **every terminal
+state** -- ``COMPLETE`` (M2), and ``STOPPED``/``FAILED`` via ``termination`` (M7); the
+server maps the same object into ``RunDetail.report``. Because it is a pure fold,
+``replay`` reproduces it exactly and never rewrites the file.
 
 Severity is encoded in ``Fact.subtitle`` as ``severity=<level> · confidence=<c>`` — the
 shape the sample fixture froze (``examples/copilot_productivity``).
@@ -95,11 +96,26 @@ def _summarize(verdict: str, findings: list[Deviation]) -> str:
     return f"{verdict or 'Deviations'} ({len(findings)}): {titles}"
 
 
-def derive_report(board: Board, *, run_id: str) -> Report:
+def termination_label(status: str, reason: str) -> str:
+    """Human-readable verdict fallback for a run that ended without a ``COMPLETE``.
+
+    A ``STOPPED``/``FAILED`` run carries no verdict of its own (only ``COMPLETE`` does),
+    so :func:`derive_report` fills the report's ``verdict``/``summary`` with the termination
+    cause instead (M7). Returns ``""`` for non-terminal statuses so a live/paused run never
+    gains a spurious verdict.
+    """
+    if status not in ("stopped", "failed"):
+        return ""
+    return status if not reason else f"{status}: {reason}"
+
+
+def derive_report(board: Board, *, run_id: str, termination: str = "") -> Report:
     """Fold a board's deviation facts into a :class:`Report` (pure, deterministic).
 
     Findings keep the board's fact order; sources are the findings' evidence de-duplicated
-    by ``(url, quote)`` while preserving first-seen order.
+    by ``(url, quote)`` while preserving first-seen order. ``termination`` is the
+    :func:`termination_label` of a ``STOPPED``/``FAILED`` run: it is used as the verdict
+    when the board has none, so every terminal run carries a readable ``report.md`` (M7).
     """
     findings: list[Deviation] = []
     sources: list[Evidence] = []
@@ -122,7 +138,7 @@ def derive_report(board: Board, *, run_id: str) -> Report:
             if key not in seen:
                 seen.add(key)
                 sources.append(evidence)
-    verdict = board.verdict or ""
+    verdict = board.verdict or termination
     return Report(
         runId=run_id,
         verdict=verdict,
@@ -171,4 +187,5 @@ __all__ = [
     "derive_report",
     "parse_severity",
     "render_report",
+    "termination_label",
 ]

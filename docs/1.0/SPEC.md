@@ -510,15 +510,19 @@ Worker 调用 = 一个**隔离会话**，历史以会话为单位保留**原始�
 `report.md`（结构沿用 M2 偏差记分卡：verdict / summary / findings / sources）；`paused` /
 `awaiting_human` 等中间态不生成。`report.md` 仍是**派生**物、非事件，`replay` 只读复现且不重写。
 
-- [ ] 终止态落盘：`_fail` / `_stop` / `_stop_for_budget` / Gate A `reject`（→`STOPPED`）与
-      `COMPLETE` 路径统一调用 `engine._write_report()`（`engine.py`）；`paused` 不写
-- [ ] 异常终止可读性：`derive_report` 接受可选 termination（`STOPPED{reason}` / `FAILED{reason}`），
-      无 verdict 时以终止原因填充 verdict/summary；`Report` 结构不变（`report.py`）
-- [ ] 纯 fold/确定性：同 board + 同 termination 必得同 `report.md`；`replay` 不重写
-- [ ] 单测：`COMPLETE`、`STOPPED`（budget、dead-end、stalled、max rounds、Gate A reject）、
+- [x] 终止态落盘：`_fail` / `_stop` / `_stop_for_budget` / Gate A·B `reject`（→`STOPPED`）与
+      `COMPLETE` 路径统一写报告；新 `engine._terminal()` 收口所有 `FAILED`/`STOPPED`（含
+      `fail_runtime` 与 `_bootstrap`/`_reason`/`_dispatch` 的裸 append）→ `_write_report()`
+      （`engine.py`）；`paused`/`awaiting_human` 不写
+- [x] 异常终止可读性：`derive_report(termination=…)` + `termination_label(status, reason)`
+      无 verdict 时以终止原因（`stopped: …` / `failed: …`）填充 verdict/summary；`Report` 结构不变
+      （`report.py`）；server parity：`convert.run_detail_pb` 复用 `persistence.terminal_reason`
+- [x] 纯 fold/确定性：同 board + 同 termination 必得同 `report.md`；`replay` 不重写
+- [x] 单测：`COMPLETE`、`STOPPED`（budget、dead-end、stalled、max rounds、Gate A reject）、
       `FAILED` 各写 `report.md`；`paused` 不写；`replay` 只读 — `tests/test_report.py`、
-      `tests/test_engine.py`、`tests/test_engine_m2.py`、`tests/test_budget.py`
-- [ ] 文档同步：`blackboard-protocol.md` §5/§8、`product-overview.md` 第 4 节、`store.py` 布局注释
+      `tests/test_engine.py`、`tests/test_engine_m2.py`、`tests/test_budget.py`、`tests/test_server.py`
+- [x] 文档同步：`blackboard-protocol.md` §5/§8、`product-overview.md` 第 4 节、`agent-design.md`、
+      `store.py` 布局注释
 
 > 依赖：复用 M2 的 `Report`/`derive_report` 结构；与 M5/M6 无耦合，可独立推进。
 

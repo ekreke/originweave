@@ -1242,6 +1242,10 @@ async def test_heartbeat_timeout_releases_intent(tmp_path: Path) -> None:
     intent = board.intents[1]
     assert intent.status == "open"
     assert intent.claimedBy is None
+    # The stall is terminal, so it writes a report naming the cause (M7).
+    assert "stopped: stalled: dispatch produced no new facts" in store.report_path.read_text(
+        encoding="utf-8"
+    )
 
 
 async def test_heartbeat_timeout_fails_run_when_configured(tmp_path: Path) -> None:
@@ -1510,6 +1514,8 @@ async def test_resume_reject_stops_the_run(tmp_path: Path) -> None:
     assert "rejected" in events[-1].payload["reason"]
     # A rejected gate never reaches Reason.
     assert not any(event.type == "REASON" for event in events)
+    # A human-terminated run still leaves a report whose verdict names the cause (M7).
+    assert "stopped: Gate A rejected by human" in store.report_path.read_text(encoding="utf-8")
 
 
 async def test_resume_without_pending_gate_raises(tmp_path: Path) -> None:
@@ -1857,6 +1863,8 @@ async def test_stigmergy_respects_max_rounds(tmp_path: Path) -> None:
     assert [event.payload["reason"] for event in stopped] == ["max rounds reached"]
     assert stopped[0].payload["rounds"] == 1
     assert [intent.id for intent in board.intents] == ["i1", "i2"]
+    # The safety valve is terminal, so it writes a report naming the cause (M7).
+    assert "stopped: max rounds reached" in store.report_path.read_text(encoding="utf-8")
     starts = [
         event
         for event in store.read_events()
@@ -2266,3 +2274,33 @@ async def test_live_bootstrap_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     )
     board = await engine.run(origin=origin, goal=_goal())
     assert any(fact.role == "main-claim" for fact in board.facts)
+
+
+# ------------------------------------------------- M7: a report for every terminal state
+
+
+async def test_dead_end_stop_writes_a_report(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(
+        store,
+        _bootstrap("Core claim"),
+        _reason({"type": "decompose", "from": "f1", "question": "Split f1."}),
+        _validate(0),
+        _explore_reply(_sub_claim("Sub claim")),
+        NO_REASON,  # the next round offers no direction
+    ).run(origin=_origin(), goal=_goal())
+
+    assert board.status == "stopped"
+    report = store.report_path.read_text(encoding="utf-8")
+    assert "stopped: dead-end: no runnable intent" in report
+
+
+async def test_failed_run_writes_a_report(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+    board = await _engine(store, "not json").run(origin=_origin(), goal=_goal())
+
+    assert board.status == "failed"
+    report = store.report_path.read_text(encoding="utf-8")
+    # The verdict is the exception message, prefixed with the terminal state (M7).
+    reason = next(e for e in store.read_events() if e.type == "FAILED").payload["reason"]
+    assert f"- verdict: failed: {reason}" in report

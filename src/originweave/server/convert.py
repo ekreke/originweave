@@ -29,8 +29,8 @@ from ..blackboard import (
 )
 from ..config import Config, ModelConfig, WorkerConfig
 from ..events import Event
-from ..persistence import Project, Run
-from ..report import Deviation, Report, derive_report
+from ..persistence import Project, Run, terminal_reason
+from ..report import Deviation, Report, derive_report, termination_label
 
 
 def evidence_pb(evidence: Evidence) -> Any:
@@ -335,7 +335,10 @@ def run_detail_pb(
     source_text: str = "",
 ) -> Any:
     waiting = waiting_for_pb(board.waitingFor) if board.waitingFor is not None else None
-    report = derive_report(board, run_id=run.id)
+    # Match the engine's report.md (M7): a STOPPED/FAILED run has no COMPLETE verdict, so
+    # fill it from the terminal reason instead of surfacing an empty verdict.
+    termination = termination_label(board.status, terminal_reason(events))
+    report = derive_report(board, run_id=run.id, termination=termination)
     detail = pb.RunDetail(
         run=run_pb(run),
         origin=fact_pb(board.origin),

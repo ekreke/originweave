@@ -1165,6 +1165,57 @@ async def test_get_run_exposes_report_and_deviations(tmp_path: Path) -> None:
     assert detail["report"]["findings"][0]["nodeId"] == "d1"
 
 
+def _write_run_terminated(runs_dir: Path, run_id: str, event: str, reason: str) -> None:
+    store = RunStore(runs_dir / run_id)
+    store.init_layout()
+    store.write_run_meta({"id": run_id, "project_id": "p", "title": "T", "goal": "g"})
+    at = "2026-01-01T00:00:0{}"
+    store.append_event("PROJECT", {"origin": _ORIGIN, "goal": _GOAL}, at=at.format(0))
+    store.append_event(event, {"reason": reason}, at=at.format(1))
+
+
+@pytest.mark.parametrize(
+    ("event", "status", "reason", "label"),
+    [
+        (
+            "STOPPED",
+            "stopped",
+            "dead-end: no runnable intent",
+            "stopped: dead-end: no runnable intent",
+        ),
+        ("STOPPED", "stopped", "budget exceeded", "stopped: budget exceeded"),
+        ("FAILED", "failed", "boom", "failed: boom"),
+    ],
+)
+async def test_get_run_report_verdict_reports_the_termination(
+    tmp_path: Path, event: str, status: str, reason: str, label: str
+) -> None:
+    """`RunDetail.report.verdict` must match report.md for a run with no COMPLETE (M7)."""
+    _write_run_terminated(tmp_path / "runs", "run_001", event, reason)
+
+    async with _client(tmp_path) as client:
+        response = await _post(client, "GetRun", {"runId": "run_001"})
+
+    detail = response.json()["runDetail"]
+    assert detail["run"]["status"] == status
+    assert detail["report"]["verdict"] == label
+
+
+async def test_get_run_report_verdict_matches_a_real_report_md(tmp_path: Path) -> None:
+    """End to end: a real FAILED run's `RunDetail.report` mirrors the report.md on disk (M7)."""
+    ctx = _ctx(tmp_path, "not json")  # an unusable Bootstrap reply fails the run
+    async with _client_for(ctx) as client:
+        run = await _create_run(client, auto=True)
+        await ctx.scheduler.drain()
+        response = await _post(client, "GetRun", {"runId": run["id"]})
+
+    detail = response.json()["runDetail"]
+    assert detail["run"]["status"] == "failed"
+    report_md = (tmp_path / "runs" / str(run["id"]) / "report.md").read_text(encoding="utf-8")
+    verdict_line = next(line for line in report_md.splitlines() if line.startswith("- verdict: "))
+    assert detail["report"]["verdict"] == verdict_line.removeprefix("- verdict: ")
+
+
 async def test_submit_human_input_approves_gate_b(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "runs" / "run_001")
     store.init_layout()

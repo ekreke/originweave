@@ -391,6 +391,9 @@ run 的全部状态由 append-only 事件派生。事件取代此前的领域事
 | `ENTITY` | 抽取/归并到实体 | `entity: Entity` |
 | `RELATION` | 判别出实体间关系 | `relation: Relation` |
 
+`COMPLETE`/`STOPPED`/`FAILED` 三者都是**终止事件**：引擎在写入任一终止事件后派生并落 `report.md`
+（M7），故每个终止 run 都有报告；`paused`/`awaiting_human` 无报告。
+
 `SESSION` / `WORKER_STEP` **不参与 Board 状态派生**（reducer 忽略，同 `REASON`）：会话的原始
 输入/输出全文只在 `sessions/<id>.json` 快照里，事件只作可重放的索引。因此 Board 结构与
 `replay` 确定性不受影响。
@@ -473,7 +476,9 @@ Board 上等下一轮 Reason。
 - **随时停止/恢复**：run 状态完整保留，可从任意事件点恢复。
 - **终止态落盘**：异常终止写 `FAILED`（→ `status=failed`）；预算触顶、人工终止，以及收敛循环的非完成
   出口（死胡同/无新 Fact/`max_rounds`）写 `STOPPED`（→ `status=stopped`）；两者都是事件，`replay` 可复现
-  到终止点。**`PAUSED`/`RESUMED`（M3b）**：
+  到终止点。**M7**：任一终止态（`COMPLETE`/`STOPPED`/`FAILED`）都落 run dir `report.md`——报告仍是**派生**
+  物（非事件），`COMPLETE` 用其 verdict，`STOPPED`/`FAILED` 用终止原因填充 verdict/summary；`paused`/
+  `awaiting_human` 等中间态不写，`replay` 只读、不重写。**`PAUSED`/`RESUMED`（M3b）**：
   `PauseRun` 在轮次边界写 `PAUSED`（→ `status=paused`，可恢复），`ResumeRun` 写 `RESUMED` 续跑；
   `paused` 状态下计数器从黑板重建，可在新 `Engine` 上恢复。
 - **Intent 心跳与超时（I4）**：执行中引擎按 `[worker].heartbeat_interval` 写 `HEARTBEAT`；

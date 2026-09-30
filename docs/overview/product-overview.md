@@ -182,12 +182,16 @@ EntityGraph { entities: Entity[], relations: Relation[] }
 Deviation { id, title, summary, severity, confidence, nodeId }   # severity: high | medium | low
 
 Report {
-  runId, verdict,          # 如 "部分偏差"
+  runId, verdict,          # 如 "部分偏差"；COMPLETE 用其 verdict，
+                           # STOPPED/FAILED 以终止原因填充（M7）
   summary,
   findings: Deviation[],
   sources:  Evidence[]
 }
 ```
+
+`report.md` 是**派生**物（非事件）：任一终止态（`COMPLETE`/`STOPPED`/`FAILED`）后由引擎落盘，
+`replay` 只读复现、不重写；`paused`/`awaiting_human` 中间态不生成（M7）。
 
 ### Event（事件溯源时间线）
 ```text

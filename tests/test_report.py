@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 
 from originweave.blackboard import Board, Fact
-from originweave.report import ReportError, derive_report, parse_severity, render_report
+from originweave.report import (
+    ReportError,
+    derive_report,
+    parse_severity,
+    render_report,
+    termination_label,
+)
 
 
 def _deviation(
@@ -84,3 +90,34 @@ def test_render_report_contains_verdict_and_findings() -> None:
     assert "d1" in text
     assert "high" in text
     assert "https://a" in text
+
+
+def test_termination_label_only_for_terminal_statuses() -> None:
+    assert termination_label("stopped", "budget exceeded") == "stopped: budget exceeded"
+    assert termination_label("failed", "boom") == "failed: boom"
+    # A missing reason still yields a label; a live/paused run never gets one.
+    assert termination_label("stopped", "") == "stopped"
+    assert termination_label("running", "whatever") == ""
+    assert termination_label("paused", "whatever") == ""
+    assert termination_label("completed", "") == ""
+
+
+def test_derive_report_falls_back_to_termination_without_a_verdict() -> None:
+    board = _board(_deviation("d1", severity="high", confidence=0.9, url="u"))
+    report = derive_report(board, run_id="r1", termination="stopped: budget exceeded")
+    assert report.verdict == "stopped: budget exceeded"
+    assert "stopped: budget exceeded" in report.summary
+
+
+def test_derive_report_prefers_a_complete_verdict_over_termination() -> None:
+    board = _board(verdict="部分偏差")
+    report = derive_report(board, run_id="r1", termination="stopped: budget exceeded")
+    assert report.verdict == "部分偏差"
+
+
+def test_derive_report_termination_is_deterministic() -> None:
+    board = _board(_deviation("d1", severity="low", confidence=0.5, url="u"))
+    first = render_report(derive_report(board, run_id="r1", termination="failed: boom"))
+    second = render_report(derive_report(board, run_id="r1", termination="failed: boom"))
+    assert first == second
+    assert "failed: boom" in first
