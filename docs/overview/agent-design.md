@@ -49,6 +49,20 @@ TS 扩展提供（`src/originweave/pi_extensions/search.ts`，以 `pi --no-exten
 agent 自主执行、引擎不再预取；否则（如 `local`）维持引擎预取并经 `extra` 注入。`cwd` 仅是 P2 的
 工具默认根目录，容器级安全隔离归 M3/P6。
 
+**search 韧性**：`build_search` 返回的是包住配置 provider 的 `ResilientSearch`（进程级单例、被引擎
+预取与 server `Search` RPC 共享）：瞬态失败按**指数退避 + 全抖动**重试，连续失败达 `breaker_threshold`
+即**熔断**（`SearchUnavailableError`，冷却期内不再触网）。provider 返回的 200 限流文案会被识别为
+`SearchRateLimitedError`（而非当作结果）。引擎据此**降级**：熔断打开时注入 `SEARCH UNAVAILABLE` 标记
+让 worker 照常运行（按提示不产 fact），退避后仍失败则 `RELEASE` 该 Intent（回 `open` 待重派），不再
+终止 run（见 `blackboard-protocol.md` §4.2）；**永久性错误**（4xx/无效端点，`SearchRequestError`）不重试、
+直接 `FAILED`。该降级作用于**引擎预取**路径；当 worker 自带 `search` 工具时，检索失败以工具错误回给
+模型，由模型决定是否不产 fact（两者都不终止 run）。
+
+**结构化回复**：`PiWorker` 始终加载包内 `submit.ts` 扩展并以 `--tools ...,submit_result` 暴露
+`submit_result` 工具（内部工具，不属于 `[worker].tools` 白名单）。提示词要求模型**调用该工具**提交结果，
+`PiWorker` 取其参数作为 `WorkerReply.text`，因此引擎永远拿到合法 JSON；缺失该工具的 provider 仍按
+「输出单个 JSON 对象」约定，引擎 `parse_result` 会先尝试从散文/markdown 代码块中**提取** JSON 对象兜底。
+
 要求：
 
 - provider/model/runtime 关注点解耦：编排逻辑不感知具体 provider 的 SDK。
@@ -68,6 +82,11 @@ agent 自主执行、引擎不再预取；否则（如 `local`）维持引擎预
 auto = false
 [capability.search]
 provider = "exa"       # exa | parallel
+max_attempts = 3       # 单次检索的尝试上限（瞬态失败按指数退避重试）
+backoff = "1s"         # 退避基数（base * 2^(n-1)，正整数 + ms|s|m|h|d）
+backoff_max = "30s"    # 单次退避上限（须 >= backoff）
+breaker_threshold = 3  # 连续失败多少次后熔断（进程级、跨 run 共享）
+breaker_cooldown = "60s"  # 熔断打开后冷却多久再放行探测
 [capability.prompt]
 provider = "local"     # local | langfuse
 directory = "prompts"  # local provider 的模板目录
@@ -78,7 +97,7 @@ base_url = ""           # 端点由 OPENAI_BASE_URL 提供（内网地址不入�
 [worker]                # Worker 执行体（M6）
 provider = "pi"         # local | pi；Pi 运行时缺失会明确报错
 max_concurrency = 1     # 本项目每次 run 的 worker 并发上限（>0 且 <=16；server 调度处强制）
-tools = []              # Pi 工具白名单：search|read|grep|find|ls|bash|edit|write；空 = 不启用
+tools = []              # Pi 工具白名单：search|read|grep|find|ls|bash|edit|write；空 = 不启用（submit_result 恒启用，不在此列）
 heartbeat_interval = "15s"    # 单次 Worker 调用的 HEARTBEAT 上报间隔（I4）
 heartbeat_timeout = "5m"      # 超过此值判定调用失活（须 > interval）
 heartbeat_on_timeout = "release"  # release（Intent 回 open）| fail（run -> failed）

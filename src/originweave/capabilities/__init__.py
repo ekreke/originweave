@@ -17,6 +17,7 @@ from ..config import (
     ALLOWED_SEARCH_PROVIDERS,
     ALLOWED_WORKER_PROVIDERS,
     Config,
+    parse_duration,
 )
 from .base import (
     CapabilityError,
@@ -26,11 +27,20 @@ from .base import (
     ProviderError,
     ProviderUnavailableError,
     SearchProvider,
+    SearchUnavailableError,
 )
 from .model import ChatMessage, ModelProvider, OpenAIModel
 from .pi import PiWorker
 from .prompt import LANGFUSE_ENV_VARS, LangfusePrompt, LocalPrompt
-from .search import ENV_VARS, ExaSearch, ParallelSearch, credential_env
+from .resilience import ResilientSearch
+from .search import (
+    ENV_VARS,
+    ExaSearch,
+    ParallelSearch,
+    SearchRateLimitedError,
+    SearchRequestError,
+    credential_env,
+)
 from .worker import LocalWorker, Worker, WorkerReply, WorkerStep
 
 SEARCH_PROVIDERS: dict[str, Callable[[], SearchProvider]] = {
@@ -78,8 +88,25 @@ def get_model(name: str, *, model: str, base_url: str) -> ModelProvider:
 
 
 def build_search(config: Config) -> SearchProvider:
-    """Resolve the configured search provider."""
-    return get_search(config.capability.search.provider)
+    """Resolve the configured search provider, wrapped for resilience.
+
+    The returned provider is a :class:`ResilientSearch` (retry + circuit breaker)
+    around the configured provider. It is created once per process and shared by the
+    engine's prefetch and the server's ``Search`` RPC, so a rate limit trips one
+    breaker for all callers (red line 5: the provider choice stays here).
+    """
+    settings = config.capability.search
+    provider = get_search(settings.provider)
+    return ResilientSearch(
+        provider,
+        max_attempts=settings.max_attempts,
+        backoff=parse_duration(settings.backoff, "capability.search.backoff"),
+        backoff_max=parse_duration(settings.backoff_max, "capability.search.backoff_max"),
+        breaker_threshold=settings.breaker_threshold,
+        breaker_cooldown=parse_duration(
+            settings.breaker_cooldown, "capability.search.breaker_cooldown"
+        ),
+    )
 
 
 def build_prompt(config: Config) -> PromptProvider:
@@ -129,7 +156,11 @@ __all__ = [
     "PromptTemplate",
     "ProviderError",
     "ProviderUnavailableError",
+    "ResilientSearch",
     "SearchProvider",
+    "SearchRateLimitedError",
+    "SearchRequestError",
+    "SearchUnavailableError",
     "Worker",
     "WorkerReply",
     "WorkerStep",

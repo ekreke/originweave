@@ -117,6 +117,42 @@ def test_validate_rejects_unknown_search_provider() -> None:
         cfg.validate()
 
 
+def test_load_reads_search_resilience_overrides(tmp_path: Path) -> None:
+    path = tmp_path / "originweave.toml"
+    path.write_text(
+        """
+[capability.search]
+provider = "exa"
+max_attempts = 5
+backoff = "2s"
+backoff_max = "1m"
+breaker_threshold = 4
+breaker_cooldown = "5m"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    cfg = config.load(path)
+    assert cfg.capability.search.max_attempts == 5
+    assert cfg.capability.search.backoff == "2s"
+    assert cfg.capability.search.backoff_max == "1m"
+    assert cfg.capability.search.breaker_threshold == 4
+    assert cfg.capability.search.breaker_cooldown == "5m"
+
+
+@pytest.mark.parametrize(
+    "search",
+    [
+        config.SearchConfig(max_attempts=0),
+        config.SearchConfig(breaker_threshold=0),
+        config.SearchConfig(backoff="1m", backoff_max="1s"),
+    ],
+)
+def test_validate_rejects_bad_search_resilience(search: config.SearchConfig) -> None:
+    cfg = config.Config(capability=config.CapabilityConfig(search=search))
+    with pytest.raises(config.ConfigError):
+        cfg.validate()
+
+
 def test_validate_rejects_unknown_model_provider() -> None:
     cfg = config.Config(
         capability=config.CapabilityConfig(model=config.ModelConfig(provider="nope"))

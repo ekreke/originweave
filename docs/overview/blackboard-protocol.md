@@ -236,10 +236,14 @@ Dispatcher / reducer 分配与推导（§2.4），**语义**边由 Worker 显式
 `Explore` 指令的检索上下文由**引擎**准备：Dispatcher 先写 `EXECUTE`（认领），再由引擎调用
 `search` capability（query = Intent 的 `question`），把检索结果与该 Intent（`{id, type, from,
 question}`）一起经 `extra` 注入 worker 的 user 消息——**provider 选择留在引擎层**（红线 4），
-worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` 落会话快照。产出的 Fact 必须
+worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` 落会话快照。`search` 经
+`ResilientSearch`（重试 + 进程级熔断）调用（见 `agent-design.md` §2）：熔断打开时引擎注入
+`SEARCH UNAVAILABLE` 标记并继续，重试后仍失败则 `RELEASE` 该 Intent（回 `open`），二者都**不**终止 run。
+产出的 Fact 必须
 匹配 Intent 类型：`explore` → `citation`/`source`（`role=none` 且**至少一条** `Evidence`），
 `decompose` → `fact`/`sub-claim`。回复夹带 `intents` / `complete`、kind/role 不符或证据缺失
-均视为失败。
+均视为失败。Pi worker 的回复可由 `submit_result` 工具调用携带（引擎取工具入参为回复文本），
+因此其 JSON 始终合法；无该工具的 provider 由 `parse_result` 从散文/代码块中提取 JSON 兜底。
 
 `verify` 型 Intent（M2）改为**派发**：引擎用 `prompts/compare.txt` 指令、**不检索**，让 Worker 在
 已有 facts × sources × goal 上评分偏差，产出**恰好一个** `compare`（`role=none`、`status=verified`）
@@ -255,8 +259,9 @@ worker 自身不触碰外部服务；检索结果全文随 `WorkerReply.input` �
 Intent 按 id 序取前 `[run].dispatch_width` 个（M9：每轮宽度上限，其余保持 `open` 留待后续轮次——**节流
 而非丢弃**），先按 id 序统一写 `EXECUTE` 认领（worker 标签按序 `worker-1..N`），再以
 `[worker].max_concurrency` 为上限并发执行。每个 Explore pass 的原始结果先缓存在内存，**提交阶段按 Intent id 序**分配 Fact id、
-写 `CONCLUDE`/`SESSION`——因此完成顺序不影响 Board（结构确定）；首个硬失败（provider/解析/超时
-`fail`）写 `FAILED` 并停止提交。执行期间引擎按 `[worker].heartbeat_interval` 代写 `HEARTBEAT`；
+写 `CONCLUDE`/`SESSION`——因此完成顺序不影响 Board（结构确定）；首个硬失败（解析失败或超时 `fail`）写
+`FAILED` 并停止提交（**检索 provider 失败例外**：经 `ResilientSearch` 重试后退避仍失败时该 Intent 写
+`RELEASE` 回 `open`，不终止 run）。执行期间引擎按 `[worker].heartbeat_interval` 代写 `HEARTBEAT`；
 整个 pass（含 `search` 与 worker 调用）超过 `[worker].heartbeat_timeout` 即判定失活，按
 `heartbeat_on_timeout` 写 `RELEASE`（Intent 回 `open`，本轮其余继续）或 `FAILED`（终止 run）。
 

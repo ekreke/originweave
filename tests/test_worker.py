@@ -20,7 +20,12 @@ from originweave.blackboard import Fact
 from originweave.capabilities import PiWorker, ProviderUnavailableError, build_worker
 from originweave.capabilities.base import MissingCredentialError, PromptTemplate, ProviderError
 from originweave.capabilities.model import ChatMessage
-from originweave.capabilities.pi import PiAgentClient, resolve_agent_dir_env_name
+from originweave.capabilities.pi import (
+    SUBMIT_TOOL,
+    PiAgentClient,
+    _extension_path,
+    resolve_agent_dir_env_name,
+)
 from originweave.capabilities.worker import (
     STEP_TEXT_LIMIT,
     LocalWorker,
@@ -266,7 +271,7 @@ async def test_pi_worker_maps_session_and_tool_events(
     assert pi_config.cwd == str(tmp_path.resolve())
     assert pi_config.no_session is True
     assert "--tools" in pi_config.extra_args
-    assert "read" in pi_config.extra_args
+    assert pi_config.extra_args[pi_config.extra_args.index("--tools") + 1] == "read,submit_result"
     assert "--no-context-files" in pi_config.extra_args
     provider = factory.models[0]["providers"]["originweave-openai"]
     assert provider["baseUrl"] == "https://model.example/v1"
@@ -421,6 +426,34 @@ async def test_pi_worker_splits_message_steps_around_tool_calls(
     assert reply.steps[3].text == "after tool"
 
 
+async def test_pi_worker_uses_submit_tool_args_as_the_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    submitted = {"facts": [], "intents": [], "complete": None}
+    events = [
+        AgentStartEvent(type="agent_start"),
+        ToolExecutionStartEvent(type="tool_execution_start", toolName=SUBMIT_TOOL, args=submitted),
+        ToolExecutionEndEvent(type="tool_execution_end", toolName=SUBMIT_TOOL, isError=False),
+        TurnEndEvent(type="turn_end"),
+    ]
+    # A non-JSON free-form assistant text must be ignored in favour of the tool call.
+    agent = _FakePiAgent(events, text="here is my answer, hope it helps!")
+    worker = PiWorker(
+        model=config.ModelConfig(model="test-model", base_url="https://model.example/v1"),
+        tools=(),
+        cwd=tmp_path,
+        agent_factory=_FakePiFactory(agent),
+        runtime_checker=lambda: None,
+    )
+
+    reply = await worker.run(
+        "Reason", PromptTemplate(name="reason", text="SYSTEM"), await _board(tmp_path)
+    )
+
+    assert json.loads(reply.text) == submitted
+
+
 async def test_pi_worker_keeps_message_steps_separate_across_turns(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -456,7 +489,7 @@ async def test_pi_worker_keeps_message_steps_separate_across_turns(
     assert [step.seq for step in reply.steps] == [1, 2, 3, 4, 5]
 
 
-async def test_pi_worker_disables_tools_when_none_configured(
+async def test_pi_worker_always_enables_the_submit_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -471,7 +504,10 @@ async def test_pi_worker_disables_tools_when_none_configured(
 
     await worker.run("Reason", PromptTemplate(name="reason", text="SYSTEM"), await _board(tmp_path))
 
-    assert "--no-tools" in factory.configs[0].extra_args
+    args = factory.configs[0].extra_args
+    # No user tools, but the submit tool is always present so the reply is structured.
+    assert "--no-tools" not in args
+    assert args[args.index("--tools") + 1] == SUBMIT_TOOL
 
 
 async def test_pi_worker_wires_the_search_extension(
@@ -496,7 +532,12 @@ async def test_pi_worker_wires_the_search_extension(
     # The extension is loaded explicitly and `search` is enabled alongside the built-ins.
     assert pi_config.extra_args[pi_config.extra_args.index("-e") + 1] == str(extension)
     assert "--tools" in pi_config.extra_args
-    assert pi_config.extra_args[pi_config.extra_args.index("--tools") + 1] == "search,read"
+    assert (
+        pi_config.extra_args[pi_config.extra_args.index("--tools") + 1]
+        == f"search,read,{SUBMIT_TOOL}"
+    )
+    # The packaged submit extension is loaded too (always on).
+    assert str(_extension_path("submit.ts")) in pi_config.extra_args
     # The server address is injected, trailing slash stripped.
     assert pi_config.env["ORIGINWEAVE_SERVER_URL"] == "http://server.example:8765"
     # The (default) agent-config-dir variable is always present as a fallback.
@@ -523,7 +564,7 @@ async def test_pi_worker_search_uses_the_server_default(
     assert factory.configs[0].env["ORIGINWEAVE_SERVER_URL"] == "http://127.0.0.1:8765"
 
 
-async def test_pi_worker_without_search_does_not_load_the_extension(
+async def test_pi_worker_without_search_loads_only_the_submit_extension(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -538,7 +579,9 @@ async def test_pi_worker_without_search_does_not_load_the_extension(
 
     await worker.run("Reason", PromptTemplate(name="reason", text="SYSTEM"), await _board(tmp_path))
 
-    assert "-e" not in factory.configs[0].extra_args
+    args = factory.configs[0].extra_args
+    assert str(_extension_path("submit.ts")) in args
+    assert str(_extension_path("search.ts")) not in args
 
 
 def _fake_pi_install(root: Path, package: dict[str, object]) -> Path:

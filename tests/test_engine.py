@@ -9,8 +9,9 @@ from pathlib import Path
 import pytest
 
 from originweave.blackboard import Fact, Hint, Intent
-from originweave.capabilities.base import PromptTemplate, ProviderError
+from originweave.capabilities.base import PromptTemplate, ProviderError, SearchUnavailableError
 from originweave.capabilities.model import ChatMessage
+from originweave.capabilities.search import SearchRequestError
 from originweave.capabilities.worker import LocalWorker, WorkerReply, render_messages
 from originweave.engine import Engine, EngineError, parse_result, parse_validation
 from originweave.reduce import reduce, render_canonical
@@ -878,7 +879,7 @@ async def test_verify_intent_is_dispatched_to_compare(tmp_path: Path) -> None:
     assert board.status == "stopped"
 
 
-async def test_explore_search_failure_fails_run(tmp_path: Path) -> None:
+async def test_explore_search_failure_releases_intent(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "run_001")
 
     class _BoomSearch:
@@ -901,12 +902,97 @@ async def test_explore_search_failure_fails_run(tmp_path: Path) -> None:
     )
     board = await engine.run(origin=_origin(), goal=_goal())
 
-    assert board.status == "failed"
+    # P2: a transient search failure no longer kills the run; the Intent goes back
+    # ``open`` (RELEASE). With no new facts the Stigmergy loop then stalls.
     events = store.read_events()
-    assert events[-1].type == "FAILED"
-    assert events[-1].payload["reason"] == "search exploded"
-    # The claim was already written, so the audit shows "claimed, then died".
-    assert events[-2].type == "EXECUTE"
+    assert [e for e in events if e.type == "FAILED"] == []
+    release = next(e for e in events if e.type == "RELEASE")
+    assert "search exploded" in release.payload["reason"]
+    assert board.status == "stopped"
+
+
+async def test_explore_breaker_open_degrades_without_failure(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+
+    class _OpenBreakerSearch:
+        name = "open"
+
+        async def search(self, query: str, *, num_results: int = 8) -> str:
+            raise SearchUnavailableError("search circuit breaker open; retry in 60.0s")
+
+    captured: list[dict[str, object]] = []
+
+    class _CapturingWorker:
+        name = "capturing"
+        tools: frozenset[str] = frozenset()
+
+        def __init__(self, *replies: str) -> None:
+            self._replies = list(replies)
+
+        async def run(
+            self,
+            task: str,
+            template: PromptTemplate,
+            board: object,
+            *,
+            extra: object = None,
+        ) -> WorkerReply:
+            messages = render_messages(task, template, board, extra=extra)  # type: ignore[arg-type]
+            captured.append(json.loads(messages[1].content))
+            text = self._replies.pop(0) if self._replies else NO_REASON
+            return WorkerReply(
+                text=text,
+                input={"system": messages[0].content, "user": messages[1].content},
+            )
+
+    model = _CapturingWorker(
+        _bootstrap("A claim"),
+        _reason({"type": "explore", "from": "f1", "question": "Source f1."}),
+        _validate(0),
+        _explore_reply(_source_fact("no retrieval; no facts")),
+    )
+    engine = Engine(
+        worker=model,
+        search=_OpenBreakerSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    # The worker still ran, saw the degradation marker, and the run was not failed.
+    explore_payload = next(p for p in captured if "intent" in p)
+    assert "SEARCH UNAVAILABLE" in str(explore_payload["search"])
+    assert not any(e.type == "FAILED" for e in store.read_events())
+    assert board.status != "failed"
+
+
+async def test_explore_permanent_search_error_fails_run(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "run_001")
+
+    class _RejectedSearch:
+        name = "rejected"
+
+        async def search(self, query: str, *, num_results: int = 8) -> str:
+            raise SearchRequestError("search returned HTTP 400")
+
+    model = _FakeModel(
+        _bootstrap("A claim"),
+        _reason({"type": "explore", "from": "f1", "question": "Source f1."}),
+        _validate(0),
+    )
+    engine = Engine(
+        worker=LocalWorker(model=model),
+        search=_RejectedSearch(),
+        prompt=_FakePrompt(),
+        store=store,
+        auto=True,
+    )
+    board = await engine.run(origin=_origin(), goal=_goal())
+
+    # A permanent search error (bad request/endpoint) is not degraded away: it fails.
+    assert board.status == "failed"
+    assert store.read_events()[-1].type == "FAILED"
 
 
 async def test_decompose_rejects_citation_facts(tmp_path: Path) -> None:
@@ -2207,6 +2293,26 @@ def test_parse_result_reads_fields_and_ids_evidence() -> None:
 def test_parse_result_rejects_non_json() -> None:
     with pytest.raises(EngineError):
         parse_result("not json")
+
+
+def test_parse_result_salvages_fenced_json() -> None:
+    # P5: a plain provider may wrap the object in markdown fences; extract it.
+    reply = '```json\n{"facts": [], "intents": [], "complete": null}\n```'
+    result = parse_result(reply)
+    assert result.facts == []
+
+
+def test_parse_result_salvages_prose_wrapped_json() -> None:
+    reply = (
+        'Sure! Here is the result:\n{"facts": [], "intents": [], "complete": null}\nHope it helps.'
+    )
+    result = parse_result(reply)
+    assert result.intents == []
+
+
+def test_parse_result_still_rejects_a_bare_brace() -> None:
+    with pytest.raises(EngineError):
+        parse_result("here is a { note not json")
 
 
 def test_parse_result_rejects_unknown_fact_kind() -> None:

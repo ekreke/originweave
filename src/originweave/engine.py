@@ -35,7 +35,14 @@ from .blackboard import (
     Relation,
     canonical_name,
 )
-from .capabilities.base import CapabilityError, PromptProvider, PromptTemplate, SearchProvider
+from .capabilities.base import (
+    CapabilityError,
+    PromptProvider,
+    PromptTemplate,
+    ProviderError,
+    SearchProvider,
+    SearchUnavailableError,
+)
 from .capabilities.model import Usage
 from .capabilities.worker import TaskKind, Worker, WorkerReply
 from .config import BudgetConfig, parse_duration
@@ -304,6 +311,57 @@ def _parse_relation(item: Any, ev_seq: int) -> tuple[Relation, int]:
     return relation, ev_seq
 
 
+def _extract_json_object(text: str) -> str | None:
+    """Return the first balanced ``{...}`` slice of ``text`` (string-aware), or ``None``.
+
+    Used to rescue a reply that wrapped its JSON in prose or markdown fences, which the
+    Pi submit tool avoids but a plain model provider may still emit (P5).
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_str:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_str = False
+            continue
+        if char == '"':
+            in_str = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+
+
+def _loads_reply(text: str) -> Any:
+    """Decode a worker reply, salvaging a prose/fence-wrapped JSON object if needed.
+
+    Raises the original :class:`json.JSONDecodeError` when nothing parses, so each
+    caller can keep its own task-specific message.
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        candidate = _extract_json_object(text)
+        if candidate is not None and candidate != text:
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+        raise exc
+
+
 def parse_result(
     text: str,
     *,
@@ -323,9 +381,12 @@ def parse_result(
     pass (M5) may carry ``entities``/``relations``.
     ``allow_edges``/``allow_gate``/``allow_hint``/``allow_entities``/``allow_relations``
     bound which tasks may. Malformed replies raise :class:`EngineError`.
+
+    As a fallback (P5) a reply whose JSON is wrapped in prose or markdown fences is
+    salvaged by extracting its first balanced object before giving up.
     """
     try:
-        data = json.loads(text)
+        data = _loads_reply(text)
     except json.JSONDecodeError as exc:
         raise EngineError(f"worker reply is not valid JSON: {exc}") from exc
     if not isinstance(data, dict):
@@ -502,7 +563,7 @@ def parse_validation(text: str, count: int, known_intent_ids: set[str]) -> Valid
     reference. Malformed or incomplete replies raise :class:`EngineError`.
     """
     try:
-        data = json.loads(text)
+        data = _loads_reply(text)
     except json.JSONDecodeError as exc:
         raise EngineError(f"validate reply is not valid JSON: {exc}") from exc
     if not isinstance(data, dict):
@@ -566,6 +627,15 @@ def _session_suffix(session_id: str) -> int:
     return int(digits) if digits.isdigit() else 0
 
 
+# Injected as ``extra["search"]`` when the search circuit breaker is open (P2): the
+# worker still runs so the pass stays auditable, but it is told there are no results.
+_SEARCH_UNAVAILABLE_TEMPLATE = (
+    "SEARCH UNAVAILABLE: {reason}. No web results were retrieved for this intent. "
+    "If the document and your own knowledge cannot support a finding, emit no facts "
+    "rather than guessing. Do not attempt to call a search tool."
+)
+
+
 @dataclass
 class _ExploreOutcome:
     """Result of one concurrent Explore pass, before the engine commits it.
@@ -592,6 +662,10 @@ class _ExploreOutcome:
     started: str = ""
     ended: str = ""
     error: Exception | None = None
+    # Set when the pass could not run but the Intent should be handed back ``open``
+    # (a transient search failure after the resilience retries were exhausted). The
+    # commit path writes ``RELEASE`` instead of a terminal ``FAILED`` (P2).
+    release_reason: str | None = None
 
 
 class Engine:
@@ -1619,6 +1693,16 @@ class Engine:
         # later pass can reference an entity an earlier one in the same round produced.
         graph_entities = list(board.entities)
         for outcome in outcomes:
+            if outcome.release_reason is not None:
+                # A transient search failure: hand the Intent back as ``open`` and keep
+                # committing the rest of the round (P2). This is independent of the
+                # lease ``heartbeat_on_timeout`` policy; the provider, not the lease,
+                # caused it.
+                self._store.append_event(
+                    "RELEASE",
+                    {"intentId": outcome.intent_id, "reason": outcome.release_reason},
+                )
+                continue
             if outcome.error is not None:
                 if (
                     isinstance(outcome.error, _ExploreTimeout)
@@ -1982,6 +2066,19 @@ class Engine:
                         )
                     except TimeoutError:
                         return self._timeout_outcome(intent, worker)
+                    except SearchUnavailableError as exc:
+                        # The breaker is open (the provider was not even called): degrade
+                        # by telling the worker there is no retrieval, and keep going (P2).
+                        extra["search"] = _SEARCH_UNAVAILABLE_TEMPLATE.format(reason=exc)
+                    except ProviderError as exc:
+                        # A transient search failure survived the resilience retries:
+                        # hand the Intent back to the board as ``open`` so a later round
+                        # can retry, instead of killing the whole run (P2).
+                        return _ExploreOutcome(
+                            intent_id=intent.id,
+                            worker=worker,
+                            release_reason=f"search failed: {exc}",
+                        )
                     except CapabilityError as exc:
                         return _ExploreOutcome(intent_id=intent.id, worker=worker, error=exc)
                 try:

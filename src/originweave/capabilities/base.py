@@ -31,6 +31,15 @@ class ProviderError(CapabilityError):
     """Raised when a provider call fails (transport, status, or malformed body)."""
 
 
+class SearchUnavailableError(CapabilityError):
+    """Raised when the search circuit breaker is open and the call is skipped.
+
+    Distinct from :class:`ProviderError`: the provider was not called at all, so
+    callers can *degrade* (proceed without retrieval) instead of treating it as a
+    hard failure. See ``capabilities/resilience.py``.
+    """
+
+
 @dataclass(frozen=True)
 class PromptTemplate:
     name: str
@@ -64,4 +73,5 @@ __all__ = [
     "ProviderError",
     "ProviderUnavailableError",
     "SearchProvider",
+    "SearchUnavailableError",
 ]

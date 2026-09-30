@@ -111,8 +111,11 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   `ConfigError`（防 `max_step` 之类拼写错误被静默忽略）。`CONFIG_FILENAME` 是**相对路径**，
   测试靠 `monkeypatch.chdir(tmp_path)`，不要在库代码里假设绝对路径。
   `[capability.model]` 默认 `openai` / `deepseek-v4.1-flash`，端点由 `OPENAI_BASE_URL` 提供
-  （内网地址不入库）。顶层 `[worker]`：`provider`(local\|pi，默认 `pi`)、`execution`(in-process\|container，
-  **默认 `container`**)、`image`、`tools`(Pi 工具白名单)、`max_concurrency`(>0 且
+  （内网地址不入库）。`[capability.search]` 除 `provider`(exa\|parallel) 外有韧性键：
+  `max_attempts`(默认 3)/`backoff`(`"1s"`)/`backoff_max`(`"30s"`)/`breaker_threshold`(3)/
+  `breaker_cooldown`(`"60s"`)——`build_search` 包一层 `ResilientSearch`（指数退避 + 进程级熔断，
+  识别 200 限流文案为错误）。顶层 `[worker]`：`provider`(local\|pi，默认 `pi`)、`execution`(in-process\|container，
+  **默认 `container`**)、`image`、`tools`(Pi 工具白名单；`submit_result` 恒启用、不在此列)、`max_concurrency`(>0 且
   <=16)、`heartbeat_interval`(默认 `"15s"`)/`heartbeat_timeout`(默认 `"5m"`，
   须 `> interval`)/`heartbeat_on_timeout`(`release`\|`fail`)、`budget`（`max_steps` / `max_wall` /
   `max_cost`）；时长均为正整数加 `ms|s|m|h|d`（`config.parse_duration`）。Pi 的 model/base_url 复用
@@ -137,7 +140,9 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   `PI_CODING_AGENT_DIR`（P2 bug 已修，P4）。扩展加载：`pi --no-extensions -e <ext.ts>` 仍需显式 `-e`
   （`--no-extensions` 只关自动发现）；`--tools <name>` 按精确名同时约束内建与扩展工具；
   `typebox`/pi 类型在仓库外路径可直接 import，无需 shim。`search` 工具由包内
-  `src/originweave/pi_extensions/search.ts` 提供，回调 server `Search`（`ORIGINWEAVE_SERVER_URL`）。
+  `src/originweave/pi_extensions/search.ts` 提供，回调 server `Search`（`ORIGINWEAVE_SERVER_URL`）；
+  `submit_result`（恒启用、内部）由 `pi_extensions/submit.ts` 提供，`PiWorker` 取其入参为
+  `WorkerReply.text`，保证回复是合法 JSON。
 - **测试与工具链**：pytest `asyncio_mode = "auto"`（`pyproject.toml`），async 测试**不加**
   `@pytest.mark.asyncio`；ruff `line-length = 100`（非默认 88），mypy strict **只查 `src`**。
   前端 `pnpm --dir frontend test` 经 `frontend/scripts/test-watchdog.mjs` 包装：vitest 的

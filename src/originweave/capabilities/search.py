@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
@@ -19,7 +20,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .base import ProviderError
+from .base import CapabilityError, ProviderError
 
 EXA_URL = "https://mcp.exa.ai/mcp"
 PARALLEL_URL = "https://search.parallel.ai/mcp"
@@ -31,6 +32,39 @@ ENV_VARS: dict[str, str] = {
 
 TIMEOUT_SECONDS = 25.0
 MAX_RESPONSE_BYTES = 256 * 1024
+
+# The free MCP endpoints answer an over-quota request with HTTP 200 and an error
+# notice as the "result" text (e.g. "You've hit Exa's free MCP rate limit."), so a
+# limiter is not a transport error. Match notice *phrasing* (not a bare "quota" word)
+# and bound the length, so a short real result that merely mentions "quota" is not
+# misclassified as a limiter.
+_RATE_LIMIT_RE = re.compile(
+    r"rate[-\s]?limit"
+    r"|too many requests"
+    r"|(?:quota|usage limit)[^.]{0,40}(?:exceed|exhaust|reached|limit)",
+    re.IGNORECASE,
+)
+_RATE_LIMIT_MAX_LEN = 500
+
+
+class SearchRateLimitedError(ProviderError):
+    """Raised when a provider reports a rate/quota limit (often in a 200 body)."""
+
+
+class SearchRequestError(CapabilityError):
+    """Raised when a provider rejects the request (a permanent 4xx, not a limiter).
+
+    Not a :class:`ProviderError`, so the resilient wrapper never retries it and the
+    engine fails the run loudly instead of degrading (a bad endpoint/key is a config
+    error, not a transient hiccup).
+    """
+
+
+def _looks_rate_limited(text: str) -> bool:
+    """True when ``text`` reads as a provider rate-limit notice rather than results."""
+    if len(text) > _RATE_LIMIT_MAX_LEN:
+        return False
+    return _RATE_LIMIT_RE.search(text) is not None
 
 
 def _user_agent() -> str:
@@ -109,8 +143,16 @@ class _McpSearch:
             async with client.stream(
                 "POST", self._request_url(), headers=self._headers(), json=body
             ) as response:
-                if response.status_code >= 400:
+                if response.status_code == 429:
+                    raise SearchRateLimitedError(f"{self.name} search is rate limited (HTTP 429)")
+                if response.status_code >= 500:
+                    # Server-side/transient: retryable, so the wrapper backs off.
                     raise ProviderError(
+                        f"{self.name} search returned HTTP {response.status_code}"
+                    )
+                if response.status_code >= 400:
+                    # A 4xx (bad request/endpoint/credential): permanent, do not retry.
+                    raise SearchRequestError(
                         f"{self.name} search returned HTTP {response.status_code}"
                     )
                 total = 0
@@ -127,6 +169,10 @@ class _McpSearch:
         text = parse_response(b"".join(chunks).decode("utf-8", errors="replace"))
         if text is None:
             raise ProviderError(f"{self.name} search returned no usable result")
+        if _looks_rate_limited(text):
+            # A 200 body carrying a rate-limit notice would otherwise be injected as
+            # if it were results; surface it as a failure so the breaker/backoff act.
+            raise SearchRateLimitedError(f"{self.name} search is rate limited: {text.strip()}")
         return text
 
     async def search(self, query: str, *, num_results: int = 8) -> str:
@@ -202,6 +248,8 @@ __all__ = [
     "TIMEOUT_SECONDS",
     "ExaSearch",
     "ParallelSearch",
+    "SearchRateLimitedError",
+    "SearchRequestError",
     "credential_env",
     "parse_response",
 ]

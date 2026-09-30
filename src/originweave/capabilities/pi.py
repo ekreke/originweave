@@ -34,8 +34,12 @@ _PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent"
 _PI_BUILTIN_TOOLS: frozenset[str] = frozenset(
     {"read", "bash", "edit", "write", "grep", "find", "ls"}
 )
-# The TS extension the ``search`` tool lives in (packaged as package data).
+# The TS extensions the Pi worker loads (packaged as package data).
 _EXTENSION_NAME = "search.ts"
+_SUBMIT_EXTENSION_NAME = "submit.ts"
+# Always-on internal tool that captures the structured reply (P4); not part of the
+# user-facing ``[worker].tools`` allowlist.
+SUBMIT_TOOL = "submit_result"
 _AGENT_DIR_ENV_SUFFIX = "_CODING_AGENT_DIR"
 # Upstream/default Pi agent-config-dir variable; a rebranded build uses another name.
 _DEFAULT_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR"
@@ -135,9 +139,9 @@ def resolve_agent_dir_env_name(bin: str | None = None) -> str:
     return f"{(name or 'pi').upper()}{_AGENT_DIR_ENV_SUFFIX}"
 
 
-def _extension_path() -> Path:
-    """The packaged ``search`` TS extension (package data, fixed known path)."""
-    return Path(__file__).resolve().parent.parent / "pi_extensions" / _EXTENSION_NAME
+def _extension_path(name: str = _EXTENSION_NAME) -> Path:
+    """A packaged Pi TS extension (package data, fixed known path)."""
+    return Path(__file__).resolve().parent.parent / "pi_extensions" / name
 
 
 def _render_value(value: Any) -> str:
@@ -165,9 +169,12 @@ class PiWorker:
         self._model = model
         self._tools = tools
         self._cwd = (Path.cwd() if cwd is None else cwd).resolve()
-        self._extension_path = (
+        # The search extension path is overridable for tests; the submit extension is
+        # always the packaged one.
+        self._search_extension_path = (
             Path(extension_path) if extension_path is not None else _extension_path()
         )
+        self._submit_extension_path = _extension_path(_SUBMIT_EXTENSION_NAME)
         self._agent_factory = agent_factory
         self._runtime_checker = runtime_checker
 
@@ -191,12 +198,20 @@ class PiWorker:
 
     def _tools_args(self) -> list[str]:
         tools = [tool for tool in self._tools if tool in _PI_BUILTIN_TOOLS or tool == "search"]
-        return ["--no-tools"] if not tools else ["--tools", ",".join(tools)]
+        # The submit tool is always available so the reply is captured as structured
+        # arguments rather than free-form (and possibly malformed) assistant text.
+        tools.append(SUBMIT_TOOL)
+        return ["--tools", ",".join(tools)]
 
     def _extension_args(self) -> list[str]:
-        if "search" not in self._tools:
-            return []
-        return ["-e", str(self._extension_path)]
+        paths: list[Path] = []
+        if "search" in self._tools:
+            paths.append(self._search_extension_path)
+        paths.append(self._submit_extension_path)
+        args: list[str] = []
+        for path in paths:
+            args += ["-e", str(path)]
+        return args
 
     def _pi_config(self, *, config_dir: str, template: PromptTemplate) -> PiConfig:
         return PiConfig(
@@ -256,14 +271,27 @@ class PiWorker:
                 self._write_models_config(config_dir)
                 pi_config = self._pi_config(config_dir=config_dir, template=template)
                 agent = self._agent_factory(pi_config)
+                submitted: dict[str, Any] | None = None
                 async with agent:
                     async for event in agent.prompt_stream(messages[1].content):
                         self._append_step(steps, event)
                         usage.add(_turn_usage(event))
+                        # The submit tool is the canonical reply (P4): its arguments are
+                        # the structured result, so the engine always gets valid JSON.
+                        # The first submission wins (the contract is "exactly once").
+                        if (
+                            submitted is None
+                            and isinstance(event, ToolExecutionStartEvent)
+                            and event.toolName == SUBMIT_TOOL
+                            and isinstance(event.args, dict)
+                        ):
+                            submitted = event.args
                     text = await agent.get_last_assistant_text()
         except PiError as exc:
             raise ProviderError(f"Pi worker failed: {exc}") from exc
 
+        if submitted is not None:
+            text = json.dumps(submitted, ensure_ascii=False)
         if text is None:
             raise ProviderError("Pi worker completed without an assistant response")
         return WorkerReply(

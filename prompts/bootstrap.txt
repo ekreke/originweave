@@ -17,6 +17,9 @@ Rules:
   "main-chain", "dependency" or "goal-derived".
 
 Reply with exactly one JSON object and nothing else: no prose, no markdown fences.
+If a "submit_result" tool is provided, call it exactly once with that object as its
+arguments instead of printing it; otherwise write the object directly. Never emit
+tool-call markup, and never call a tool you were not given.
 
 {
   "facts": [

@@ -56,7 +56,16 @@ _TOP_LEVEL_KEYS: frozenset[str] = frozenset(
 _TABLE_KEYS: dict[str, frozenset[str]] = {
     "hitl": frozenset({"auto"}),
     "capability": frozenset({"search", "prompt", "model"}),
-    "capability.search": frozenset({"provider"}),
+    "capability.search": frozenset(
+        {
+            "provider",
+            "max_attempts",
+            "backoff",
+            "backoff_max",
+            "breaker_threshold",
+            "breaker_cooldown",
+        }
+    ),
     "capability.prompt": frozenset({"provider", "directory"}),
     "capability.model": frozenset({"provider", "model", "base_url"}),
     "worker": frozenset(
@@ -106,6 +115,14 @@ class HitlConfig:
 @dataclass(frozen=True)
 class SearchConfig:
     provider: str = "exa"
+    # Resilience knobs for the search capability (see capabilities/resilience.py):
+    # a transient failure is retried with exponential backoff, and repeated
+    # failures trip a process-wide breaker for ``breaker_cooldown``.
+    max_attempts: int = 3
+    backoff: str = "1s"
+    backoff_max: str = "30s"
+    breaker_threshold: int = 3
+    breaker_cooldown: str = "60s"
 
 
 @dataclass(frozen=True)
@@ -196,7 +213,14 @@ class Config:
         return {
             "hitl": {"auto": self.hitl.auto},
             "capability": {
-                "search": {"provider": self.capability.search.provider},
+                "search": {
+                    "provider": self.capability.search.provider,
+                    "max_attempts": self.capability.search.max_attempts,
+                    "backoff": self.capability.search.backoff,
+                    "backoff_max": self.capability.search.backoff_max,
+                    "breaker_threshold": self.capability.search.breaker_threshold,
+                    "breaker_cooldown": self.capability.search.breaker_cooldown,
+                },
                 "prompt": {
                     "provider": self.capability.prompt.provider,
                     "directory": self.capability.prompt.directory,
@@ -241,6 +265,29 @@ class Config:
                 f"unknown search provider {search!r}; "
                 f"expected one of {sorted(ALLOWED_SEARCH_PROVIDERS)}"
             )
+        if self.capability.search.max_attempts < 1:
+            raise ConfigError(
+                "capability.search.max_attempts must be >= 1, "
+                f"got {self.capability.search.max_attempts}"
+            )
+        if self.capability.search.breaker_threshold < 1:
+            raise ConfigError(
+                "capability.search.breaker_threshold must be >= 1, "
+                f"got {self.capability.search.breaker_threshold}"
+            )
+        backoff = parse_duration(self.capability.search.backoff, "capability.search.backoff")
+        backoff_max = parse_duration(
+            self.capability.search.backoff_max, "capability.search.backoff_max"
+        )
+        if backoff > backoff_max:
+            raise ConfigError(
+                "capability.search.backoff must be <= capability.search.backoff_max "
+                f"(got {self.capability.search.backoff} > {self.capability.search.backoff_max})"
+            )
+        parse_duration(
+            self.capability.search.breaker_cooldown,
+            "capability.search.breaker_cooldown",
+        )
         prompt = self.capability.prompt.provider
         if prompt not in ALLOWED_PROMPT_PROVIDERS:
             raise ConfigError(
@@ -417,7 +464,32 @@ def from_dict(data: Mapping[str, Any]) -> Config:
                     search.get("provider"),
                     "capability.search.provider",
                     defaults.capability.search.provider,
-                )
+                ),
+                max_attempts=_as_int(
+                    search.get("max_attempts"),
+                    "capability.search.max_attempts",
+                    defaults.capability.search.max_attempts,
+                ),
+                backoff=_as_str(
+                    search.get("backoff"),
+                    "capability.search.backoff",
+                    defaults.capability.search.backoff,
+                ),
+                backoff_max=_as_str(
+                    search.get("backoff_max"),
+                    "capability.search.backoff_max",
+                    defaults.capability.search.backoff_max,
+                ),
+                breaker_threshold=_as_int(
+                    search.get("breaker_threshold"),
+                    "capability.search.breaker_threshold",
+                    defaults.capability.search.breaker_threshold,
+                ),
+                breaker_cooldown=_as_str(
+                    search.get("breaker_cooldown"),
+                    "capability.search.breaker_cooldown",
+                    defaults.capability.search.breaker_cooldown,
+                ),
             ),
             prompt=PromptConfig(
                 provider=_as_str(

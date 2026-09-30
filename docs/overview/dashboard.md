@@ -241,7 +241,9 @@ Session {                             # 一次 Worker 调用的历史（隔离�
 冻结非敏感 runtime 设置，保证人工 Gate 恢复仍使用原有容器与镜像。
 会话快照落 run dir `sessions/<id>.json`；`RunDetail.sessions` 直接读该快照（原始输入/输出与完整步骤链，
 样例目录无 `sessions/` 则为空），与 `SESSION`/`WORKER_STEP` 事件互为索引，前端 INSPECTOR 依会话展示。
-`Search` 为只读 RPC（`[capability.search]` 单一来源，切换 provider 不需改 Pi 扩展）。
+`Search` 为只读 RPC（`[capability.search]` 单一来源，切换 provider 不需改 Pi 扩展）。检索经
+`ResilientSearch`（重试 + 熔断）：限流/失败以 `UNAVAILABLE` 返回（Pi 侧呈现为工具错误），熔断打开时
+立即 `UNAVAILABLE`。
 
 ## 5. 契约原型与样例
 

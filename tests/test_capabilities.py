@@ -16,6 +16,9 @@ from originweave.capabilities import (
     OpenAIModel,
     ParallelSearch,
     ProviderError,
+    ResilientSearch,
+    SearchRateLimitedError,
+    SearchRequestError,
     build_model,
     build_prompt,
     build_search,
@@ -107,7 +110,12 @@ def test_build_helpers_select_configured_providers(monkeypatch: pytest.MonkeyPat
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     cfg = _cfg()
-    assert isinstance(build_search(cfg), ExaSearch)
+    # build_search wraps the configured provider in the resilient decorator (P1);
+    # the provider name is preserved and the inner provider is still reachable.
+    search = build_search(cfg)
+    assert isinstance(search, ResilientSearch)
+    assert search.name == "exa"
+    assert isinstance(search._provider, ExaSearch)
     assert build_prompt(cfg).name == "local"
     assert isinstance(build_model(cfg), OpenAIModel)
 
@@ -212,6 +220,49 @@ async def test_search_http_error_raises_provider_error() -> None:
     )
     try:
         with pytest.raises(ProviderError):
+            await ExaSearch(client=client).search("q")
+    finally:
+        await client.aclose()
+
+
+async def test_search_http_429_raises_rate_limited() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(429, text="slow down"))
+    )
+    try:
+        with pytest.raises(SearchRateLimitedError):
+            await ExaSearch(client=client).search("q")
+    finally:
+        await client.aclose()
+
+
+async def test_search_rate_limit_body_raises_rate_limited() -> None:
+    # The free MCP endpoint answers a 200 with a rate-limit notice as the "result".
+    notice = "You've hit Exa's free MCP rate limit. To continue, create your own API key."
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_mcp_handler(notice, capture={})))
+    try:
+        with pytest.raises(SearchRateLimitedError):
+            await ExaSearch(client=client).search("q")
+    finally:
+        await client.aclose()
+
+
+async def test_search_short_real_result_with_quota_word_is_not_flagged() -> None:
+    # A short, real result that merely mentions "quota" must not look like a limiter.
+    text = "The Qing quota system fixed provincial examination quotas by population."
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_mcp_handler(text, capture={})))
+    try:
+        assert await ExaSearch(client=client).search("q") == text
+    finally:
+        await client.aclose()
+
+
+async def test_search_http_4xx_is_a_permanent_request_error() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(400, text="bad request"))
+    )
+    try:
+        with pytest.raises(SearchRequestError):
             await ExaSearch(client=client).search("q")
     finally:
         await client.aclose()
