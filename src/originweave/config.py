@@ -49,6 +49,8 @@ _DURATION_UNITS: dict[str, float] = {
     "d": 86400.0,
 }
 _DURATION_RE = re.compile(r"([1-9][0-9]*)(ms|s|m|h|d)")
+# A permissive BCP-47 language tag (e.g. "zh", "zh-CN", "en-US"); empty means unset.
+_LANGUAGE_RE = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
 
 _TOP_LEVEL_KEYS: frozenset[str] = frozenset(
     {"hitl", "capability", "worker", "run", "project", "storage"}
@@ -66,7 +68,7 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
             "breaker_cooldown",
         }
     ),
-    "capability.prompt": frozenset({"provider", "directory"}),
+    "capability.prompt": frozenset({"provider", "directory", "language"}),
     "capability.model": frozenset({"provider", "model", "base_url"}),
     "worker": frozenset(
         {
@@ -129,6 +131,9 @@ class SearchConfig:
 class PromptConfig:
     provider: str = "local"
     directory: str = "prompts"
+    # Output language for the input helper (SuggestGoal). "" follows document A's
+    # language; otherwise a BCP-47-ish tag (e.g. "zh-CN") forces goal/title in it.
+    language: str = ""
 
 
 @dataclass(frozen=True)
@@ -224,6 +229,7 @@ class Config:
                 "prompt": {
                     "provider": self.capability.prompt.provider,
                     "directory": self.capability.prompt.directory,
+                    "language": self.capability.prompt.language,
                 },
                 "model": {
                     "provider": self.capability.model.provider,
@@ -293,6 +299,12 @@ class Config:
             raise ConfigError(
                 f"unknown prompt provider {prompt!r}; "
                 f"expected one of {sorted(ALLOWED_PROMPT_PROVIDERS)}"
+            )
+        language = self.capability.prompt.language
+        if language and not _LANGUAGE_RE.fullmatch(language):
+            raise ConfigError(
+                "capability.prompt.language must be a BCP-47-like tag (e.g. 'zh-CN'); "
+                f"got {language!r}"
             )
         model = self.capability.model.provider
         if model not in ALLOWED_MODEL_PROVIDERS:
@@ -501,6 +513,11 @@ def from_dict(data: Mapping[str, Any]) -> Config:
                     prompt.get("directory"),
                     "capability.prompt.directory",
                     defaults.capability.prompt.directory,
+                ),
+                language=_as_str(
+                    prompt.get("language"),
+                    "capability.prompt.language",
+                    defaults.capability.prompt.language,
                 ),
             ),
             model=ModelConfig(

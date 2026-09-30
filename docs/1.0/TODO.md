@@ -139,6 +139,9 @@
       `list`）。旧 `obscura_kitesurf` 占位样例已被从零构建的 `copilot_productivity` 替换，且
       Phase R 移除录制/离线后「安装 capability」已无对应概念；`product-overview.md` §5 冻结契约
       已同步为 `capabilities list`（`cli.py`、`tests/test_smoke.py`）
+- [x] **M8 输入辅助语言（已完成）** → `[capability.prompt].language`（空=跟随资料 A，否则 BCP-47）
+      经 `capabilities.prompt.language_directive` 追加到 `suggest_goal` 的 system 文本（英文资料 A 也产出
+      用户语言 goal/标题）；Settings `PromptSettings.language` 写回该键，前端 Settings 页可填 BCP-47（留空=跟随资料 A）。
 - [ ] **M8** 标题编辑仅改 `Run.title`（`run.json`/workspace 元数据），CreateRun 时写入 PROJECT 事件的
       `origin` Fact label 不随动；如需同步要新增「事实取代」事件（本期不做）
 - [x] **M6 P4** server URL 传递 → **env `ORIGINWEAVE_SERVER_URL`，默认 `http://127.0.0.1:8765`**

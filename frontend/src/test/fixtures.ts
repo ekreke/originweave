@@ -14,6 +14,7 @@ import {
   IntentSchema,
   LlmSettingsSchema,
   ProjectSchema,
+  PromptSettingsSchema,
   RelationSchema,
   RunDetailSchema,
   RunGraphSchema,
@@ -233,7 +234,11 @@ export function workerSettings(
 }
 
 export function settings(overrides: Partial<Settings> = {}): Settings {
-  return create(SettingsSchema, { worker: workerSettings(), ...overrides })
+  return create(SettingsSchema, {
+    worker: workerSettings(),
+    prompt: create(PromptSettingsSchema, { language: '' }),
+    ...overrides,
+  })
 }
 
 export function sessionStep(overrides: Partial<SessionStep> = {}): SessionStep {

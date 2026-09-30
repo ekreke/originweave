@@ -2,6 +2,7 @@ import { create } from '@bufbuild/protobuf'
 
 import {
   LlmSettingsSchema,
+  PromptSettingsSchema,
   SettingsSchema,
   WorkerBudgetSchema,
   WorkerSettingsSchema,
@@ -18,6 +19,9 @@ export const EXECUTIONS = ['container', 'in-process'] as const
 export const CONTAINER_SCOPES = ['per-run', 'per-call'] as const
 export const HEARTBEAT_ON_TIMEOUT = ['release', 'fail'] as const
 export const TOOLS = ['search', 'read', 'grep', 'find', 'ls', 'bash', 'edit', 'write'] as const
+// Output-language suggestions for the input helper (goal/title); "" follows the document.
+export const LANGUAGES = ['', 'zh-CN', 'zh-TW', 'en', 'ja'] as const
+const LANGUAGE_RE = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/
 const DURATION_RE = /^[1-9][0-9]*(ms|s|m|h|d)$/
 const DURATION_UNITS: Record<string, number> = { ms: 0.001, s: 1, m: 60, h: 3600, d: 86400 }
 
@@ -46,6 +50,7 @@ export interface Draft {
   maxSteps: string
   maxWall: string
   maxCost: string
+  language: string
 }
 
 export const EMPTY_DRAFT: Draft = {
@@ -64,6 +69,7 @@ export const EMPTY_DRAFT: Draft = {
   maxSteps: '60',
   maxWall: '10m',
   maxCost: '2',
+  language: '',
 }
 
 export function toDraft(settings: Settings): Draft {
@@ -86,6 +92,7 @@ export function toDraft(settings: Settings): Draft {
     maxSteps: String(budget?.maxSteps ?? 60),
     maxWall: budget?.maxWall || EMPTY_DRAFT.maxWall,
     maxCost: String(budget?.maxCost ?? 2),
+    language: settings.prompt?.language ?? '',
   }
 }
 
@@ -122,6 +129,9 @@ export function validateDraft(draft: Draft): string {
   if (!Number.isInteger(steps) || steps < 1) return 'max_steps 需为 > 0 的整数'
   const cost = Number(draft.maxCost)
   if (!Number.isFinite(cost) || cost < 0) return 'max_cost 需为 >= 0 的数字'
+  if (draft.language.trim() && !LANGUAGE_RE.test(draft.language.trim())) {
+    return '语言需为 BCP-47 形（如 zh-CN），或留空跟随文档'
+  }
   return ''
 }
 
@@ -148,5 +158,6 @@ export function draftToMessage(draft: Draft): Settings {
         maxCost: Number(draft.maxCost),
       }),
     }),
+    prompt: create(PromptSettingsSchema, { language: draft.language.trim() }),
   })
 }

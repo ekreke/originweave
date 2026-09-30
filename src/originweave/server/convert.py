@@ -236,7 +236,10 @@ def worker_settings_pb(worker: WorkerConfig, model: ModelConfig) -> Any:
 
 def settings_pb(config: Config) -> Any:
     """Map a :class:`Config` onto the ``Settings`` message."""
-    return pb.Settings(worker=worker_settings_pb(config.worker, config.capability.model))
+    return pb.Settings(
+        worker=worker_settings_pb(config.worker, config.capability.model),
+        prompt=pb.PromptSettings(language=config.capability.prompt.language),
+    )
 
 
 def event_pb(event: Event) -> Any:

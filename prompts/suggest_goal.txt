@@ -11,7 +11,8 @@ operator can start a verification run without typing them by hand:
 Rules:
 - Base both on what document A actually asserts. Do not invent facts, organisations,
   numbers or sources.
-- Write in the document's language (Chinese document -> Chinese goal/title).
+- Write in the run language when the system prompt specifies one; otherwise use the
+  document's language (Chinese document -> Chinese goal/title).
 - "goal" is one sentence; "title" is a compact noun phrase.
 
 Reply with exactly one JSON object and nothing else: no prose, no markdown fences.

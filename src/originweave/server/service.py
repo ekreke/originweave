@@ -21,12 +21,14 @@ from originweave.v1.originweave_connect import OriginweaveService
 
 from ..blackboard import DEFAULT_ANALYSIS, BlackboardError, Fact, Hint, normalize_analysis
 from ..capabilities import CapabilityError, ChatMessage, build_model
+from ..capabilities.prompt import language_directive
 from ..config import (
     BudgetConfig,
     CapabilityConfig,
     Config,
     ConfigError,
     ModelConfig,
+    PromptConfig,
     WorkerConfig,
     from_dict,
     parse_duration,
@@ -140,11 +142,20 @@ def _config_from_settings(base: Config, settings: Any) -> Config:
         if worker.HasField("budget")
         else base.worker.budget
     )
+    prompt = base.capability.prompt
+    if settings.HasField("prompt"):
+        # The input-helper language is the only prompt setting the UI exposes; the
+        # provider/directory stay as configured (round-tripped by the client anyway).
+        prompt = PromptConfig(
+            provider=prompt.provider,
+            directory=prompt.directory,
+            language=settings.prompt.language,
+        )
     candidate = Config(
         hitl=base.hitl,
         capability=CapabilityConfig(
             search=base.capability.search,
-            prompt=base.capability.prompt,
+            prompt=prompt,
             model=model,
         ),
         worker=WorkerConfig(
@@ -642,9 +653,14 @@ class Service(OriginweaveService):  # type: ignore[misc]  # generated base is An
             model = build_model(self._ctx.config)
         try:
             template = await self._ctx.providers.prompt.get("suggest_goal")
+            system = template.text
+            language = self._ctx.config.capability.prompt.language
+            if language:
+                # Force goal/title into the user's language regardless of document A's.
+                system = f"{system}\n\n{language_directive(language)}"
             reply = await model.complete(
                 [
-                    ChatMessage(role="system", content=template.text),
+                    ChatMessage(role="system", content=system),
                     ChatMessage(role="user", content=source_text),
                 ]
             )

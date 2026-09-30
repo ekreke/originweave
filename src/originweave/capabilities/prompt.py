@@ -17,6 +17,22 @@ LANGFUSE_ENV_VARS: tuple[str, ...] = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KE
 _SUFFIXES: tuple[str, ...] = (".txt", ".md")
 
 
+def language_directive(tag: str) -> str:
+    """A global instruction forcing generated text into the ``tag`` language.
+
+    Appended to the input-helper prompt so goal/title follow the user's configured
+    language (``[capability.prompt].language``) rather than document A's. It must not
+    touch verbatim quotes or the fixed JSON shape/enums.
+    """
+    return (
+        "Language rule (global): write every generated, human-readable string (goal, "
+        f"title) in the language identified by the tag {tag!r}, even when document A is "
+        "written in a different language. Keep the JSON object and its keys exactly as "
+        "specified, and never translate verbatim quotes, source text, or fixed enum "
+        "values."
+    )
+
+
 class LocalPrompt:
     name = "local"
 

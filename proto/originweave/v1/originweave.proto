@@ -249,8 +249,15 @@ message WorkerSettings {
   string container_scope = 11; // per-call | per-run (Pi + container only)
 }
 
+message PromptSettings {
+  // Output language for the input helper (SuggestGoal): "" follows document A's
+  // language, otherwise a BCP-47-like tag (e.g. "zh-CN").
+  string language = 1;
+}
+
 message Settings {
   WorkerSettings worker = 1;
+  PromptSettings prompt = 2;
 }
 
 // ---------------------------------------------------------------- events

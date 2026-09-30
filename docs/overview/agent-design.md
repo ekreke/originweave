@@ -90,6 +90,7 @@ breaker_cooldown = "60s"  # 熔断打开后冷却多久再放行探测
 [capability.prompt]
 provider = "local"     # local | langfuse
 directory = "prompts"  # local provider 的模板目录
+language = ""          # 输入辅助（SuggestGoal）输出语言；空 = 跟随资料 A，否则 BCP-47（如 "zh-CN"）
 [capability.model]
 provider = "openai"     # OpenAI 兼容
 model    = "deepseek-v4.1-flash"
@@ -148,6 +149,9 @@ dir = "projects"        # 目录式 project 注册表根（M1c-1）
   - `model` 用 `OPENAI_API_KEY`（`OPENAI_BASE_URL` 可覆盖配置里的 `base_url`）。
   - `prompt` 的 `langfuse` 用 `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`。
 - `local` prompt provider 从仓库 `prompts/` 目录读取 `*.txt` / `*.md` 模板。
+- `[capability.prompt].language`：输入辅助（`SuggestGoal`）的输出语言。设为 `zh-CN` 等时，在
+  `suggest_goal` 的 system 文本后追加一条**全局语言指令**（`language_directive`），让 goal/标题
+  用该语言——**即使资料 A 是英文**；空值时跟随资料 A 的语言（现状）。逐字引用与 JSON 枚举不受影响。
 - 现状：`search`（exa/parallel 免费 MCP）与 `model`（OpenAI 兼容）已**真实落地**；
   `prompt` 的 `local` 可用（读文件），`langfuse` 于 M3。**能力无离线/录制回放**（Phase R 移除）。
 

@@ -6,6 +6,7 @@ import {
   CONTAINER_SCOPES,
   EXECUTIONS,
   HEARTBEAT_ON_TIMEOUT,
+  LANGUAGES,
   PROVIDERS,
   TOOLS,
   type Draft,
@@ -277,6 +278,28 @@ export function Settings() {
                   ))}
                 </select>
               </label>
+            </fieldset>
+
+            <fieldset>
+              <legend>输入辅助（goal / 标题语言）</legend>
+              <label>
+                语言
+                <input
+                  aria-label="prompt language"
+                  list="prompt-language-options"
+                  placeholder="留空 = 跟随文档语言（如 zh-CN）"
+                  value={draft.language}
+                  onChange={(event) => patch({ language: event.target.value })}
+                />
+              </label>
+              <datalist id="prompt-language-options">
+                {LANGUAGES.filter(Boolean).map((tag) => (
+                  <option key={tag} value={tag} />
+                ))}
+              </datalist>
+              <p className="cnt">
+                「提取 goal」产出的 goal / 标题用该语言（即使资料 A 是其他语言）；留空跟随资料 A。
+              </p>
             </fieldset>
 
             <fieldset>

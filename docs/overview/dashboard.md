@@ -125,10 +125,10 @@ boundary 灰、compare 青、deviation 红）；`Intent` 为**状态色迷你卡
 | `SubmitHumanInput` | `SubmitHumanInputRequest` | `SubmitHumanInputResponse{run}` | 提交 Gate 决策，解除 `awaiting_human` |
 | `PauseRun` | `PauseRunRequest{run_id}` | `PauseRunResponse{run}` | 暂停运行中的 run（轮次边界，→ `paused`，可恢复；**M3b**） |
 | `ResumeRun` | `ResumeRunRequest{run_id}` | `ResumeRunResponse{run}` | 恢复 `paused` 的 run（**M3b**） |
-| `GetSettings` | `GetSettingsRequest{}` | `GetSettingsResponse{settings}` | 读项目设置（`[worker]` + `[capability.model]`；**M6 P3**） |
-| `UpdateSettings` | `UpdateSettingsRequest{settings}` | `UpdateSettingsResponse{settings}` | 校验后写回项目 `originweave.toml` 并应用（未知 provider/tool 报错；**M6 P3**） |
+| `GetSettings` | `GetSettingsRequest{}` | `GetSettingsResponse{settings}` | 读项目设置（`[worker]` + `[capability.model]` + `[capability.prompt].language`；**M6 P3**） |
+| `UpdateSettings` | `UpdateSettingsRequest{settings}` | `UpdateSettingsResponse{settings}` | 校验后写回项目 `originweave.toml` 并应用（未知 provider/tool/语言格式报错；**M6 P3**） |
 | `Search` | `SearchRequest{query, num_results?}` | `SearchResponse{text}` | 经 `[capability.search]` 执行检索；供 Pi 的 TS 搜索扩展回调（**M6 P3，消费于 P4**） |
-| `SuggestGoal` | `SuggestGoalRequest{source_text}` | `SuggestGoalResponse{goal, title}` | 资料 A → **一次** `[capability.model]` 调用抽 goal（判定标准）+ 标题；**只读**（pinned 可用，无 run 状态）；空 `source_text` → `INVALID_ARGUMENT`，能力失败/坏 JSON → `UNAVAILABLE`（**M8**） |
+| `SuggestGoal` | `SuggestGoalRequest{source_text}` | `SuggestGoalResponse{goal, title}` | 资料 A → **一次** `[capability.model]` 调用抽 goal（判定标准）+ 标题；**只读**（pinned 可用，无 run 状态）；输出语言取自 `[capability.prompt].language`（空=跟随资料 A）；空 `source_text` → `INVALID_ARGUMENT`，能力失败/坏 JSON → `UNAVAILABLE`（**M8**） |
 | `UpdateRun` | `UpdateRunRequest{run_id, title?}` | `UpdateRunResponse{run}` | 改 run **静态元数据**（当前仅标题，写 `run.json`+workspace，不写事件）；空标题 → `INVALID_ARGUMENT`，未知 run → `NOT_FOUND`，pinned → `FAILED_PRECONDITION`（**M8**） |
 
 `ListProjectRuns` / `ListRuns` 返回的 run 列表按创建时间**倒序**（`created_at` 降序，`run_id` 降序作平局裁决），最新 run 排最前。
@@ -224,6 +224,9 @@ Settings {
     heartbeatOnTimeout,               # release | fail（I4）
     budget: WorkerBudget { maxSteps, maxWall, maxCost }
   }
+  prompt: PromptSettings {
+    language,                         # 输入辅助（SuggestGoal）输出语言；空 = 跟随资料 A，否则 BCP-47（如 "zh-CN"）
+  }
 }
 
 Session {                             # 一次 Worker 调用的历史（隔离）
@@ -236,7 +239,8 @@ Session {                             # 一次 Worker 调用的历史（隔离�
 }
 ```
 `GetSettings`/`UpdateSettings` 读写项目 `originweave.toml`：`UpdateSettings` 的 `worker` 块为**权威值**
-（逐字段写回 `[worker]`，`llm` 写回 `[capability.model]`），校验失败 → `INVALID_ARGUMENT`；
+（逐字段写回 `[worker]`，`llm` 写回 `[capability.model]`；`prompt.language` 写回
+`[capability.prompt].language`），校验失败 → `INVALID_ARGUMENT`；
 调用后 server 重建 worker/search/prompt provider，**仅对后续新建 run 生效**；每个 run 的 `run.json`
 冻结非敏感 runtime 设置，保证人工 Gate 恢复仍使用原有容器与镜像。
 会话快照落 run dir `sessions/<id>.json`；`RunDetail.sessions` 直接读该快照（原始输入/输出与完整步骤链，

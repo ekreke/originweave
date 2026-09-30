@@ -1,5 +1,7 @@
+import { create } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
 
+import { PromptSettingsSchema } from '@/gen/originweave/v1/originweave_pb'
 import { EMPTY_DRAFT, draftToMessage, toDraft, validateDraft } from '@/routes/settingsModel'
 import { settings } from '@/test/fixtures'
 
@@ -21,7 +23,13 @@ describe('toDraft', () => {
       maxSteps: '60',
       maxWall: '10m',
       maxCost: '2',
+      language: '',
     })
+  })
+
+  it('reads the input-helper language', () => {
+    const draft = toDraft(settings({ prompt: create(PromptSettingsSchema, { language: 'zh-CN' }) }))
+    expect(draft.language).toBe('zh-CN')
   })
 })
 
@@ -52,6 +60,11 @@ describe('draftToMessage', () => {
     expect(worker?.budget?.maxWall).toBe('3m')
     expect(worker?.budget?.maxCost).toBe(1.5)
     expect(worker?.llm?.model).toBe('deepseek-v4.1-flash')
+  })
+
+  it('includes the input-helper language (trimmed)', () => {
+    const message = draftToMessage({ ...VALID, language: ' zh-CN ' })
+    expect(message.prompt?.language).toBe('zh-CN')
   })
 })
 
@@ -92,5 +105,11 @@ describe('validateDraft', () => {
     expect(validateDraft({ ...VALID, maxConcurrency: '17' })).toContain('max_concurrency')
     expect(validateDraft({ ...VALID, maxSteps: '0' })).toContain('max_steps')
     expect(validateDraft({ ...VALID, maxCost: '-1' })).toContain('max_cost')
+  })
+
+  it('validates the input-helper language tag', () => {
+    expect(validateDraft({ ...VALID, language: '' })).toBe('')
+    expect(validateDraft({ ...VALID, language: 'zh-CN' })).toBe('')
+    expect(validateDraft({ ...VALID, language: 'not a tag!' })).toContain('语言')
   })
 })

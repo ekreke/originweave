@@ -563,11 +563,12 @@ describe('settings', () => {
     expect(model).toHaveValue('deepseek-v4.1-flash')
 
     fireEvent.change(model, { target: { value: 'gpt-x' } })
+    fireEvent.change(screen.getByLabelText('prompt language'), { target: { value: 'zh-CN' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(mocks.updateSettings).toHaveBeenCalledTimes(1))
     const request = mocks.updateSettings.mock.calls[0]![0] as {
-      settings: { worker?: Record<string, unknown> }
+      settings: { worker?: Record<string, unknown>; prompt?: { language?: string } }
     }
     // The whole authoritative worker block round-trips (the server rejects omissions).
     expect(request.settings.worker).toMatchObject({
@@ -583,6 +584,8 @@ describe('settings', () => {
       llm: { model: 'gpt-x' },
       budget: { maxSteps: 60, maxWall: '10m', maxCost: 2 },
     })
+    // The input-helper language is part of the same authoritative Settings payload.
+    expect(request.settings.prompt?.language).toBe('zh-CN')
     expect(await screen.findByText(/已保存/)).toBeInTheDocument()
   })
 

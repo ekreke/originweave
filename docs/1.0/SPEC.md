@@ -561,6 +561,12 @@ run 详情页（Console）支持**就地编辑标题**（仅静态元数据，�
       前端（按钮回填、提交带标题、提取失败、标题编辑）— `tests/test_server.py`、
       `frontend/src/routes/routes.test.tsx`
 - [x] 文档：`dashboard.md` §4.1 RPC 表（2 条）与 §4.3、`product-overview.md` §4/§5、`AGENTS.md` RPC 计数
+- [x] 输入辅助语言：`[capability.prompt].language`（空=跟随资料 A，否则 BCP-47）经
+      `capabilities.prompt.language_directive` 追加到 `suggest_goal` 的 system 文本，使英文资料 A
+      也产出用户语言的 goal/标题；Settings 增 `PromptSettings.language`（`Get/UpdateSettings` 写回
+      `[capability.prompt].language`），前端 Settings 页可填 BCP-47（留空=跟随资料 A）—
+      `config.py`/`capabilities/prompt.py`/`server/service.py`/`server/convert.py`、`proto`
+      `PromptSettings`+`Settings.prompt`、`frontend/src/routes/{settingsModel,Settings}`
 
 > 依赖：M1c-1（server）+ M1c-2b（前端）；与 M5/M7 无耦合。
 

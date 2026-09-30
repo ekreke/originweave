@@ -36,7 +36,8 @@
     持久化（`run.json` 只存静态元数据，结果由 `events.jsonl` 派生）、`RunScheduler`、
     `originweave ui`（端口 8765，`--run <dir>` 单 run 只读、写 RPC 拒）。
   - M8 输入辅助：`SuggestGoal`（资料 A → 一次 `[capability.model]` 调出 goal + 标题，只读、pinned
-    可用；`Providers.model`）与 `UpdateRun`（只改 `run.json`/workspace 标题元数据，不写事件）；
+    可用；`Providers.model`；输出语言可经 `[capability.prompt].language` + Settings 设，空=跟随资料 A）
+    与 `UpdateRun`（只改 `run.json`/workspace 标题元数据，不写事件）；
     前端 NewRun 无标题输入、一键「提取 goal」，Console 标题行内编辑。
   - M3a+M3b：container-per-worker（`runtime/`、`Dockerfile.runtime`、`make image`）；预算触顶
     `STOPPED{reason:"budget exceeded"}`（`pricing.py` 计价、usage 链路）；`PAUSED`/`RESUMED` +
@@ -114,7 +115,9 @@ Python ≥ 3.11（CI 固定 3.11，mypy `python_version=3.11`）。所有命令�
   （内网地址不入库）。`[capability.search]` 除 `provider`(exa\|parallel) 外有韧性键：
   `max_attempts`(默认 3)/`backoff`(`"1s"`)/`backoff_max`(`"30s"`)/`breaker_threshold`(3)/
   `breaker_cooldown`(`"60s"`)——`build_search` 包一层 `ResilientSearch`（指数退避 + 进程级熔断，
-  识别 200 限流文案为错误）。顶层 `[worker]`：`provider`(local\|pi，默认 `pi`)、`execution`(in-process\|container，
+  识别 200 限流文案为错误）。`[capability.prompt]`：`provider`(local\|langfuse)、`directory`、
+  `language`(输入辅助 `SuggestGoal` 输出语言；空=跟随资料 A，否则 BCP-47 如 `"zh-CN"`，经
+  `capabilities.prompt.language_directive` 追加到 `suggest_goal` 的 system 文本)。顶层 `[worker]`：`provider`(local\|pi，默认 `pi`)、`execution`(in-process\|container，
   **默认 `container`**)、`image`、`tools`(Pi 工具白名单；`submit_result` 恒启用、不在此列)、`max_concurrency`(>0 且
   <=16)、`heartbeat_interval`(默认 `"15s"`)/`heartbeat_timeout`(默认 `"5m"`，
   须 `> interval`)/`heartbeat_on_timeout`(`release`\|`fail`)、`budget`（`max_steps` / `max_wall` /

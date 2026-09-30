@@ -21,7 +21,7 @@ from originweave import config as config_module  # noqa: E402
 from originweave.capabilities import PromptTemplate, ProviderError  # noqa: E402
 from originweave.capabilities.model import ChatMessage  # noqa: E402
 from originweave.capabilities.worker import LocalWorker  # noqa: E402
-from originweave.config import Config, WorkerConfig  # noqa: E402
+from originweave.config import CapabilityConfig, Config, PromptConfig, WorkerConfig  # noqa: E402
 from originweave.persistence import Project, ProjectRegistry  # noqa: E402
 from originweave.reduce import reduce  # noqa: E402
 from originweave.server import Providers, ServerContext, create_app  # noqa: E402
@@ -1483,6 +1483,12 @@ def _settings_body(**worker_overrides: object) -> dict[str, object]:
     return {"worker": worker}
 
 
+def _settings_body_with_language(language: str) -> dict[str, object]:
+    body = _settings_body()
+    body["prompt"] = {"language": language}
+    return body
+
+
 async def test_get_settings_returns_the_live_config(tmp_path: Path) -> None:
     ctx = _ctx_with(tmp_path, _providers())
     async with _client_for(ctx) as client:
@@ -1494,6 +1500,9 @@ async def test_get_settings_returns_the_live_config(tmp_path: Path) -> None:
     assert settings["maxConcurrency"] == 1
     assert settings["llm"]["provider"] == "openai"
     assert settings["budget"]["maxSteps"] == 60
+    # The input-helper language defaults to "" (follow document A); protojson omits the
+    # default scalar (and may omit the whole message when empty).
+    assert response.json()["settings"].get("prompt", {}).get("language", "") == ""
 
 
 async def test_update_settings_writes_config_and_applies(tmp_path: Path) -> None:
@@ -1518,6 +1527,57 @@ async def test_update_settings_writes_config_and_applies(tmp_path: Path) -> None
     assert reloaded.worker.tools == ("search",)
     # The live context was updated too, so subsequent runs use the new settings.
     assert ctx.config.worker.max_concurrency == 4
+
+
+async def test_update_settings_persists_the_prompt_language(tmp_path: Path) -> None:
+    ctx = _ctx_with(tmp_path, _providers())
+    async with _client_for(ctx) as client:
+        response = await _post(
+            client, "UpdateSettings", {"settings": _settings_body_with_language("zh-CN")}
+        )
+        read = await _post(client, "GetSettings", {})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["settings"]["prompt"]["language"] == "zh-CN"
+    assert read.json()["settings"]["prompt"]["language"] == "zh-CN"
+
+    reloaded = config_module.load(tmp_path / "originweave.toml")
+    assert reloaded.capability.prompt.language == "zh-CN"
+    assert ctx.config.capability.prompt.language == "zh-CN"
+
+
+def _ctx_with_language(root: Path, language: str) -> ServerContext:
+    ProjectRegistry(root / "projects", root / "runs").write(Project(id="p", name="P"))
+    config = Config(
+        worker=WorkerConfig(execution="in-process", container_scope="per-call"),
+        capability=CapabilityConfig(prompt=PromptConfig(language=language)),
+    )
+    return ServerContext.build(config=config, providers=_providers(), root=root)
+
+
+async def test_update_settings_keeps_language_when_prompt_is_omitted(tmp_path: Path) -> None:
+    """An older client that omits ``prompt`` keeps the configured language (HasField)."""
+    ctx = _ctx_with_language(tmp_path, "zh-CN")
+    async with _client_for(ctx) as client:
+        response = await _post(client, "UpdateSettings", {"settings": _settings_body()})
+        read = await _post(client, "GetSettings", {})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["settings"]["prompt"]["language"] == "zh-CN"
+    assert read.json()["settings"]["prompt"]["language"] == "zh-CN"
+    assert ctx.config.capability.prompt.language == "zh-CN"
+
+
+async def test_update_settings_clears_the_language(tmp_path: Path) -> None:
+    ctx = _ctx_with_language(tmp_path, "zh-CN")
+    async with _client_for(ctx) as client:
+        response = await _post(
+            client, "UpdateSettings", {"settings": _settings_body_with_language("")}
+        )
+
+    assert response.status_code == 200, response.text
+    assert ctx.config.capability.prompt.language == ""
+    assert config_module.load(tmp_path / "originweave.toml").capability.prompt.language == ""
 
 
 async def test_update_settings_rebuilds_providers(tmp_path: Path) -> None:
@@ -1992,7 +2052,9 @@ class _RecordingModel:
         return self._reply
 
 
-def _ctx_with_model(root: Path, model: _RecordingModel) -> ServerContext:
+def _ctx_with_model(
+    root: Path, model: _RecordingModel, *, language: str = ""
+) -> ServerContext:
     ProjectRegistry(root / "projects", root / "runs").write(Project(id="p", name="P"))
     providers = Providers(
         worker=LocalWorker(model=_FakeModel()),
@@ -2000,7 +2062,10 @@ def _ctx_with_model(root: Path, model: _RecordingModel) -> ServerContext:
         prompt=_FakePrompt(),
         model=model,
     )
-    config = Config(worker=WorkerConfig(execution="in-process", container_scope="per-call"))
+    config = Config(
+        worker=WorkerConfig(execution="in-process", container_scope="per-call"),
+        capability=CapabilityConfig(prompt=PromptConfig(language=language)),
+    )
     return ServerContext.build(config=config, providers=providers, root=root)
 
 
@@ -2016,6 +2081,28 @@ async def test_suggest_goal_returns_goal_and_title(tmp_path: Path) -> None:
     assert len(model.calls) == 1
     assert model.calls[0][0].role == "system"
     assert model.calls[0][1].content == "Copilot 提升 55% 生产力。"
+
+
+async def test_suggest_goal_appends_the_language_directive(tmp_path: Path) -> None:
+    """A configured prompt language forces goal/title language via a system directive."""
+    model = _RecordingModel(json.dumps({"goal": "Judge X", "title": "X review"}))
+    ctx = _ctx_with_model(tmp_path, model, language="zh-CN")
+    async with _client_for(ctx) as client:
+        response = await _post(client, "SuggestGoal", {"sourceText": "An English document."})
+
+    assert response.status_code == 200, response.text
+    system = model.calls[0][0].content
+    assert "zh-CN" in system
+    assert "Language rule (global)" in system
+
+
+async def test_suggest_goal_omits_the_language_directive_by_default(tmp_path: Path) -> None:
+    model = _RecordingModel(json.dumps({"goal": "g", "title": "t"}))
+    ctx = _ctx_with_model(tmp_path, model)  # language defaults to "" (follow the document)
+    async with _client_for(ctx) as client:
+        await _post(client, "SuggestGoal", {"sourceText": "doc"})
+
+    assert "Language rule (global)" not in model.calls[0][0].content
 
 
 async def test_suggest_goal_tolerates_markdown_fence(tmp_path: Path) -> None:

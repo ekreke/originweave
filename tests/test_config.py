@@ -13,6 +13,7 @@ def test_default_values() -> None:
     assert cfg.capability.search.provider == "exa"
     assert cfg.capability.prompt.provider == "local"
     assert cfg.capability.prompt.directory == "prompts"
+    assert cfg.capability.prompt.language == ""
     assert cfg.capability.model.provider == "openai"
     assert cfg.capability.model.model == "deepseek-v4.1-flash"
     assert cfg.capability.model.base_url == ""
@@ -107,6 +108,27 @@ dir = "out"
     assert cfg.worker.budget.max_steps == 5
     assert cfg.worker.budget.max_cost == 0.5
     assert cfg.run.dir == "out"
+
+
+def test_prompt_language_roundtrips(tmp_path: Path) -> None:
+    path = tmp_path / "originweave.toml"
+    path.write_text(
+        '[capability.prompt]\nprovider = "local"\ndirectory = "prompts"\nlanguage = "zh-CN"\n',
+        encoding="utf-8",
+    )
+    cfg = config.load(path)
+    assert cfg.capability.prompt.language == "zh-CN"
+    assert cfg.to_dict()["capability"]["prompt"]["language"] == "zh-CN"
+
+
+def test_validate_rejects_a_malformed_language() -> None:
+    cfg = config.Config(
+        capability=config.CapabilityConfig(
+            prompt=config.PromptConfig(language="chinese please")
+        )
+    )
+    with pytest.raises(config.ConfigError, match="capability.prompt.language"):
+        cfg.validate()
 
 
 def test_validate_rejects_unknown_search_provider() -> None:
